@@ -1,0 +1,188 @@
+/* ============================================================
+ * GameSaves 全局样式 — GitHub 白底黑字亮色风格
+ * ============================================================ */
+
+@import './variables.css';
+
+/* ---- 全局重置 ---- */
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: var(--font-family);
+  font-size: var(--font-size-normal);
+  color: var(--color-body-text);
+  background-color: var(--color-body-bg);
+  line-height: 1.5;
+  min-height: 100vh;
+}
+
+a {
+  color: var(--color-link);
+  text-decoration: none;
+  transition: color var(--transition-fast);
+}
+
+a:hover {
+  color: var(--color-link-hover);
+  text-decoration: underline;
+}
+
+img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* ---- Element Plus 主题覆盖 ---- */
+:root {
+  --el-color-primary: #0969da;
+  --el-color-primary-light-3: #539bf5;
+  --el-color-primary-light-5: #80b3ff;
+  --el-color-primary-light-7: #b6d4fe;
+  --el-color-primary-light-9: #ddf4ff;
+  --el-color-primary-dark-2: #0550ae;
+  --el-color-success: #1a7f37;
+  --el-color-success-light-3: #4ac26b;
+  --el-color-success-light-5: #86e0a2;
+  --el-color-danger: #cf222e;
+  --el-color-warning: #9a6700;
+  --el-color-info: #656d76;
+  --el-border-color: #d0d7de;
+  --el-border-color-light: #d8dee4;
+  --el-border-color-lighter: #e8eaed;
+  --el-border-color-extra-light: #f0f2f4;
+  --el-border-radius-base: 6px;
+  --el-border-radius-small: 4px;
+  --el-border-radius-round: 20px;
+  --el-font-size-base: 14px;
+  --el-font-size-small: 12px;
+  --el-font-size-large: 16px;
+  --el-bg-color: #ffffff;
+  --el-bg-color-page: #ffffff;
+  --el-bg-color-overlay: #ffffff;
+  --el-fill-color: #f6f8fa;
+  --el-fill-color-light: #fafbfc;
+  --el-fill-color-blank: #ffffff;
+  --el-text-color-primary: #1f2328;
+  --el-text-color-regular: #24292f;
+  --el-text-color-secondary: #656d76;
+  --el-text-color-placeholder: #8c959f;
+  --el-box-shadow-light: 0 3px 6px rgba(140, 149, 159, 0.15);
+}
+
+/* ---- Element Plus 按钮样式覆盖 ---- */
+.el-button--primary {
+  --el-button-bg-color: var(--color-btn-primary-bg);
+  --el-button-border-color: var(--color-btn-primary-bg);
+  --el-button-hover-bg-color: var(--color-btn-primary-hover);
+  --el-button-hover-border-color: var(--color-btn-primary-hover);
+}
+
+/* ---- Element Plus 输入框样式覆盖 ---- */
+.el-input__wrapper {
+  box-shadow: 0 0 0 1px var(--color-border-primary) inset;
+  border-radius: var(--radius-sm);
+}
+
+.el-input__wrapper:hover {
+  box-shadow: 0 0 0 1px var(--color-secondary-text) inset;
+}
+
+.el-input__wrapper.is-focus {
+  box-shadow: 0 0 0 2px var(--color-link) inset;
+}
+
+/* ---- 布局工具类 ---- */
+.container {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: 0 var(--spacing-lg);
+}
+
+.page-content {
+  min-height: calc(100vh - var(--header-height) - 60px);
+  padding: var(--spacing-lg) 0;
+}
+
+/* ---- 页面标题 ---- */
+.page-title {
+  font-size: var(--font-size-title);
+  font-weight: 600;
+  color: var(--color-body-text);
+  margin-bottom: var(--spacing-sm);
+}
+
+.page-subtitle {
+  font-size: var(--font-size-large);
+  color: var(--color-secondary-text);
+  margin-bottom: var(--spacing-lg);
+}
+
+/* ---- 通用卡片 ---- */
+.card {
+  background: var(--color-bg-canvas);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-lg);
+}
+
+/* ---- 表格样式（自定义，非 el-table） ---- */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-normal);
+}
+
+.data-table th {
+  text-align: left;
+  padding: var(--spacing-sm) var(--spacing-md);
+  font-weight: 600;
+  color: var(--color-secondary-text);
+  border-bottom: 2px solid var(--color-border-primary);
+  font-size: var(--font-size-small);
+}
+
+.data-table td {
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-bottom: 1px solid var(--color-border-secondary);
+}
+
+.data-table tr:hover td {
+  background-color: var(--color-bg-secondary);
+}
+
+/* ---- 相对时间文字 ---- */
+.time-ago {
+  color: var(--color-secondary-text);
+  font-size: var(--font-size-small);
+}
+
+/* ---- 滚动条美化 ---- */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c1c7cd;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #a5abb3;
+}

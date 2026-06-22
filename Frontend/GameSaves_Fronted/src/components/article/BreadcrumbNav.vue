@@ -1,0 +1,51 @@
+<template>
+  <div class="breadcrumb-nav">
+    <el-breadcrumb separator="/">
+      <el-breadcrumb-item v-for="(crumb, index) in items" :key="crumb.path || 'root'">
+        <a
+          v-if="index < items.length - 1"
+          href="javascript:void(0)"
+          class="breadcrumb-link"
+          @click.prevent="$emit('navigate', crumb.path)"
+        >
+          {{ crumb.name }}
+        </a>
+        <span v-else class="breadcrumb-current">{{ crumb.name }}</span>
+      </el-breadcrumb-item>
+    </el-breadcrumb>
+  </div>
+</template>
+
+<script setup>
+defineProps({
+  items: {
+    type: Array,
+    default: () => []
+    // 每项: { name: 'root', path: '' }
+  }
+})
+
+defineEmits(['navigate'])
+</script>
+
+<style scoped>
+.breadcrumb-nav {
+  padding: var(--spacing-md) 0;
+  font-size: var(--font-size-normal);
+}
+
+.breadcrumb-link {
+  color: var(--color-link);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.breadcrumb-link:hover {
+  text-decoration: underline;
+}
+
+.breadcrumb-current {
+  color: var(--color-body-text);
+  font-weight: 600;
+}
+</style>

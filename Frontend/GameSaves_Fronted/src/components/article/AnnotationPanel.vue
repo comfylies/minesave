@@ -1,0 +1,464 @@
+<template>
+  <aside class="annotation-panel">
+    <div class="annotation-header">
+      <h3 class="annotation-title">📝 批注</h3>
+      <span v-if="allComments.length" class="annotation-count">{{ allComments.length }}</span>
+    </div>
+
+    <div class="annotation-body" ref="bodyRef" v-loading="loading">
+      <div v-if="!loading && allComments.length === 0" class="empty-hint">
+        选中 README 中任意文字即可添加批注
+      </div>
+
+      <div v-else-if="showPositioned" ref="layerRef" class="positioned-layer">
+        <div
+          v-for="item in adjustedPositions"
+          :key="item.id"
+          class="comment-card"
+          :class="[
+            'comment-card--positioned',
+            `comment-card--role-${getColorRole(item.comment)}`,
+            {
+              'comment-card--active': activeCommentId === item.id,
+              'comment-card--expanded': expandedIds.has(item.id)
+            }
+          ]"
+          :style="{ top: item.top + 'px' }"
+          @click="handleClick(item.comment, item.id)"
+        >
+          <!-- 折叠状态：原文（一行）+ 批注内容（两行） -->
+          <div v-if="!expandedIds.has(item.id)" class="card-collapsed">
+            <div class="card-quote">"{{ truncate(item.comment.selectedText, 60) }}"</div>
+            <div class="card-content">{{ truncate(item.comment.content, 100) }}</div>
+          </div>
+
+          <!-- 展开状态：详细信息 -->
+          <div v-else class="card-expanded">
+            <div class="card-expanded-header">
+              <el-avatar :size="20" icon="UserFilled" />
+              <span class="card-author">{{ item.comment.nickname || '用户' }}</span>
+              <span class="card-role-tag" :class="`role-tag--${getColorRole(item.comment)}`">
+                {{ roleLabel(item.comment) }}
+              </span>
+              <span class="card-time">{{ formatTime(item.comment.createdAt) }}</span>
+            </div>
+            <div class="card-quote">"{{ item.comment.selectedText }}"</div>
+            <div class="card-content">{{ item.comment.content }}</div>
+
+            <div v-if="item.comment.children?.length" class="card-replies">
+              <div v-for="child in item.comment.children" :key="child.id" class="reply-item">
+                <span class="reply-author">{{ child.nickname || '用户' }}</span>
+                <span class="reply-role-tag" :class="`role-tag--${getColorRole(child)}`">
+                  {{ roleLabel(child) }}
+                </span>：
+                <span class="reply-content">{{ child.content }}</span>
+                <span class="reply-time">{{ formatTime(child.createdAt) }}</span>
+              </div>
+            </div>
+
+            <div v-if="canDelete(item.comment)" class="card-actions">
+              <el-button text size="small" type="danger" @click.stop="handleDelete(item.comment)">
+                <el-icon><Delete /></el-icon> 删除
+              </el-button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 降级列表模式 -->
+      <div v-else class="comment-list">
+        <div
+          v-for="comment in sortedComments"
+          :key="comment.id"
+          class="comment-card"
+          :class="[
+            `comment-card--role-${getColorRole(comment)}`,
+            {
+              'comment-card--active': activeCommentId === comment.id,
+              'comment-card--expanded': expandedIds.has(comment.id)
+            }
+          ]"
+          @click="handleClick(comment, comment.id)"
+        >
+          <div v-if="!expandedIds.has(comment.id)" class="card-collapsed">
+            <div class="card-quote">"{{ truncate(comment.selectedText, 60) }}"</div>
+            <div class="card-content">{{ truncate(comment.content, 100) }}</div>
+          </div>
+          <div v-else class="card-expanded">
+            <div class="card-expanded-header">
+              <el-avatar :size="20" icon="UserFilled" />
+              <span class="card-author">{{ comment.nickname || '用户' }}</span>
+              <span class="card-role-tag" :class="`role-tag--${getColorRole(comment)}`">
+                {{ roleLabel(comment) }}
+              </span>
+              <span class="card-time">{{ formatTime(comment.createdAt) }}</span>
+            </div>
+            <div class="card-quote">"{{ comment.selectedText }}"</div>
+            <div class="card-content">{{ comment.content }}</div>
+
+            <div v-if="comment.children?.length" class="card-replies">
+              <div v-for="child in comment.children" :key="child.id" class="reply-item">
+                <span class="reply-author">{{ child.nickname || '用户' }}</span>：
+                <span class="reply-content">{{ child.content }}</span>
+                <span class="reply-time">{{ formatTime(child.createdAt) }}</span>
+              </div>
+            </div>
+
+            <div v-if="canDelete(comment)" class="card-actions">
+              <el-button text size="small" type="danger" @click.stop="handleDelete(comment)">
+                <el-icon><Delete /></el-icon> 删除
+              </el-button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </aside>
+</template>
+
+<script setup>
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Delete } from '@element-plus/icons-vue'
+import { commentApi } from '../../api/commentApi'
+import { useAuthStore } from '../../stores/auth'
+import { useArticleStore } from '../../stores/articles'
+
+const props = defineProps({
+  articleId: { type: Number, required: true },
+  activeCommentId: { type: [Number, String], default: null },
+  marginPositions: { type: Array, default: () => [] },
+  readmeContentTop: { type: Number, default: 0 }
+})
+
+const emit = defineEmits(['select-comment', 'delete-comment'])
+
+const auth = useAuthStore()
+const articleStore = useArticleStore()
+const comments = ref([])
+const loading = ref(false)
+const expandedIds = ref(new Set())
+const bodyRef = ref(null)
+const layerRef = ref(null)
+const bodyOffsetTop = ref(0)
+
+const allComments = computed(() => comments.value)
+
+// 角色颜色优先级：admin > 上传者 > 普通用户
+function getColorRole(comment) {
+  const role = comment.role || 'user'
+  const commentUserId = comment.userId
+  const articleUserId = articleStore.currentArticle?.userId
+
+  if (role === 'admin') return 'admin'
+  if (commentUserId === articleUserId) return 'uploader'
+  return 'user'
+}
+
+function roleLabel(comment) {
+  const r = getColorRole(comment)
+  if (r === 'admin') return '管理员'
+  if (r === 'uploader') return '上传者'
+  return ''
+}
+
+function truncate(text, maxLen) {
+  if (!text) return ''
+  return text.length > maxLen ? text.slice(0, maxLen) + '…' : text
+}
+
+const showPositioned = computed(() => {
+  return props.marginPositions && props.marginPositions.length > 0 && bodyOffsetTop.value > 0
+})
+
+const adjustedPositions = computed(() => {
+  if (!showPositioned.value) return []
+
+  // 用 bodyOffsetTop（.positioned-layer 的 viewport 位置）和 readmeContentTop
+  // 计算坐标系偏移。两个值都反映 viewport 位置，差值固定，不受页面滚动影响。
+  const bodyTop = bodyOffsetTop.value
+  const contentTop = props.readmeContentTop
+  const offsetAdjust = bodyTop - contentTop
+
+  const commentMap = new Map()
+  for (const c of comments.value) {
+    commentMap.set(c.id, c)
+  }
+
+  return props.marginPositions
+    .filter(p => commentMap.has(p.id))
+    .map(p => ({
+      id: p.id,
+      // p.top 是 ReadmeRenderer 计算的容器相对坐标
+      // 减去 offsetAdjust 转换为 AnnotationPanel 的坐标系
+      top: Math.round(p.top - offsetAdjust),
+      comment: commentMap.get(p.id) || p.comment
+    }))
+    .sort((a, b) => a.top - b.top)
+})
+
+function measureBodyOffset() {
+  if (layerRef.value) {
+    // 优先使用 .positioned-layer 的 viewport top（card 的定位原点）
+    bodyOffsetTop.value = layerRef.value.getBoundingClientRect().top
+  } else if (bodyRef.value) {
+    // .positioned-layer 尚未渲染，使用 .annotation-body 作为降级参考
+    // .annotation-body 有 padding: 8px，需补偿以匹配 layerRef 的坐标系
+    const bodyRect = bodyRef.value.getBoundingClientRect()
+    const bodyStyle = window.getComputedStyle(bodyRef.value)
+    const padTop = parseFloat(bodyStyle.paddingTop) || 0
+    bodyOffsetTop.value = bodyRect.top + padTop
+  }
+}
+
+function canDelete(comment) {
+  if (!auth.currentUser) return false
+  return auth.isAdmin || auth.userId === comment.userId
+}
+
+function formatTime(dateStr) {
+  if (!dateStr) return ''
+  const d = new Date(dateStr)
+  const now = new Date()
+  const diff = now - d
+  if (diff < 60000) return '刚刚'
+  if (diff < 3600000) return `${Math.floor(diff / 60000)} 分钟前`
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)} 小时前`
+  return d.toLocaleDateString('zh-CN')
+}
+
+function toggleExpand(commentId) {
+  if (expandedIds.value.has(commentId)) {
+    expandedIds.value.delete(commentId)
+  } else {
+    expandedIds.value.add(commentId)
+  }
+  expandedIds.value = new Set(expandedIds.value)
+}
+
+function handleClick(comment, commentId) {
+  toggleExpand(commentId)
+  emit('select-comment', commentId || comment.id)
+}
+
+async function handleDelete(comment) {
+  try {
+    await ElMessageBox.confirm('确定要删除这条批注吗？', '确认删除', {
+      confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning'
+    })
+    await commentApi.delete(comment.id, auth.userId)
+    comments.value = comments.value.filter(c => c.id !== comment.id)
+    emit('delete-comment', comment.id)
+    ElMessage.success('批注已删除')
+  } catch { /* cancelled */ }
+}
+
+async function fetchComments() {
+  if (!props.articleId) return
+  loading.value = true
+  try {
+    const result = await commentApi.getByArticle(props.articleId)
+    comments.value = result || []
+  } catch {
+    comments.value = []
+  } finally {
+    loading.value = false
+  }
+}
+
+const sortedComments = computed(() => {
+  return [...comments.value].sort((a, b) => {
+    const aPos = a.quoteStart ?? Number.MAX_SAFE_INTEGER
+    const bPos = b.quoteStart ?? Number.MAX_SAFE_INTEGER
+    return aPos - bPos
+  })
+})
+
+function addCommentToList(comment) {
+  comments.value.unshift(comment)
+  if (comment?.id) {
+    expandedIds.value.add(comment.id)
+    expandedIds.value = new Set(expandedIds.value)
+  }
+}
+
+function removeCommentFromList(commentId) {
+  comments.value = comments.value.filter(c => c.id !== commentId)
+  expandedIds.value.delete(commentId)
+  expandedIds.value = new Set(expandedIds.value)
+}
+
+function onResize() {
+  nextTick(() => measureBodyOffset())
+}
+
+defineExpose({ fetchComments, addCommentToList, removeCommentFromList })
+
+watch(() => props.marginPositions, () => nextTick(() => measureBodyOffset()))
+watch(() => props.readmeContentTop, () => nextTick(() => measureBodyOffset()))
+watch(() => props.articleId, () => { if (props.articleId) fetchComments() })
+watch(() => props.activeCommentId, (newId) => {
+  if (newId) {
+    expandedIds.value.add(newId)
+    expandedIds.value = new Set(expandedIds.value)
+  }
+})
+
+onMounted(() => {
+  if (props.articleId) fetchComments()
+  nextTick(() => measureBodyOffset())
+})
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('resize', onResize, { passive: true })
+}
+
+onBeforeUnmount(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('resize', onResize)
+  }
+})
+</script>
+
+<style scoped>
+.annotation-panel {
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-canvas);
+  display: flex;
+  flex-direction: column;
+}
+
+.annotation-header {
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+
+.annotation-title { font-size: 14px; font-weight: 600; margin: 0; }
+.annotation-count { font-size: 12px; background: var(--color-link); color: #fff; padding: 1px 6px; border-radius: 10px; }
+
+.annotation-body { padding: 8px; flex: 1; position: relative; }
+.empty-hint { text-align: center; padding: 24px 12px; font-size: 13px; color: var(--color-secondary-text); }
+
+.positioned-layer { position: relative; width: 100%; min-height: 0; }
+.comment-list { display: flex; flex-direction: column; gap: 6px; }
+
+/* ======== 卡片 ======== */
+.comment-card {
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+  transition: box-shadow 0.15s, border-color 0.15s;
+  overflow: hidden;
+}
+
+/* 左侧彩色条 */
+.comment-card::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  border-radius: 3px 0 0 3px;
+}
+
+/* --- 角色颜色 --- */
+.comment-card--role-admin { border-left: 3px solid #e74c3c; }
+.comment-card--role-admin::before { background: #e74c3c; }
+
+.comment-card--role-uploader { border-left: 3px solid #3498db; }
+.comment-card--role-uploader::before { background: #3498db; }
+
+.comment-card--role-user { border-left: 3px solid #27ae60; }
+.comment-card--role-user::before { background: #27ae60; }
+
+.comment-card:hover { box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+.comment-card--active { box-shadow: 0 0 0 1px var(--color-link); }
+.comment-card--expanded { box-shadow: 0 2px 10px rgba(0,0,0,.1); z-index: 10; }
+
+/* 定位卡片 */
+.comment-card--positioned {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  z-index: 1;
+}
+
+.comment-card--positioned:hover { z-index: 10; }
+
+/* ======== 折叠视图（内容优先） ======== */
+.card-collapsed { padding: 8px 10px; }
+
+.card-quote {
+  font-size: 11px;
+  color: #909399;
+  font-style: italic;
+  padding: 2px 8px;
+  margin-bottom: 4px;
+  border-left: 2px solid #e6a23c;
+  background: #fdf6ec;
+  border-radius: 0 3px 3px 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+
+.card-content {
+  font-size: 13px;
+  color: #303133;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+/* ======== 展开视图 ======== */
+.card-expanded { padding: 8px 10px; }
+
+.card-expanded-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.card-author { font-size: 12px; font-weight: 600; color: #303133; }
+
+.card-role-tag {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: 500;
+}
+
+.role-tag--admin { background: #fde8e8; color: #c0392b; }
+.role-tag--uploader { background: #e3f2fd; color: #1565c0; }
+.role-tag--user { display: none; }
+
+.reply-role-tag {
+  font-size: 10px;
+  padding: 0 4px;
+  border-radius: 2px;
+}
+
+.card-time { font-size: 11px; color: #909399; margin-left: auto; }
+
+.card-replies { margin-top: 6px; padding-top: 6px; border-top: 1px solid #f2f3f5; }
+.reply-item { padding: 3px 0; font-size: 12px; color: #606266; line-height: 1.5; }
+.reply-author { font-weight: 600; color: #303133; }
+.reply-time { font-size: 11px; color: #c0c4cc; margin-left: 6px; }
+
+.card-actions { margin-top: 6px; display: flex; justify-content: flex-end; }
+
+/* ======== 响应式 ======== */
+@media (max-width: 900px) {
+  .comment-card--positioned { position: static; margin-bottom: 6px; }
+  .positioned-layer { min-height: auto !important; }
+}
+</style>

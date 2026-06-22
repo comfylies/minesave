@@ -1,0 +1,87 @@
+spring:
+  application:
+    name: GameSaves
+
+  # ============================================================
+  # MySQL 8.0 数据库配置 (游戏存档分享平台)
+  # ============================================================
+  datasource:
+    url: jdbc:mysql://localhost:3306/gamesaving?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai
+    username: root
+    password: 3256
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      minimum-idle: 5
+      maximum-pool-size: 20
+      idle-timeout: 300000
+      max-lifetime: 1200000
+      connection-timeout: 30000
+
+  # JPA 配置
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+        format_sql: true
+
+  # 文件上传大小限制
+  servlet:
+    multipart:
+      max-file-size: 200MB
+      max-request-size: 200MB
+
+  # Spring Mail 邮箱配置 (QQ邮箱)
+  mail:
+    host: smtp.qq.com
+    port: 587
+    username: 1834909995@qq.com
+    password: scegopvlbiqobfej
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+            required: true
+          ssl:
+            enable: false
+
+# 服务器端口
+server:
+  port: 8080
+
+# ============================================================
+# Sa-Token 权限认证配置
+# ============================================================
+sa-token:
+  token-name: Authorization              # token名称（前端请求头携带）
+  timeout: 86400                         # token有效期（秒），默认24小时
+  active-timeout: 1800                   # 最低活跃频率（秒），30分钟无操作则过期
+  is-concurrent: true                    # 是否允许多地同时登录
+  is-share: false                        # 多终端登录是否共用token
+  token-style: random-64                 # token风格
+  is-log: true                           # 是否输出操作日志
+  is-print: false                        # 是否打印Sa-Token日志
+
+# ============================================================
+# 应用自定义配置
+# ============================================================
+app:
+  storage:
+    database-path: ../../Database                # 混合存储根目录
+  rate-limit:
+    max-downloads-per-ip: 3                    # 每个IP每分钟最大下载次数
+    window-seconds: 60                         # 限流时间窗口（秒）
+  extraction:
+    timeout-seconds: 30                        # ZIP解压超时时间
+    max-file-size: 209715200                   # 最大文件大小 200MB
+  # 登录安全配置
+  login:
+    max-fail-count: 5                          # 最大登录失败次数
+    lock-minutes: 30                           # 锁定时间（分钟）
+    captcha-enabled: true                      # 是否启用图形验证码
+    email-code-cooldown: 60                    # 邮箱验证码发送冷却时间（秒）
+    email-code-ttl: 300                        # 邮箱验证码有效期（秒）
