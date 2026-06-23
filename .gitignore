@@ -1,1 +1,29 @@
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Claude Code
 .claude/
+
+# Backend - compiled output
+Backend/GameSaves/target/
+
+# Frontend - dependencies
+Frontend/GameSaves_Fronted/node_modules/
+
+# Frontend - build output
+Frontend/GameSaves_Fronted/dist/
+
+# Storage / uploaded data (存档数据)
+Database/
+
+# Maven wrapper jar (keep the properties file)
+Backend/GameSaves/.mvn/wrapper/maven-wrapper.jar
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
