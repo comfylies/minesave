@@ -34,6 +34,7 @@ public class ZipExtractionService {
     private final ArticleRepository articleRepository;
     private final SavingsRepository savingsRepository;
     private final SavingItemRepository savingItemRepository;
+    private final SearchSyncService searchSyncService;
 
     @Value("${app.extraction.timeout-seconds:30}")
     private int timeoutSeconds;
@@ -51,10 +52,12 @@ public class ZipExtractionService {
 
     public ZipExtractionService(ArticleRepository articleRepository,
                                 SavingsRepository savingsRepository,
-                                SavingItemRepository savingItemRepository) {
+                                SavingItemRepository savingItemRepository,
+                                SearchSyncService searchSyncService) {
         this.articleRepository = articleRepository;
         this.savingsRepository = savingsRepository;
         this.savingItemRepository = savingItemRepository;
+        this.searchSyncService = searchSyncService;
     }
 
     /**
@@ -185,12 +188,15 @@ public class ZipExtractionService {
         article.setReadmeRaw(readmeRaw);
         article.setReadmeContent(readmeContent);
         article.setFileSize(fileSize);
-        articleRepository.save(article);
+        article = articleRepository.save(article);
         log.info("Article {} completed: readmeRaw={} chars, readmeContent={} chars, fileSize={}",
                 articleId,
                 readmeRaw != null ? readmeRaw.length() : 0,
                 readmeContent != null ? readmeContent.length() : 0,
                 fileSize);
+
+        // Index in Meilisearch
+        searchSyncService.indexArticle(article);
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)

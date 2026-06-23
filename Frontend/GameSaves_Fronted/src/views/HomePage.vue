@@ -6,16 +6,8 @@
       <p class="page-subtitle">浏览游戏存档，发现其他玩家的精彩时刻</p>
     </div>
 
-    <!-- 搜索排序栏 -->
+    <!-- 排序栏 -->
     <div class="home-toolbar">
-      <el-input
-        v-model="searchKeyword"
-        placeholder="搜索游戏名称或描述..."
-        :prefix-icon="Search"
-        clearable
-        size="large"
-        class="search-input"
-      />
       <el-select
         v-model="sortBy"
         size="large"
@@ -39,9 +31,9 @@
     </div>
 
     <!-- 游戏卡片网格 -->
-    <div v-else-if="filteredGames.length > 0" class="game-grid">
+    <div v-else-if="sortedGames.length > 0" class="game-grid">
       <GameCard
-        v-for="game in filteredGames"
+        v-for="game in sortedGames"
         :key="game.id"
         :game="game"
       />
@@ -57,7 +49,6 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { Search } from '@element-plus/icons-vue'
 import { useGameStore } from '../stores/games'
 import GameCard from '../components/game/GameCard.vue'
 import EmptyState from '../components/common/EmptyState.vue'
@@ -65,7 +56,6 @@ import LoadingSkeleton from '../components/common/LoadingSkeleton.vue'
 import AnnouncementModal from '../components/announcement/AnnouncementModal.vue'
 
 const gameStore = useGameStore()
-const searchKeyword = ref('')
 const sortBy = ref('name-asc')
 
 // ---- 公告弹窗（仅外部访问显示） ----
@@ -103,18 +93,9 @@ function shouldShowAnnouncement() {
   return true
 }
 
-// 纯前端搜索 + 排序
-const filteredGames = computed(() => {
+// 排序（搜索已迁移到导航栏统一搜索框 → /search?q=）
+const sortedGames = computed(() => {
   let list = [...gameStore.games]
-
-  // 搜索过滤
-  if (searchKeyword.value.trim()) {
-    const kw = searchKeyword.value.trim().toLowerCase()
-    list = list.filter(g =>
-      g.name.toLowerCase().includes(kw) ||
-      (g.description && g.description.toLowerCase().includes(kw))
-    )
-  }
 
   // 排序
   switch (sortBy.value) {
@@ -176,11 +157,6 @@ onMounted(() => {
   margin-bottom: var(--spacing-lg);
   padding: var(--spacing-md) 0;
   border-bottom: 1px solid var(--color-border-secondary);
-}
-
-.search-input {
-  flex: 1;
-  max-width: 480px;
 }
 
 .sort-select {

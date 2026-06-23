@@ -9,6 +9,7 @@ import com.gamesaves.gamesaves.dto.response.*;
 import com.gamesaves.gamesaves.exception.BadRequestException;
 import com.gamesaves.gamesaves.service.AdminService;
 import com.gamesaves.gamesaves.service.AnnouncementService;
+import com.gamesaves.gamesaves.service.SearchSyncService;
 import com.gamesaves.gamesaves.service.TagService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Value;
@@ -34,15 +35,17 @@ public class AdminController {
     private final AdminService adminService;
     private final AnnouncementService announcementService;
     private final TagService tagService;
+    private final SearchSyncService searchSyncService;
 
     @Value("${app.storage.database-path:../../Database}")
     private String databasePath;
 
     public AdminController(AdminService adminService, AnnouncementService announcementService,
-                           TagService tagService) {
+                           TagService tagService, SearchSyncService searchSyncService) {
         this.adminService = adminService;
         this.announcementService = announcementService;
         this.tagService = tagService;
+        this.searchSyncService = searchSyncService;
     }
 
     @GetMapping("/dashboard")
@@ -87,6 +90,21 @@ public class AdminController {
     public ApiResponse<String> deleteArticle(@PathVariable Long id) {
         adminService.deleteArticle(id);
         return ApiResponse.success("Article deleted", "ok");
+    }
+
+    // ==================== 搜索索引管理 ====================
+
+    /** 全量重建搜索索引 */
+    @PostMapping("/search/reindex")
+    @SaCheckPermission("user:manage")
+    public ApiResponse<Map<String, Object>> reindex() {
+        long start = System.currentTimeMillis();
+        int count = searchSyncService.rebuildAll();
+        long elapsed = System.currentTimeMillis() - start;
+        return ApiResponse.success(Map.of(
+                "documents", count,
+                "elapsedMs", elapsed
+        ));
     }
 
     // ==================== 公告管理 ====================

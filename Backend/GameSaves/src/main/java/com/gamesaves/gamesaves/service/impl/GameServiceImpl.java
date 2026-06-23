@@ -10,6 +10,7 @@ import com.gamesaves.gamesaves.exception.ResourceNotFoundException;
 import com.gamesaves.gamesaves.repository.ArticleRepository;
 import com.gamesaves.gamesaves.repository.GameRepository;
 import com.gamesaves.gamesaves.service.GameService;
+import com.gamesaves.gamesaves.service.SearchSyncService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -27,10 +28,13 @@ public class GameServiceImpl implements GameService {
 
     private final GameRepository gameRepository;
     private final ArticleRepository articleRepository;
+    private final SearchSyncService searchSyncService;
 
-    public GameServiceImpl(GameRepository gameRepository, ArticleRepository articleRepository) {
+    public GameServiceImpl(GameRepository gameRepository, ArticleRepository articleRepository,
+                           SearchSyncService searchSyncService) {
         this.gameRepository = gameRepository;
         this.articleRepository = articleRepository;
+        this.searchSyncService = searchSyncService;
     }
 
     @Override
@@ -47,6 +51,7 @@ public class GameServiceImpl implements GameService {
 
         game = gameRepository.save(game);
         log.info("Game created: {}", game.getName());
+        searchSyncService.indexGame(game);
         return GameResponse.fromEntity(game);
     }
 
@@ -66,6 +71,7 @@ public class GameServiceImpl implements GameService {
         if (request.getDescription() != null) game.setDescription(request.getDescription());
 
         game = gameRepository.save(game);
+        searchSyncService.indexGame(game);
         return GameResponse.fromEntity(game);
     }
 
@@ -94,6 +100,7 @@ public class GameServiceImpl implements GameService {
             throw new ResourceNotFoundException("Game", id);
         }
         try {
+            searchSyncService.deleteGame(id);
             gameRepository.deleteById(id);
             log.info("Game deleted: id={}", id);
         } catch (DataIntegrityViolationException e) {

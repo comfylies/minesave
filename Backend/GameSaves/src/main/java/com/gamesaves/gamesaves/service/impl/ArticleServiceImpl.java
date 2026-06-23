@@ -19,6 +19,7 @@ import com.gamesaves.gamesaves.repository.SavingsRepository;
 import com.gamesaves.gamesaves.repository.TagRepository;
 import com.gamesaves.gamesaves.repository.UserRepository;
 import com.gamesaves.gamesaves.service.ArticleService;
+import com.gamesaves.gamesaves.service.SearchSyncService;
 import com.gamesaves.gamesaves.service.ZipExtractionService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,6 +52,7 @@ public class ArticleServiceImpl implements ArticleService {
     private final SavingsRepository savingsRepository;
     private final TagRepository tagRepository;
     private final ZipExtractionService zipExtractionService;
+    private final SearchSyncService searchSyncService;
 
     @Value("${app.storage.database-path:../../Database}")
     private String databasePathConfig;
@@ -68,13 +70,15 @@ public class ArticleServiceImpl implements ArticleService {
                                UserRepository userRepository,
                                SavingsRepository savingsRepository,
                                TagRepository tagRepository,
-                               ZipExtractionService zipExtractionService) {
+                               ZipExtractionService zipExtractionService,
+                               SearchSyncService searchSyncService) {
         this.articleRepository = articleRepository;
         this.gameRepository = gameRepository;
         this.userRepository = userRepository;
         this.savingsRepository = savingsRepository;
         this.tagRepository = tagRepository;
         this.zipExtractionService = zipExtractionService;
+        this.searchSyncService = searchSyncService;
     }
 
     @Override
@@ -220,6 +224,9 @@ public class ArticleServiceImpl implements ArticleService {
         } catch (IOException e) {
             log.warn("Failed to delete physical files for article {}", id, e);
         }
+
+        // Remove from search index
+        searchSyncService.deleteArticle(id);
 
         // DB cascade handles savings, saving_items, comments, download_logs
         articleRepository.delete(article);

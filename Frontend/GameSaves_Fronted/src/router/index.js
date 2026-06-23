@@ -23,6 +23,14 @@ const routes = [
     name: 'Register',
     component: () => import('../views/RegisterPage.vue')
   },
+  // 搜索
+  {
+    path: '/search',
+    component: () => import('../layouts/DefaultLayout.vue'),
+    children: [
+      { path: '', name: 'Search', component: () => import('../views/SearchPage.vue') }
+    ]
+  },
   // 管理后台路由
   {
     path: '/admin',

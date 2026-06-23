@@ -25,5 +25,9 @@ Backend/GameSaves/.mvn/wrapper/maven-wrapper.jar
 .DS_Store
 Thumbs.db
 
+# Meilisearch
+meilisearch*.exe
+data.ms/
+
 # Logs
 *.log

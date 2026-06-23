@@ -238,8 +238,8 @@ watch(() => route.params.gameId, (newId) => {
 }
 
 /* Title column — left-align for readability */
-.col-title,
-.article-table th:first-child {
+.article-table th:first-child,
+.article-table .col-title {
   text-align: left;
   white-space: normal;
 }

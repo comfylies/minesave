@@ -44,8 +44,11 @@ public interface ArticleRepository extends JpaRepository<Article, Long> {
     @Query("SELECT a FROM Article a JOIN FETCH a.user JOIN FETCH a.game WHERE a.title LIKE %:keyword% OR a.user.username LIKE %:keyword%")
     Page<Article> searchByKeyword(@Param("keyword") String keyword, Pageable pageable);
 
-    // Admin: filter articles by status
-    @Query("SELECT a FROM Article a JOIN FETCH a.user JOIN FETCH a.game WHERE a.status = :status")
+    // Admin: filter articles by status (with tags for search indexing)
+    @Query("SELECT DISTINCT a FROM Article a " +
+           "JOIN FETCH a.user JOIN FETCH a.game " +
+           "LEFT JOIN FETCH a.tags " +
+           "WHERE a.status = :status")
     Page<Article> findByStatusWithDetails(@Param("status") Article.ArticleStatus status, Pageable pageable);
 
     // Admin: all articles with user and game eager loaded

@@ -23,19 +23,35 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 @Configuration
 public class SaTokenConfig implements WebMvcConfigurer {
 
+    /**
+     * 如果当前请求已登录，刷新 token 活跃时间。
+     * 用于公开接口（前台浏览），避免用户一直使用前台但 token 因 active-timeout 过期，
+     * 导致进入后台时被拦截。
+     */
+    private void refreshIfLogin() {
+        try {
+            Object loginId = StpUtil.getLoginIdByToken(StpUtil.getTokenValue());
+            if (loginId != null) {
+                StpUtil.updateLastActiveToNow();
+            }
+        } catch (Exception ignored) {
+            // 未登录，无需刷新
+        }
+    }
+
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(new SaInterceptor(handle -> {
-                    // 公开接口放行（注意：必须链式调用，不可拆成多条独立语句）
+                    // 公开接口放行前，若已登录则刷新活跃时间，避免前台浏览导致 token 过期
                     SaRouter
                         .match("/api/auth/**").stop()
-                        .match("/api/games/**").stop()
+                        .match("/api/games/**", r -> refreshIfLogin()).stop()
                         .match("/api/users/register").stop()
                         .match("/api/users/login").stop()
-                        .match("/api/articles/**").stop()
-                        .match("/api/files/**").stop()
+                        .match("/api/articles/**", r -> refreshIfLogin()).stop()
+                        .match("/api/files/**", r -> refreshIfLogin()).stop()
                         // 批注：GET 公开（stop），POST/DELETE 需登录走下一级 checkLogin
-                        .matchMethod("GET").match("/api/comments/**").stop()
+                        .matchMethod("GET").match("/api/comments/**", r -> refreshIfLogin()).stop()
                         // 其他 /api/** 需要登录
                         .match("/api/**", r -> StpUtil.checkLogin());
                 }))

@@ -2,6 +2,7 @@ package com.gamesaves.gamesaves.config;
 
 import com.gamesaves.gamesaves.entity.User;
 import com.gamesaves.gamesaves.repository.UserRepository;
+import com.gamesaves.gamesaves.service.SearchSyncService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.CommandLineRunner;
@@ -28,10 +29,12 @@ public class DataInitializer implements CommandLineRunner {
 
     private final UserRepository userRepository;
     private final BCryptPasswordEncoder passwordEncoder;
+    private final SearchSyncService searchSyncService;
 
-    public DataInitializer(UserRepository userRepository) {
+    public DataInitializer(UserRepository userRepository, SearchSyncService searchSyncService) {
         this.userRepository = userRepository;
         this.passwordEncoder = new BCryptPasswordEncoder();
+        this.searchSyncService = searchSyncService;
     }
 
     @Override
@@ -47,6 +50,15 @@ public class DataInitializer implements CommandLineRunner {
                 "speed@example.com", "user",
                 "游戏速通爱好者，追求极限操作");
         log.info("DataInitializer: test users ready.");
+
+        // Rebuild search index on startup
+        try {
+            int count = searchSyncService.rebuildAll();
+            log.info("DataInitializer: search index rebuilt with {} documents", count);
+        } catch (Exception e) {
+            log.warn("DataInitializer: search index rebuild skipped ({}): {}",
+                    e.getClass().getSimpleName(), e.getMessage());
+        }
     }
 
     private void ensureTestUser(String username, String nickname, String phone,

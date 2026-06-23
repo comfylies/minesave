@@ -14,6 +14,19 @@
         </nav>
       </div>
 
+      <!-- 中间：搜索框 -->
+      <div class="navbar-center">
+        <div class="search-box">
+          <el-icon class="search-icon"><Search /></el-icon>
+          <input
+            v-model="searchQuery"
+            class="search-input"
+            placeholder="搜索游戏、存档..."
+            @keyup.enter="doSearch"
+          />
+        </div>
+      </div>
+
       <!-- 右侧：用户菜单 -->
       <div class="navbar-right">
         <template v-if="auth.isLoggedIn">
@@ -52,12 +65,21 @@
 </template>
 
 <script setup>
+import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
 import { ElMessage } from 'element-plus'
 
 const router = useRouter()
 const auth = useAuthStore()
+const searchQuery = ref('')
+
+function doSearch() {
+  const q = searchQuery.value.trim()
+  if (q) {
+    router.push({ path: '/search', query: { q } })
+  }
+}
 
 function handleLogout() {
   auth.logout()
@@ -88,6 +110,7 @@ function handleLogout() {
   display: flex;
   align-items: center;
   gap: var(--spacing-lg);
+  flex: 1;
 }
 
 .navbar-logo {
@@ -134,11 +157,57 @@ function handleLogout() {
   color: var(--color-link);
 }
 
+/* ---- 中间搜索 ---- */
+.navbar-center {
+  display: flex;
+  justify-content: center;
+  padding: 0 16px;
+  flex-shrink: 0;
+}
+
+.search-box {
+  position: relative;
+  width: 400px;
+}
+
+.search-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--color-secondary-text);
+  font-size: 16px;
+}
+
+.search-input {
+  width: 100%;
+  height: 36px;
+  padding: 0 12px 0 36px;
+  font-size: var(--font-size-normal);
+  color: var(--color-body-text);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-secondary);
+  border-radius: 18px;
+  outline: none;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.search-input:focus {
+  background: var(--color-bg-canvas);
+  border-color: var(--color-link);
+}
+
+.search-input::placeholder {
+  color: var(--color-secondary-text);
+}
+
 /* ---- 右侧 ---- */
 .navbar-right {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: var(--spacing-md);
+  flex: 1;
 }
 
 .btn-outline {
