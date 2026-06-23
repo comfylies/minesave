@@ -26,6 +26,10 @@
           <el-icon><Document /></el-icon>
           <span>文章管理</span>
         </el-menu-item>
+        <el-menu-item index="/admin/announcements">
+          <el-icon><Bell /></el-icon>
+          <span>公告管理</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
 

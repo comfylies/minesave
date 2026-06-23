@@ -148,10 +148,10 @@ public class MarkdownRenderer {
         text = text.replaceAll("_(.+?)_", "<em>$1</em>");
         // Inline code: `text`
         text = text.replaceAll("`(.+?)`", "<code>$1</code>");
+        // Images: ![alt](url) — must be BEFORE links, otherwise link regex steals the [alt](url) part
+        text = text.replaceAll("!\\[(.*?)\\]\\((.+?)\\)", "<img src=\"$2\" alt=\"$1\">");
         // Links: [text](url)
         text = text.replaceAll("\\[(.+?)\\]\\((.+?)\\)", "<a href=\"$2\">$1</a>");
-        // Images: ![alt](url)
-        text = text.replaceAll("!\\[(.*?)\\]\\((.+?)\\)", "<img src=\"$2\" alt=\"$1\">");
         // Strikethrough: ~~text~~
         text = text.replaceAll("~~(.+?)~~", "<del>$1</del>");
 

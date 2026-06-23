@@ -1,5 +1,7 @@
 package com.gamesaves.gamesaves.exception;
 
+import cn.dev33.satoken.exception.NotLoginException;
+import cn.dev33.satoken.exception.NotPermissionException;
 import com.gamesaves.gamesaves.dto.response.ApiResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -109,6 +111,18 @@ public class GlobalExceptionHandler {
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public ApiResponse<Void> handleNumberFormat(NumberFormatException e) {
         return ApiResponse.error(400, "Invalid number format: " + e.getMessage());
+    }
+
+    @ExceptionHandler(NotLoginException.class)
+    @ResponseStatus(HttpStatus.UNAUTHORIZED)
+    public ApiResponse<Void> handleNotLogin(NotLoginException e) {
+        return ApiResponse.error(401, "未登录或登录已过期，请重新登录");
+    }
+
+    @ExceptionHandler(NotPermissionException.class)
+    @ResponseStatus(HttpStatus.FORBIDDEN)
+    public ApiResponse<Void> handleNotPermission(NotPermissionException e) {
+        return ApiResponse.error(403, "权限不足");
     }
 
     @ExceptionHandler(Exception.class)

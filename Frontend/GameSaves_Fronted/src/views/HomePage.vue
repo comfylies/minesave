@@ -49,6 +49,9 @@
 
     <!-- 空状态 -->
     <EmptyState v-else description="暂无游戏" />
+
+    <!-- 站内公告弹窗（仅外部访问显示） -->
+    <AnnouncementModal v-model="showAnnouncement" />
   </div>
 </template>
 
@@ -59,10 +62,46 @@ import { useGameStore } from '../stores/games'
 import GameCard from '../components/game/GameCard.vue'
 import EmptyState from '../components/common/EmptyState.vue'
 import LoadingSkeleton from '../components/common/LoadingSkeleton.vue'
+import AnnouncementModal from '../components/announcement/AnnouncementModal.vue'
 
 const gameStore = useGameStore()
 const searchKeyword = ref('')
 const sortBy = ref('name-asc')
+
+// ---- 公告弹窗（仅外部访问显示） ----
+const showAnnouncement = ref(false)
+
+function getTodayKey() {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+}
+
+function shouldShowAnnouncement() {
+  // 今日已点过"今日不再提示"
+  if (localStorage.getItem('announcement_dismissed_date') === getTodayKey()) {
+    return false
+  }
+  // 已在本 session 中显示过（回首页时不重复弹）
+  if (sessionStorage.getItem('announcement_shown_session') === 'true') {
+    return false
+  }
+  // 检查 referrer：空 = 直接输入网址/书签（视为外部访问）
+  // 有 referrer 但来自本站 = 内部导航，不弹
+  try {
+    const referrer = document.referrer
+    if (referrer) {
+      const referrerHost = new URL(referrer).host
+      const currentHost = window.location.host
+      if (referrerHost === currentHost) {
+        return false // 内部导航
+      }
+    }
+  } catch {
+    // referrer 解析失败，保守处理：不弹
+    return false
+  }
+  return true
+}
 
 // 纯前端搜索 + 排序
 const filteredGames = computed(() => {
@@ -98,6 +137,14 @@ const filteredGames = computed(() => {
 
 onMounted(() => {
   gameStore.fetchGames()
+  // 外部访问时弹出公告
+  if (shouldShowAnnouncement()) {
+    sessionStorage.setItem('announcement_shown_session', 'true')
+    // 延迟弹出，让页面先渲染
+    setTimeout(() => {
+      showAnnouncement.value = true
+    }, 300)
+  }
 })
 </script>
 

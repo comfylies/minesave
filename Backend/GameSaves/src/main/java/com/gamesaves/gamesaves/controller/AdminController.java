@@ -2,15 +2,27 @@ package com.gamesaves.gamesaves.controller;
 
 import cn.dev33.satoken.annotation.SaCheckLogin;
 import cn.dev33.satoken.annotation.SaCheckPermission;
-import com.gamesaves.gamesaves.dto.response.AdminArticleResponse;
-import com.gamesaves.gamesaves.dto.response.AdminUserResponse;
-import com.gamesaves.gamesaves.dto.response.ApiResponse;
-import com.gamesaves.gamesaves.dto.response.DashboardStatsResponse;
+import cn.dev33.satoken.stp.StpUtil;
+import com.gamesaves.gamesaves.dto.request.AnnouncementCreateRequest;
+import com.gamesaves.gamesaves.dto.response.*;
+import com.gamesaves.gamesaves.exception.BadRequestException;
 import com.gamesaves.gamesaves.service.AdminService;
+import com.gamesaves.gamesaves.service.AnnouncementService;
+import jakarta.validation.Valid;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/admin")
@@ -18,9 +30,14 @@ import org.springframework.web.bind.annotation.*;
 public class AdminController {
 
     private final AdminService adminService;
+    private final AnnouncementService announcementService;
 
-    public AdminController(AdminService adminService) {
+    @Value("${app.storage.database-path:../../Database}")
+    private String databasePath;
+
+    public AdminController(AdminService adminService, AnnouncementService announcementService) {
         this.adminService = adminService;
+        this.announcementService = announcementService;
     }
 
     @GetMapping("/dashboard")
@@ -65,5 +82,126 @@ public class AdminController {
     public ApiResponse<String> deleteArticle(@PathVariable Long id) {
         adminService.deleteArticle(id);
         return ApiResponse.success("Article deleted", "ok");
+    }
+
+    // ==================== 公告管理 ====================
+
+    /** 获取所有公告（含禁用） */
+    @GetMapping("/announcements")
+    public ApiResponse<List<AnnouncementResponse>> listAnnouncements() {
+        return ApiResponse.success(announcementService.listAll());
+    }
+
+    /** 创建公告 */
+    @PostMapping("/announcements")
+    public ApiResponse<AnnouncementResponse> createAnnouncement(
+            @Valid @RequestBody AnnouncementCreateRequest request) {
+        Long authorId = StpUtil.getLoginIdAsLong();
+        return ApiResponse.success(announcementService.create(request, authorId));
+    }
+
+    /** 更新公告 */
+    @PutMapping("/announcements/{id}")
+    public ApiResponse<AnnouncementResponse> updateAnnouncement(
+            @PathVariable Long id,
+            @Valid @RequestBody AnnouncementCreateRequest request) {
+        return ApiResponse.success(announcementService.update(id, request));
+    }
+
+    /** 删除公告 */
+    @DeleteMapping("/announcements/{id}")
+    public ApiResponse<String> deleteAnnouncement(@PathVariable Long id) {
+        announcementService.delete(id);
+        return ApiResponse.success("Announcement deleted", "ok");
+    }
+
+    /** 切换公告启用/禁用 */
+    @PutMapping("/announcements/{id}/toggle")
+    public ApiResponse<AnnouncementResponse> toggleAnnouncement(@PathVariable Long id) {
+        return ApiResponse.success(announcementService.toggleActive(id));
+    }
+
+    /** 上传公告图片 */
+    @PostMapping("/announcements/upload-image")
+    public ApiResponse<Map<String, String>> uploadAnnouncementImage(
+            @RequestParam("file") MultipartFile file) {
+        if (file.isEmpty()) {
+            throw new BadRequestException("文件为空");
+        }
+
+        // 校验文件类型
+        String contentType = file.getContentType();
+        if (contentType == null || !contentType.startsWith("image/")) {
+            throw new BadRequestException("只允许上传图片文件");
+        }
+
+        // 校验大小（最大 10MB）
+        if (file.getSize() > 10 * 1024 * 1024) {
+            throw new BadRequestException("图片大小不能超过 10MB");
+        }
+
+        try {
+            // 生成唯一文件名
+            String originalName = file.getOriginalFilename();
+            String ext = ".png";
+            if (originalName != null && originalName.contains(".")) {
+                ext = originalName.substring(originalName.lastIndexOf("."));
+            }
+            String filename = UUID.randomUUID().toString().substring(0, 8) + ext;
+
+            // 保存到 Database/announcements/images/
+            Path storageDir = Paths.get(databasePath, "announcements", "images");
+            Files.createDirectories(storageDir);
+            Path targetPath = storageDir.resolve(filename);
+            file.transferTo(targetPath);
+
+            // 返回访问 URL（通过 /storage/** 静态资源映射）
+            String url = "/storage/announcements/images/" + filename;
+            return ApiResponse.success(Map.of(
+                    "url", url,
+                    "markdown", "![](" + url + ")",
+                    "filename", filename
+            ));
+        } catch (IOException e) {
+            throw new BadRequestException("图片上传失败: " + e.getMessage());
+        }
+    }
+
+    /** 上传公告 Markdown 文件，返回文件内容 */
+    @PostMapping("/announcements/upload-md")
+    public ApiResponse<Map<String, String>> uploadAnnouncementMd(
+            @RequestParam("file") MultipartFile file) {
+        if (file.isEmpty()) {
+            throw new BadRequestException("文件为空");
+        }
+
+        String originalName = file.getOriginalFilename();
+        if (originalName == null || !originalName.toLowerCase().endsWith(".md")) {
+            throw new BadRequestException("只允许上传 .md 文件");
+        }
+
+        try {
+            // 保存原档到 Database/announcements/md/
+            Path mdDir = Paths.get(databasePath, "announcements", "md");
+            Files.createDirectories(mdDir);
+
+            // 保留原始文件名，加时间戳防重名
+            String baseName = originalName.replaceAll("\\.md$", "");
+            String timestamp = String.valueOf(System.currentTimeMillis()).substring(0, 10);
+            String savedName = baseName + "_" + timestamp + ".md";
+            Path targetPath = mdDir.resolve(savedName);
+            file.transferTo(targetPath);
+
+            // 读取文件内容返回给前端填充到编辑器
+            String content = Files.readString(targetPath);
+
+            return ApiResponse.success(Map.of(
+                    "content", content,
+                    "filename", savedName,
+                    "path", "/storage/announcements/md/" + savedName
+            ));
+        } catch (IOException e) {
+            throw new BadRequestException("文件上传失败: " + e.getMessage());
+        }
     }
 }
