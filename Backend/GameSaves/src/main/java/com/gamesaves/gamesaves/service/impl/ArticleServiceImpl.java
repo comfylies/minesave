@@ -8,6 +8,7 @@ import com.gamesaves.gamesaves.dto.response.ArticleListItemResponse;
 import com.gamesaves.gamesaves.entity.Article;
 import com.gamesaves.gamesaves.entity.Game;
 import com.gamesaves.gamesaves.entity.Savings;
+import com.gamesaves.gamesaves.entity.Tag;
 import com.gamesaves.gamesaves.entity.User;
 import com.gamesaves.gamesaves.exception.BadRequestException;
 import com.gamesaves.gamesaves.exception.FileProcessingException;
@@ -15,6 +16,7 @@ import com.gamesaves.gamesaves.exception.ResourceNotFoundException;
 import com.gamesaves.gamesaves.repository.ArticleRepository;
 import com.gamesaves.gamesaves.repository.GameRepository;
 import com.gamesaves.gamesaves.repository.SavingsRepository;
+import com.gamesaves.gamesaves.repository.TagRepository;
 import com.gamesaves.gamesaves.repository.UserRepository;
 import com.gamesaves.gamesaves.service.ArticleService;
 import com.gamesaves.gamesaves.service.ZipExtractionService;
@@ -30,6 +32,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -46,6 +49,7 @@ public class ArticleServiceImpl implements ArticleService {
     private final GameRepository gameRepository;
     private final UserRepository userRepository;
     private final SavingsRepository savingsRepository;
+    private final TagRepository tagRepository;
     private final ZipExtractionService zipExtractionService;
 
     @Value("${app.storage.database-path:../../Database}")
@@ -63,11 +67,13 @@ public class ArticleServiceImpl implements ArticleService {
                                GameRepository gameRepository,
                                UserRepository userRepository,
                                SavingsRepository savingsRepository,
+                               TagRepository tagRepository,
                                ZipExtractionService zipExtractionService) {
         this.articleRepository = articleRepository;
         this.gameRepository = gameRepository;
         this.userRepository = userRepository;
         this.savingsRepository = savingsRepository;
+        this.tagRepository = tagRepository;
         this.zipExtractionService = zipExtractionService;
     }
 
@@ -123,6 +129,13 @@ public class ArticleServiceImpl implements ArticleService {
         // Now we have the ID — set the real storage root
         String storageRoot = storagePrefix + article.getId() + "/";
         article.setStorageRoot(storageRoot);
+
+        // Associate tags if provided
+        if (request.getTagIds() != null && !request.getTagIds().isEmpty()) {
+            List<Tag> tags = tagRepository.findAllById(request.getTagIds());
+            article.setTags(new HashSet<>(tags));
+        }
+
         article = articleRepository.save(article);
 
         // Save ZIP to disk
@@ -173,12 +186,18 @@ public class ArticleServiceImpl implements ArticleService {
 
     @Override
     public ArticleDetailResponse updateArticle(Long id, ArticleUpdateRequest request) {
-        Article article = articleRepository.findById(id)
+        Article article = articleRepository.findByIdWithUserAndGame(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Article", id));
 
         if (request.getTitle() != null) article.setTitle(request.getTitle());
         if (request.getVersion() != null) article.setVersion(request.getVersion());
         if (request.getDescription() != null) article.setDescription(request.getDescription());
+
+        // Update tag associations if tagIds is provided
+        if (request.getTagIds() != null) {
+            List<Tag> tags = tagRepository.findAllById(request.getTagIds());
+            article.setTags(new HashSet<>(tags));
+        }
 
         article = articleRepository.save(article);
         return ArticleDetailResponse.fromEntity(article);

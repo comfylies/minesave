@@ -59,6 +59,12 @@
           />
         </el-form-item>
 
+        <!-- 标签 -->
+        <el-form-item label="标签">
+          <TagSelector v-model="form.tagIds" :disabled="uploading" />
+          <div class="tag-hint">选择标签或输入新标签名创建</div>
+        </el-form-item>
+
         <!-- README（Markdown） -->
         <el-form-item label="README（Markdown）">
           <div class="readme-inputs">
@@ -163,6 +169,7 @@ import { ElMessage } from 'element-plus'
 import { useGameStore } from '../stores/games'
 import { useAuthStore } from '../stores/auth'
 import { articleApi } from '../api/articleApi'
+import TagSelector from '../components/tag/TagSelector.vue'
 
 const router = useRouter()
 const gameStore = useGameStore()
@@ -192,7 +199,8 @@ const form = reactive({
   title: '',
   version: '',
   description: '',
-  readmeRaw: ''
+  readmeRaw: '',
+  tagIds: []
 })
 
 const rules = {
@@ -334,7 +342,8 @@ async function handleUpload() {
       title: form.title,
       version: form.version,
       description: form.description || undefined,
-      readmeRaw: readmeRawValue
+      readmeRaw: readmeRawValue,
+      tagIds: form.tagIds.length > 0 ? form.tagIds : undefined
     }
 
     const formData = new FormData()
@@ -437,6 +446,12 @@ onUnmounted(() => {
 
 .readme-area {
   padding: var(--spacing-md) 0;
+}
+
+.tag-hint {
+  font-size: var(--font-size-small, 12px);
+  color: var(--color-secondary-text, #999);
+  margin-top: 4px;
 }
 
 .submit-btn {

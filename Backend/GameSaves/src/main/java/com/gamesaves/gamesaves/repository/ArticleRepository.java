@@ -32,8 +32,12 @@ public interface ArticleRepository extends JpaRepository<Article, Long> {
 
     long countByUserId(Long userId);
 
-    // Get article with user for detail
-    @Query("SELECT a FROM Article a JOIN FETCH a.user JOIN FETCH a.game WHERE a.id = :id")
+    // Get article with user, game, and tags for detail
+    @Query("SELECT DISTINCT a FROM Article a " +
+           "JOIN FETCH a.user " +
+           "JOIN FETCH a.game " +
+           "LEFT JOIN FETCH a.tags " +
+           "WHERE a.id = :id")
     Optional<Article> findByIdWithUserAndGame(@Param("id") Long id);
 
     // Admin: search articles by keyword (title or username)

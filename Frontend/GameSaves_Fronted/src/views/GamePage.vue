@@ -35,12 +35,13 @@
           <table class="data-table article-table">
             <thead>
               <tr>
-                <th style="width: 40%">标题</th>
-                <th style="width: 15%">版本</th>
-                <th style="width: 15%">作者</th>
-                <th style="width: 10%">大小</th>
-                <th style="width: 10%">下载</th>
-                <th style="width: 10%">时间</th>
+                <th class="th-title">标题</th>
+                <th class="th-tags">标签</th>
+                <th class="th-version">版本</th>
+                <th class="th-author">作者</th>
+                <th class="th-size">大小</th>
+                <th class="th-dl">下载</th>
+                <th class="th-time">时间</th>
               </tr>
             </thead>
             <tbody>
@@ -51,24 +52,26 @@
                 @click="$router.push(`/articles/${article.id}`)"
               >
                 <td class="col-title">
-                  <span class="article-title-link">{{ article.title }}</span>
-                  <span class="article-desc">{{ truncate(article.description, 60) }}</span>
+                  <span class="article-title-link" :title="article.title">{{ article.title }}</span>
+                  <span class="article-desc" :title="article.description">{{ truncate(article.description, 60) }}</span>
                 </td>
-                <td>
-                  <span class="article-version">{{ article.version }}</span>
+                <td class="col-tags">
+                  <TagDisplay :tags="article.tagNames" :max="2" />
                 </td>
-                <td>
+                <td class="col-version">
+                  <span class="article-version" :title="article.version">{{ article.version }}</span>
+                </td>
+                <td class="col-author">
                   <router-link
                     :to="`/users/${article.userId}`"
                     class="article-author"
+                    :title="article.nickname"
                     @click.stop
-                  >
-                    {{ article.nickname }}
-                  </router-link>
+                  >{{ article.nickname }}</router-link>
                 </td>
                 <td class="col-number">{{ formatSize(article.fileSize) }}</td>
                 <td class="col-number">{{ article.downloadCount || 0 }}</td>
-                <td class="col-time time-ago">{{ formatTime(article.createdAt) }}</td>
+                <td class="col-time">{{ formatTime(article.createdAt) }}</td>
               </tr>
             </tbody>
           </table>
@@ -105,6 +108,7 @@ import { useArticleStore } from '../stores/articles'
 import { useAuthStore } from '../stores/auth'
 import EmptyState from '../components/common/EmptyState.vue'
 import LoadingSkeleton from '../components/common/LoadingSkeleton.vue'
+import TagDisplay from '../components/tag/TagDisplay.vue'
 
 const route = useRoute()
 const gameStore = useGameStore()
@@ -203,23 +207,51 @@ watch(() => route.params.gameId, (newId) => {
 
 /* ---- 表格 ---- */
 .article-table {
+  table-layout: fixed;
+  width: 100%;
   margin-bottom: var(--spacing-lg);
+}
+
+/* Column widths */
+.th-title  { width: 30%; }
+.th-tags   { width: 14%; }
+.th-version { width: 12%; }
+.th-author { width: 12%; }
+.th-size   { width: 8%; }
+.th-dl     { width: 8%; }
+.th-time   { width: 16%; }
+
+/* Unified center alignment */
+.article-table th,
+.article-table td {
+  text-align: center;
+  vertical-align: middle;
 }
 
 .article-row {
   cursor: pointer;
 }
 
-.col-title {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+.article-table td {
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* Title column — left-align for readability */
+.col-title,
+.article-table th:first-child {
+  text-align: left;
+  white-space: normal;
 }
 
 .article-title-link {
+  display: block;
   font-weight: 600;
   color: var(--color-link);
   font-size: var(--font-size-large);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .article-row:hover .article-title-link {
@@ -227,33 +259,42 @@ watch(() => route.params.gameId, (newId) => {
 }
 
 .article-desc {
+  display: block;
   font-size: var(--font-size-small);
   color: var(--color-secondary-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 320px;
+  margin-top: 2px;
 }
 
 .article-version {
   font-size: var(--font-size-small);
   color: var(--color-secondary-text);
   font-family: ui-monospace, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
 }
 
 .article-author {
   font-size: var(--font-size-normal);
   color: var(--color-link);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
 }
 
 .col-number {
   font-size: var(--font-size-small);
   color: var(--color-secondary-text);
-  text-align: right;
 }
 
 .col-time {
-  text-align: right;
+  font-size: var(--font-size-small);
+  color: var(--color-secondary-text);
 }
 
 /* ---- 分页 ---- */

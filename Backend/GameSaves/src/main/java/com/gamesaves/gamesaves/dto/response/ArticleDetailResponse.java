@@ -7,6 +7,9 @@ import lombok.Builder;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.util.Collections;
+import java.util.List;
+import java.util.stream.Collectors;
 
 @Data
 @Builder
@@ -29,6 +32,7 @@ public class ArticleDetailResponse {
     private Integer downloadCount;
     private String status;
     private String errorMessage;
+    private List<TagResponse> tags;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
@@ -38,6 +42,12 @@ public class ArticleDetailResponse {
     private Long savingsId;
 
     public static ArticleDetailResponse fromEntity(Article article) {
+        List<TagResponse> tagList = article.getTags() != null
+                ? article.getTags().stream()
+                    .map(TagResponse::fromEntity)
+                    .collect(Collectors.toList())
+                : Collections.emptyList();
+
         return ArticleDetailResponse.builder()
                 .id(article.getId())
                 .title(article.getTitle())
@@ -55,6 +65,7 @@ public class ArticleDetailResponse {
                 .downloadCount(article.getDownloadCount())
                 .status(article.getStatus().name())
                 .errorMessage(article.getErrorMessage())
+                .tags(tagList)
                 .createdAt(article.getCreatedAt())
                 .updatedAt(article.getUpdatedAt())
                 .build();

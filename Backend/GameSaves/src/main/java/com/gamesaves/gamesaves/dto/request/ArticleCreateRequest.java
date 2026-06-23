@@ -6,6 +6,8 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -26,4 +28,6 @@ public class ArticleCreateRequest {
     private String description;
 
     private String readmeRaw;           // Markdown README (optional)
+
+    private List<Long> tagIds;          // 可选标签 ID 列表
 }

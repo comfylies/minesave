@@ -37,6 +37,7 @@ public class StpInterfaceImpl implements StpInterface {
             permissions.add("user:manage");
             permissions.add("game:manage");
             permissions.add("article:manage");
+            permissions.add("tag:manage");
         }
         return permissions;
     }

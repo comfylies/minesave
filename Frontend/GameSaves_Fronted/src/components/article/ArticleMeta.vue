@@ -16,6 +16,11 @@
       <span class="meta-text">版本 {{ article.version }}</span>
     </div>
 
+    <!-- 标签 -->
+    <div v-if="article.tags && article.tags.length > 0" class="article-tags">
+      <TagDisplay :tags="article.tags" />
+    </div>
+
     <!-- 统计行 -->
     <div class="article-stats">
       <span v-if="article.fileCount != null" class="stat-item">
@@ -67,6 +72,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { fileApi } from '../../api/fileApi'
+import TagDisplay from '../tag/TagDisplay.vue'
 
 const props = defineProps({
   article: { type: Object, required: true }
@@ -168,6 +174,11 @@ function formatTime(dateStr) {
 
 .meta-text {
   color: var(--color-secondary-text);
+}
+
+/* ---- 标签 ---- */
+.article-tags {
+  margin-bottom: var(--spacing-sm);
 }
 
 /* ---- 统计行 ---- */

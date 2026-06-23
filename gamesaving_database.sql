@@ -265,11 +265,52 @@ CREATE TABLE download_logs (
 ) ENGINE=InnoDB COMMENT='下载审计日志表 - 支撑IP频率限制策略和下载统计分析';
 
 -- ============================================================
--- 8. 插入开发测试数据
+-- 8. 登录失败记录表 (login_fails)
+-- 支撑登录安全策略：同一账号连续失败 N 次后锁定 M 分钟
+-- ============================================================
+CREATE TABLE login_fails (
+    id              BIGINT          NOT NULL AUTO_INCREMENT  COMMENT '记录唯一标识ID',
+    username        VARCHAR(50)     NOT NULL                 COMMENT '登录失败的账号名',
+    ip_address      VARCHAR(45)     NOT NULL                 COMMENT '登录失败来源IP',
+    attempted_at    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '失败尝试时间',
+    PRIMARY KEY (id),
+    INDEX idx_username_time (username, attempted_at)          -- 查询某账号最近失败次数
+) ENGINE=InnoDB COMMENT='登录失败记录表 - 支撑账号锁定安全策略';
+
+-- ============================================================
+-- 9. 标签表 (tags)
+-- 全局标签池，区分管理员预设标签和用户自定义标签
+-- ============================================================
+CREATE TABLE tags (
+    id              BIGINT          NOT NULL AUTO_INCREMENT  COMMENT '标签唯一标识ID',
+    name            VARCHAR(50)     NOT NULL                 COMMENT '标签名称（全局唯一）',
+    source          VARCHAR(20)     NOT NULL DEFAULT 'user'  COMMENT '标签来源: admin=预设标签, user=用户自定义',
+    created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_name (name)
+) ENGINE=InnoDB COMMENT='标签表 - 全局标签池，区分预设标签和用户自定义标签';
+
+-- ============================================================
+-- 10. 文章-标签关联表 (article_tags)
+-- 多对多关联：一篇文章可关联多个标签，一个标签可用于多篇文章
+-- ============================================================
+CREATE TABLE article_tags (
+    article_id      BIGINT          NOT NULL                 COMMENT '存档文章ID → article.id',
+    tag_id          BIGINT          NOT NULL                 COMMENT '标签ID → tags.id',
+    PRIMARY KEY (article_id, tag_id),
+    CONSTRAINT fk_article_tags_article FOREIGN KEY (article_id) REFERENCES article(id)
+        ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT fk_article_tags_tag FOREIGN KEY (tag_id) REFERENCES tags(id)
+        ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB COMMENT='文章-标签关联表 - 支撑多对多标签分类和搜索';
+
+-- ============================================================
+-- 11. 插入开发测试数据
 -- 方便前后端联调和功能验证
 -- ============================================================
 
--- 8.1 示例游戏
+-- 11.1 示例游戏
 INSERT INTO games (name, description) VALUES
 ('艾尔登法环', 'FromSoftware开发的动作角色扮演游戏，开放世界魂系巅峰之作'),
 ('Minecraft', 'Mojang Studios开发的沙盒建造游戏，无限创造可能'),
@@ -277,7 +318,7 @@ INSERT INTO games (name, description) VALUES
 ('星露谷物语', 'ConcernedApe开发的农场模拟经营游戏'),
 ('博德之门3', 'Larian Studios开发的CRPG，基于D&D第五版规则');
 
--- 8.2 示例用户（区分 admin 管理员 与 user 普通用户）
+-- 11.2 示例用户（区分 admin 管理员 与 user 普通用户）
 -- 密码均为 "password123" 的BCrypt哈希值（开发测试用，生产环境需更换）
 INSERT INTO users (username, password, nickname, phone, email, role, bio) VALUES
 ('admin',       '$2b$10$ZtCEAHK7COr0OC6KAfQA/eNcEJhtWqIfD2kaXRa4hix9peZFhQ4nu',
@@ -287,8 +328,20 @@ INSERT INTO users (username, password, nickname, phone, email, role, bio) VALUES
 ('speedrunner', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
  '速通达人',    '13800000003', 'speed@example.com',       'user',  '游戏速通爱好者，追求极限操作');
 
+-- 11.3 示例标签（预设 + 用户）
+INSERT INTO tags (name, source) VALUES
+('生存模式', 'admin'),
+('创造模式', 'admin'),
+('红石机器', 'admin'),
+('建筑', 'admin'),
+('模组整合', 'admin'),
+('冒险地图', 'admin'),
+('村民交易', 'user'),
+('猪灵交易', 'user'),
+('全自动农场', 'user');
+
 -- ============================================================
--- 数据库设计完成 v2.0
+-- 数据库设计完成 v2.1
 -- ============================================================
 -- 实体关系总结 (ER):
 --   game    1──N article    (一款游戏 ← 多个存档文章)
@@ -298,6 +351,7 @@ INSERT INTO users (username, password, nickname, phone, email, role, bio) VALUES
 --   savings 1──N saving_items (一份快照 ← N个文件+目录条目)
 --   article 1──N comments   (一篇存档 ← 多条批注)
 --   article 1──N download_logs (一篇存档 ← 多条下载记录)
+--   article M──N tags       (存档与标签多对多)
 --
 -- 混合存储物理布局:
 --   Database/

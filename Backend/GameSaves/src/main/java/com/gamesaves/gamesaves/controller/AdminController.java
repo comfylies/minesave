@@ -4,10 +4,12 @@ import cn.dev33.satoken.annotation.SaCheckLogin;
 import cn.dev33.satoken.annotation.SaCheckPermission;
 import cn.dev33.satoken.stp.StpUtil;
 import com.gamesaves.gamesaves.dto.request.AnnouncementCreateRequest;
+import com.gamesaves.gamesaves.dto.request.TagCreateRequest;
 import com.gamesaves.gamesaves.dto.response.*;
 import com.gamesaves.gamesaves.exception.BadRequestException;
 import com.gamesaves.gamesaves.service.AdminService;
 import com.gamesaves.gamesaves.service.AnnouncementService;
+import com.gamesaves.gamesaves.service.TagService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
@@ -31,13 +33,16 @@ public class AdminController {
 
     private final AdminService adminService;
     private final AnnouncementService announcementService;
+    private final TagService tagService;
 
     @Value("${app.storage.database-path:../../Database}")
     private String databasePath;
 
-    public AdminController(AdminService adminService, AnnouncementService announcementService) {
+    public AdminController(AdminService adminService, AnnouncementService announcementService,
+                           TagService tagService) {
         this.adminService = adminService;
         this.announcementService = announcementService;
+        this.tagService = tagService;
     }
 
     @GetMapping("/dashboard")
@@ -165,6 +170,34 @@ public class AdminController {
         } catch (IOException e) {
             throw new BadRequestException("图片上传失败: " + e.getMessage());
         }
+    }
+
+    // ==================== 标签管理 ====================
+
+    /** 创建预设标签（admin 专属） */
+    @PostMapping("/tags")
+    @SaCheckPermission("tag:manage")
+    public ApiResponse<TagResponse> createTag(@Valid @RequestBody TagCreateRequest request) {
+        if (request.getSource() == null) {
+            request.setSource("admin");
+        }
+        return ApiResponse.success("Tag created", tagService.createTag(request));
+    }
+
+    /** 更新标签 */
+    @PutMapping("/tags/{id}")
+    @SaCheckPermission("tag:manage")
+    public ApiResponse<TagResponse> updateTag(@PathVariable Long id,
+                                               @Valid @RequestBody TagCreateRequest request) {
+        return ApiResponse.success(tagService.updateTag(id, request));
+    }
+
+    /** 删除标签 */
+    @DeleteMapping("/tags/{id}")
+    @SaCheckPermission("tag:manage")
+    public ApiResponse<String> deleteTag(@PathVariable Long id) {
+        tagService.deleteTag(id);
+        return ApiResponse.success("Tag deleted", "ok");
     }
 
     /** 上传公告 Markdown 文件，返回文件内容 */

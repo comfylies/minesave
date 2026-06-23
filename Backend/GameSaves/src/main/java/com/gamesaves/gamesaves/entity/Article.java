@@ -7,6 +7,9 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Entity
 @Table(name = "article")
@@ -68,6 +71,13 @@ public class Article {
 
     @Column(name = "error_message", length = 1000)
     private String errorMessage;
+
+    @ManyToMany(fetch = FetchType.LAZY)
+    @JoinTable(name = "article_tags",
+            joinColumns = @JoinColumn(name = "article_id"),
+            inverseJoinColumns = @JoinColumn(name = "tag_id"))
+    @Builder.Default
+    private Set<Tag> tags = new HashSet<>();
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
