@@ -7,6 +7,7 @@ import com.gamesaves.gamesaves.entity.Savings;
 import com.gamesaves.gamesaves.entity.SavingItem;
 import com.gamesaves.gamesaves.exception.ResourceNotFoundException;
 import com.gamesaves.gamesaves.repository.ArticleRepository;
+import com.gamesaves.gamesaves.repository.SafePathRepository;
 import com.gamesaves.gamesaves.repository.SavingItemRepository;
 import com.gamesaves.gamesaves.repository.SavingsRepository;
 import com.gamesaves.gamesaves.service.FileExplorerService;
@@ -25,6 +26,7 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import jakarta.annotation.PostConstruct;
@@ -38,6 +40,7 @@ public class FileExplorerServiceImpl implements FileExplorerService {
     private final SavingsRepository savingsRepository;
     private final SavingItemRepository savingItemRepository;
     private final ArticleRepository articleRepository;
+    private final SafePathRepository safePathRepository;
 
     @Value("${app.storage.database-path:../../Database}")
     private String databasePathConfig;
@@ -52,10 +55,12 @@ public class FileExplorerServiceImpl implements FileExplorerService {
 
     public FileExplorerServiceImpl(SavingsRepository savingsRepository,
                                     SavingItemRepository savingItemRepository,
-                                    ArticleRepository articleRepository) {
+                                    ArticleRepository articleRepository,
+                                    SafePathRepository safePathRepository) {
         this.savingsRepository = savingsRepository;
         this.savingItemRepository = savingItemRepository;
         this.articleRepository = articleRepository;
+        this.safePathRepository = safePathRepository;
     }
 
     @Override
@@ -78,13 +83,33 @@ public class FileExplorerServiceImpl implements FileExplorerService {
         List<SavingItem> directories = savingItemRepository.findBySnapshotIdAndParentPathAndIsDirectory(
                 snapshotId, normalizedPath, true);
 
+        // Load safe path whitelist for this game
+        Set<String> safePaths = safePathRepository.findPathSetByGameId(savings.getGameId());
+
+        // Map to response DTOs with security level
+        List<FileEntryResponse> fileEntries = files.stream()
+                .map(item -> {
+                    FileEntryResponse entry = FileEntryResponse.fromEntity(item);
+                    entry.setSecurityLevel(computeSecurityLevel(item, safePaths));
+                    return entry;
+                })
+                .collect(Collectors.toList());
+
+        List<FileEntryResponse> dirEntries = directories.stream()
+                .map(item -> {
+                    FileEntryResponse entry = FileEntryResponse.fromEntity(item);
+                    entry.setSecurityLevel("safe"); // 目录不参与安全标记
+                    return entry;
+                })
+                .collect(Collectors.toList());
+
         // Build breadcrumbs
         List<DirectoryBrowseResponse.BreadcrumbEntry> breadcrumbs = buildBreadcrumbs(normalizedPath);
 
         return DirectoryBrowseResponse.builder()
                 .currentPath(normalizedPath)
-                .files(files.stream().map(FileEntryResponse::fromEntity).collect(Collectors.toList()))
-                .directories(directories.stream().map(FileEntryResponse::fromEntity).collect(Collectors.toList()))
+                .files(fileEntries)
+                .directories(dirEntries)
                 .breadcrumbs(breadcrumbs)
                 .build();
     }
@@ -210,6 +235,40 @@ public class FileExplorerServiceImpl implements FileExplorerService {
         }
 
         return new FileSystemResource(zipPath);
+    }
+
+    /**
+     * 根据文件扩展名和是否在白名单路径中，计算安全等级。
+     *
+     * 决策矩阵：
+     * - .exe/.bat/.cmd/.vbs/.ps1/.scr/.msi → 永远是 danger（Minecraft 存档不应出现）
+     * - 在白名单中：.sh/.py/.rb → warning（已知位置，提醒注意）；.dll/.so/.jar → safe（正常依赖）
+     * - 不在白名单中：.sh/.py/.rb → danger（异常位置，高度可疑）；.dll/.so/.jar → warning（可疑位置）
+     * - 其余 → safe
+     */
+    private String computeSecurityLevel(SavingItem item, Set<String> safePaths) {
+        if (item.getIsDirectory()) return "safe";
+
+        String ext = item.getFileType();
+        if (ext == null) ext = "";
+        ext = ext.toLowerCase();
+
+        // 永远红色的高危 Windows 可执行文件
+        Set<String> alwaysDanger = Set.of("exe", "bat", "cmd", "vbs", "ps1", "scr", "msi");
+        if (alwaysDanger.contains(ext)) return "danger";
+
+        boolean inSafe = safePaths.contains(item.getVirtualPath());
+
+        if (inSafe) {
+            // 标准结构内：宽容处理，sh/py/rb 仅警告
+            if (Set.of("sh", "py", "rb").contains(ext)) return "warning";
+            return "safe";
+        } else {
+            // 标准结构外：升级警告等级
+            if (Set.of("sh", "py", "rb").contains(ext)) return "danger";
+            if (Set.of("dll", "so", "jar").contains(ext)) return "warning";
+            return "safe";
+        }
     }
 
     private List<DirectoryBrowseResponse.BreadcrumbEntry> buildBreadcrumbs(String path) {

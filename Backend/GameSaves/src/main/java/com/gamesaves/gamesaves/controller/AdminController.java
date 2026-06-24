@@ -9,6 +9,7 @@ import com.gamesaves.gamesaves.dto.response.*;
 import com.gamesaves.gamesaves.exception.BadRequestException;
 import com.gamesaves.gamesaves.service.AdminService;
 import com.gamesaves.gamesaves.service.AnnouncementService;
+import com.gamesaves.gamesaves.service.SafePathService;
 import com.gamesaves.gamesaves.service.SearchSyncService;
 import com.gamesaves.gamesaves.service.TagService;
 import jakarta.validation.Valid;
@@ -36,16 +37,19 @@ public class AdminController {
     private final AnnouncementService announcementService;
     private final TagService tagService;
     private final SearchSyncService searchSyncService;
+    private final SafePathService safePathService;
 
     @Value("${app.storage.database-path:../../Database}")
     private String databasePath;
 
     public AdminController(AdminService adminService, AnnouncementService announcementService,
-                           TagService tagService, SearchSyncService searchSyncService) {
+                           TagService tagService, SearchSyncService searchSyncService,
+                           SafePathService safePathService) {
         this.adminService = adminService;
         this.announcementService = announcementService;
         this.tagService = tagService;
         this.searchSyncService = searchSyncService;
+        this.safePathService = safePathService;
     }
 
     @GetMapping("/dashboard")
@@ -216,6 +220,47 @@ public class AdminController {
     public ApiResponse<String> deleteTag(@PathVariable Long id) {
         tagService.deleteTag(id);
         return ApiResponse.success("Tag deleted", "ok");
+    }
+
+    // ==================== 标准结构管理 ====================
+
+    /** 上传游戏标准文件夹结构 ZIP，建立路径白名单 */
+    @PostMapping("/games/{gameId}/safe-structure")
+    @SaCheckPermission("game:manage")
+    public ApiResponse<Map<String, Object>> uploadSafeStructure(
+            @PathVariable Long gameId,
+            @RequestParam("file") MultipartFile file) {
+        if (file.isEmpty()) {
+            throw new BadRequestException("文件为空");
+        }
+
+        String originalName = file.getOriginalFilename();
+        if (originalName == null || !originalName.toLowerCase().endsWith(".zip")) {
+            throw new BadRequestException("只允许上传 .zip 文件");
+        }
+
+        try {
+            int count = safePathService.uploadSafeStructure(gameId, file.getInputStream());
+            return ApiResponse.success(Map.of(
+                    "gameId", gameId,
+                    "pathCount", count,
+                    "message", "标准结构已更新，共 " + count + " 条路径"
+            ));
+        } catch (java.io.IOException e) {
+            throw new BadRequestException("文件读取失败: " + e.getMessage());
+        }
+    }
+
+    /** 查询游戏的标准结构路径数量 */
+    @GetMapping("/games/{gameId}/safe-structure")
+    @SaCheckPermission("game:manage")
+    public ApiResponse<Map<String, Object>> getSafeStructure(@PathVariable Long gameId) {
+        long count = safePathService.getPathCount(gameId);
+        return ApiResponse.success(Map.of(
+                "gameId", gameId,
+                "pathCount", count,
+                "hasStructure", count > 0
+        ));
     }
 
     /** 上传公告 Markdown 文件，返回文件内容 */

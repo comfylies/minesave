@@ -307,11 +307,28 @@ CREATE TABLE article_tags (
 ) ENGINE=InnoDB COMMENT='文章-标签关联表 - 支撑多对多标签分类和搜索';
 
 -- ============================================================
--- 11. 插入开发测试数据
+-- 11. 游戏标准结构白名单 (safe_paths)
+-- 管理员上传标准存档文件夹结构 ZIP，系统提取路径存入此表，
+-- 用于安全颜色标记：在白名单内的可执行文件降级警告，不在的升级警告
+-- ============================================================
+CREATE TABLE safe_paths (
+    id              BIGINT          AUTO_INCREMENT PRIMARY KEY,
+    game_id         BIGINT          NOT NULL                        COMMENT '游戏ID → games.id',
+    path            VARCHAR(500)    NOT NULL                        COMMENT '文件或目录虚拟路径',
+    is_directory    TINYINT(1)      NOT NULL DEFAULT 0              COMMENT '是否为目录',
+    created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    UNIQUE KEY uk_game_path (game_id, path),
+    INDEX idx_game_id (game_id),
+    CONSTRAINT fk_safe_paths_game FOREIGN KEY (game_id) REFERENCES games(id)
+        ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB COMMENT='游戏标准结构白名单 - 安全颜色标记基线';
+
+-- ============================================================
+-- 12. 插入开发测试数据
 -- 方便前后端联调和功能验证
 -- ============================================================
 
--- 11.1 示例游戏
+-- 12.1 示例游戏
 INSERT INTO games (name, description) VALUES
 ('艾尔登法环', 'FromSoftware开发的动作角色扮演游戏，开放世界魂系巅峰之作'),
 ('Minecraft', 'Mojang Studios开发的沙盒建造游戏，无限创造可能'),
@@ -319,7 +336,7 @@ INSERT INTO games (name, description) VALUES
 ('星露谷物语', 'ConcernedApe开发的农场模拟经营游戏'),
 ('博德之门3', 'Larian Studios开发的CRPG，基于D&D第五版规则');
 
--- 11.2 示例用户（区分 admin 管理员 与 user 普通用户）
+-- 12.2 示例用户（区分 admin 管理员 与 user 普通用户）
 -- 密码均为 "password123" 的BCrypt哈希值（开发测试用，生产环境需更换）
 INSERT INTO users (username, password, nickname, phone, email, role, bio) VALUES
 ('admin',       '$2b$10$ZtCEAHK7COr0OC6KAfQA/eNcEJhtWqIfD2kaXRa4hix9peZFhQ4nu',
@@ -329,7 +346,7 @@ INSERT INTO users (username, password, nickname, phone, email, role, bio) VALUES
 ('speedrunner', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
  '速通达人',    '13800000003', 'speed@example.com',       'user',  '游戏速通爱好者，追求极限操作');
 
--- 11.3 示例标签（预设 + 用户）
+-- 12.3 示例标签（预设 + 用户）
 INSERT INTO tags (name, source) VALUES
 ('生存模式', 'admin'),
 ('创造模式', 'admin'),

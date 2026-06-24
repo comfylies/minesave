@@ -18,6 +18,7 @@ public class FileEntryResponse {
     private String fileType;
     private Boolean isText;
     private Boolean isDirectory;
+    private String securityLevel;   // "safe" | "warning" | "danger" — 安全颜色标记
 
     public static FileEntryResponse fromEntity(SavingItem item) {
         String name = item.getVirtualPath();

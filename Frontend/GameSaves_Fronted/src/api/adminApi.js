@@ -24,5 +24,21 @@ export const adminApi = {
   /** 删除文章 */
   deleteArticle(articleId) {
     return client.delete(`/admin/articles/${articleId}`)
+  },
+
+  // ==================== 游戏标准结构管理 ====================
+
+  /** 上传游戏标准结构 ZIP */
+  uploadSafeStructure(gameId, file) {
+    const formData = new FormData()
+    formData.append('file', file)
+    return client.post(`/admin/games/${gameId}/safe-structure`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+  },
+
+  /** 查询游戏标准结构状态 */
+  getSafeStructure(gameId) {
+    return client.get(`/admin/games/${gameId}/safe-structure`)
   }
 }

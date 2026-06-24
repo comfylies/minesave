@@ -12,42 +12,49 @@
 
     <!-- 状态：数据就绪 -->
     <template v-else-if="articleStore.currentArticle">
-      <ArticleMeta :article="articleStore.currentArticle">
-        <template #actions>
-          <el-button
-            v-if="isOwner || auth.isAdmin"
-            size="default"
-            @click="showEditDialog = true"
-          >
-            <el-icon><Edit /></el-icon>
-            编辑
-          </el-button>
-          <el-button
-            v-if="isOwner || auth.isAdmin"
-            size="default"
-            type="danger"
-            plain
-            @click="handleDelete"
-          >
-            <el-icon><Delete /></el-icon>
-            删除
-          </el-button>
-        </template>
-      </ArticleMeta>
+      <ArticleMeta :article="articleStore.currentArticle" />
 
-      <!-- 文件浏览器 -->
-      <FileBrowser
-        :directories="fileStore.directories"
-        :files="fileStore.files"
-        :breadcrumbs="fileStore.breadcrumbs"
-        :loading="fileStore.loading"
-        @navigate="navigateToPath"
-        @preview="previewFile"
-      />
+      <!-- 文件浏览 + 封面图 + 右侧信息栏 -->
+      <div class="browse-row">
+        <div class="browse-left">
+          <!-- 文件浏览器 -->
+          <FileBrowser
+            :directories="fileStore.directories"
+            :files="fileStore.files"
+            :breadcrumbs="fileStore.breadcrumbs"
+            :loading="fileStore.loading"
+            @navigate="navigateToPath"
+            @preview="previewFile"
+          />
 
-      <!-- 错误 -->
-      <div v-if="fileStore.error && !fileStore.loading" class="file-error">
-        <el-alert type="error" :title="fileStore.error" show-icon :closable="false" />
+          <!-- 错误 -->
+          <div v-if="fileStore.error && !fileStore.loading" class="file-error">
+            <el-alert type="error" :title="fileStore.error" show-icon :closable="false" />
+          </div>
+
+          <!-- 封面图（720px 压缩图） -->
+          <div v-if="articleStore.currentArticle.coverImage" class="cover-wrap">
+            <img
+              :src="thumbUrl(articleStore.currentArticle.coverImage, 720)"
+              :alt="articleStore.currentArticle.title"
+              class="cover-image"
+            />
+          </div>
+        </div>
+
+        <!-- 右侧信息栏 -->
+        <ArticleSidebar :article="articleStore.currentArticle">
+          <template v-if="isOwner || auth.isAdmin" #actions>
+            <el-button size="small" @click="showEditDialog = true">
+              <el-icon><Edit /></el-icon>
+              编辑
+            </el-button>
+            <el-button size="small" type="danger" plain @click="handleDelete">
+              <el-icon><Delete /></el-icon>
+              删除
+            </el-button>
+          </template>
+        </ArticleSidebar>
       </div>
 
       <!-- README + 批注 同行布局 -->
@@ -129,8 +136,10 @@ import { useFileStore } from '../stores/files'
 import { useAuthStore } from '../stores/auth'
 import { articleApi } from '../api/articleApi'
 import { fileApi } from '../api/fileApi'
+import { thumbUrl } from '../utils/imageUrl'
 import ArticleMeta from '../components/article/ArticleMeta.vue'
 import FileBrowser from '../components/article/FileBrowser.vue'
+import ArticleSidebar from '../components/article/ArticleSidebar.vue'
 import ReadmeRenderer from '../components/article/ReadmeRenderer.vue'
 import AnnotationPanel from '../components/article/AnnotationPanel.vue'
 import EmptyState from '../components/common/EmptyState.vue'
@@ -331,10 +340,38 @@ onUnmounted(() => {
   padding: var(--spacing-xxl) 0;
 }
 
+/* ---- 文件浏览 + 封面 + 信息栏 同行 ---- */
+.browse-row {
+  display: flex;
+  gap: var(--spacing-md);
+  align-items: flex-start;
+  margin-bottom: var(--spacing-lg);
+}
+
+.browse-left {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---- 封面图 ---- */
+.cover-wrap {
+  margin-top: var(--spacing-md);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.cover-image {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+}
+
+/* ---- README + 批注 ---- */
 .readme-row {
   display: flex;
   gap: var(--spacing-lg);
-  margin-top: var(--spacing-lg);
   align-items: flex-start;
 }
 
@@ -344,7 +381,7 @@ onUnmounted(() => {
 }
 
 .article-sidebar {
-  width: 300px;
+  width: 280px;
   flex-shrink: 0;
 }
 
@@ -380,9 +417,14 @@ onUnmounted(() => {
 
 /* ---- 响应式 ---- */
 @media (max-width: 900px) {
+  .browse-row {
+    flex-direction: column;
+  }
+
   .readme-row {
     flex-direction: column;
   }
+
   .article-sidebar {
     width: 100%;
     position: static;

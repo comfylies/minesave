@@ -30,7 +30,7 @@ defineEmits(['navigate'])
 
 <style scoped>
 .breadcrumb-nav {
-  padding: var(--spacing-md) 0;
+  padding: var(--spacing-md);
   font-size: var(--font-size-normal);
 }
 
