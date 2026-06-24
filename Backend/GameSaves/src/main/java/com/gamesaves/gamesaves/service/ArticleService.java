@@ -11,7 +11,7 @@ import java.util.Map;
 
 public interface ArticleService {
 
-    ArticleDetailResponse createArticle(ArticleCreateRequest request, MultipartFile file, MultipartFile readmeFile);
+    ArticleDetailResponse createArticle(ArticleCreateRequest request, MultipartFile file, MultipartFile readmeFile, MultipartFile coverFile);
 
     ArticleDetailResponse getArticleDetail(Long id);
 

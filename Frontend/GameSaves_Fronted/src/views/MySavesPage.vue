@@ -2,10 +2,22 @@
   <div class="my-saves-page">
     <div class="page-header">
       <h1 class="page-title">我的存档</h1>
-      <el-button type="primary" size="large" @click="$router.push('/upload')">
-        <el-icon><Upload /></el-icon>
-        上传新存档
-      </el-button>
+      <div class="page-header-right">
+        <el-radio-group v-model="viewMode" size="small">
+          <el-radio-button value="list">
+            <el-icon><List /></el-icon>
+            列表
+          </el-radio-button>
+          <el-radio-button value="gallery">
+            <el-icon><Grid /></el-icon>
+            画廊
+          </el-radio-button>
+        </el-radio-group>
+        <el-button type="primary" size="large" @click="$router.push('/upload')">
+          <el-icon><Upload /></el-icon>
+          上传新存档
+        </el-button>
+      </div>
     </div>
 
     <div class="page-divider" />
@@ -13,19 +25,21 @@
     <!-- 加载中 -->
     <LoadingSkeleton v-if="articleStore.loading" :rows="8" />
 
-    <!-- 存档列表 -->
+    <!-- 存档内容 -->
     <template v-else>
       <div v-if="articleStore.articleList.length > 0">
-        <table class="data-table saves-table">
+        <!-- 列表视图 -->
+        <table v-if="viewMode === 'list'" class="data-table saves-table">
           <thead>
             <tr>
-              <th style="width: 25%">标题</th>
-              <th style="width: 12%">游戏</th>
-              <th style="width: 12%">版本</th>
-              <th style="width: 8%">状态</th>
-              <th style="width: 8%">大小</th>
-              <th style="width: 8%">下载</th>
-              <th style="width: 12%">时间</th>
+              <th class="th-cover"></th>
+              <th style="width: 23%">标题</th>
+              <th style="width: 11%">游戏</th>
+              <th style="width: 10%">版本</th>
+              <th style="width: 7%">状态</th>
+              <th style="width: 7%">大小</th>
+              <th style="width: 7%">下载</th>
+              <th style="width: 14%">时间</th>
               <th style="width: 15%">操作</th>
             </tr>
           </thead>
@@ -35,6 +49,21 @@
               :key="article.id"
               class="saves-row"
             >
+              <td class="col-cover">
+                <router-link :to="`/articles/${article.id}`" class="cover-link">
+                  <div class="cover-thumb">
+                    <img
+                      v-if="article.coverImage"
+                      :src="thumbUrl(article.coverImage, 270)"
+                      :alt="article.title"
+                      class="cover-thumb-img"
+                      loading="lazy"
+                      @error="e => e.target.style.display = 'none'"
+                    />
+                    <el-icon v-else :size="20"><FolderOpened /></el-icon>
+                  </div>
+                </router-link>
+              </td>
               <td>
                 <router-link :to="`/articles/${article.id}`" class="saves-title">
                   {{ article.title }}
@@ -84,6 +113,15 @@
           </tbody>
         </table>
 
+        <!-- 画廊视图 -->
+        <div v-else class="gallery-grid">
+          <ArticleCard
+            v-for="article in articleStore.articleList"
+            :key="article.id"
+            :article="article"
+          />
+        </div>
+
         <!-- 分页 -->
         <div class="pagination-wrap">
           <el-pagination
@@ -130,12 +168,16 @@ import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useArticleStore } from '../stores/articles'
 import { useAuthStore } from '../stores/auth'
+import { useViewMode } from '../composables/useViewMode'
 import { articleApi } from '../api/articleApi'
 import EmptyState from '../components/common/EmptyState.vue'
 import LoadingSkeleton from '../components/common/LoadingSkeleton.vue'
+import ArticleCard from '../components/article/ArticleCard.vue'
+import { thumbUrl } from '../utils/imageUrl'
 
 const articleStore = useArticleStore()
 const auth = useAuthStore()
+const { viewMode } = useViewMode()
 
 const currentPage = ref(1)
 const showEditDialog = ref(false)
@@ -240,6 +282,12 @@ onMounted(() => {
   margin-bottom: var(--spacing-md);
 }
 
+.page-header-right {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+}
+
 .page-title {
   font-size: var(--font-size-title);
   font-weight: 600;
@@ -257,6 +305,38 @@ onMounted(() => {
 
 .saves-row td {
   vertical-align: middle;
+}
+
+/* ---- 封面缩略图 ---- */
+.th-cover { width: 48px; }
+
+.col-cover {
+  padding: var(--spacing-xs) var(--spacing-sm) !important;
+}
+
+.cover-link {
+  display: flex;
+  justify-content: center;
+}
+
+.cover-thumb {
+  width: 36px;
+  height: 36px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--color-bg-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-secondary-text);
+  flex-shrink: 0;
+}
+
+.cover-thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .saves-title {
@@ -292,6 +372,21 @@ onMounted(() => {
 .col-actions {
   text-align: right;
   white-space: nowrap;
+}
+
+/* ---- 画廊网格 ---- */
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--spacing-lg);
+  margin-bottom: var(--spacing-lg);
+}
+
+@media (max-width: 640px) {
+  .gallery-grid {
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: var(--spacing-md);
+  }
 }
 
 .pagination-wrap {

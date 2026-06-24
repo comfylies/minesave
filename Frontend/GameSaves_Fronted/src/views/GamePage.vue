@@ -26,15 +26,35 @@
 
       <div class="game-divider" />
 
+      <!-- 视图切换工具栏 -->
+      <div class="view-toolbar">
+        <el-radio-group v-model="viewMode" size="small">
+          <el-radio-button value="list">
+            <el-icon><List /></el-icon>
+            列表
+          </el-radio-button>
+          <el-radio-button value="gallery">
+            <el-icon><Grid /></el-icon>
+            画廊
+          </el-radio-button>
+        </el-radio-group>
+        <el-button v-if="auth.isLoggedIn" type="primary" size="small" @click="$router.push('/upload')">
+          <el-icon><Upload /></el-icon>
+          上传存档
+        </el-button>
+      </div>
+
       <!-- 存档列表加载 -->
       <LoadingSkeleton v-if="articleStore.loading" :rows="8" />
 
-      <!-- 存档列表 -->
+      <!-- 存档内容 -->
       <template v-else>
         <div v-if="articleStore.articleList.length > 0">
-          <table class="data-table article-table">
+          <!-- 列表视图 -->
+          <table v-if="viewMode === 'list'" class="data-table article-table">
             <thead>
               <tr>
+                <th class="th-cover"></th>
                 <th class="th-title">标题</th>
                 <th class="th-tags">标签</th>
                 <th class="th-version">版本</th>
@@ -51,6 +71,19 @@
                 class="article-row"
                 @click="$router.push(`/articles/${article.id}`)"
               >
+                <td class="col-cover">
+                  <div class="cover-thumb">
+                    <img
+                      v-if="article.coverImage"
+                      :src="thumbUrl(article.coverImage, 270)"
+                      :alt="article.title"
+                      class="cover-thumb-img"
+                      loading="lazy"
+                      @error="e => e.target.style.display = 'none'"
+                    />
+                    <el-icon v-else :size="20"><FolderOpened /></el-icon>
+                  </div>
+                </td>
                 <td class="col-title">
                   <span class="article-title-link" :title="article.title">{{ article.title }}</span>
                   <span class="article-desc" :title="article.description">{{ truncate(article.description, 60) }}</span>
@@ -75,6 +108,15 @@
               </tr>
             </tbody>
           </table>
+
+          <!-- 画廊视图 -->
+          <div v-else class="gallery-grid">
+            <ArticleCard
+              v-for="article in articleStore.articleList"
+              :key="article.id"
+              :article="article"
+            />
+          </div>
 
           <!-- 分页 -->
           <div class="pagination-wrap">
@@ -106,14 +148,18 @@ import { useRoute } from 'vue-router'
 import { useGameStore } from '../stores/games'
 import { useArticleStore } from '../stores/articles'
 import { useAuthStore } from '../stores/auth'
+import { useViewMode } from '../composables/useViewMode'
 import EmptyState from '../components/common/EmptyState.vue'
 import LoadingSkeleton from '../components/common/LoadingSkeleton.vue'
 import TagDisplay from '../components/tag/TagDisplay.vue'
+import ArticleCard from '../components/article/ArticleCard.vue'
+import { thumbUrl } from '../utils/imageUrl'
 
 const route = useRoute()
 const gameStore = useGameStore()
 const articleStore = useArticleStore()
 const auth = useAuthStore()
+const { viewMode } = useViewMode()
 
 const gameId = ref(Number(route.params.gameId) || 0)
 const currentPage = ref(1)
@@ -205,6 +251,14 @@ watch(() => route.params.gameId, (newId) => {
   padding: var(--spacing-xxl) 0;
 }
 
+/* ---- 视图切换工具栏 ---- */
+.view-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--spacing-md);
+}
+
 /* ---- 表格 ---- */
 .article-table {
   table-layout: fixed;
@@ -213,13 +267,14 @@ watch(() => route.params.gameId, (newId) => {
 }
 
 /* Column widths */
-.th-title  { width: 30%; }
-.th-tags   { width: 14%; }
-.th-version { width: 12%; }
-.th-author { width: 12%; }
+.th-cover  { width: 48px; }
+.th-title  { width: 28%; }
+.th-tags   { width: 13%; }
+.th-version { width: 11%; }
+.th-author { width: 11%; }
 .th-size   { width: 8%; }
 .th-dl     { width: 8%; }
-.th-time   { width: 16%; }
+.th-time   { width: 14%; }
 
 /* Unified center alignment */
 .article-table th,
@@ -238,12 +293,39 @@ watch(() => route.params.gameId, (newId) => {
 }
 
 /* Title column — left-align for readability */
-.article-table th:first-child,
+.article-table th:nth-child(2),
 .article-table .col-title {
   text-align: left;
   white-space: normal;
 }
 
+/* ---- 封面缩略图 ---- */
+.col-cover {
+  padding: var(--spacing-xs) var(--spacing-sm) !important;
+}
+
+.cover-thumb {
+  width: 36px;
+  height: 36px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--color-bg-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-secondary-text);
+  flex-shrink: 0;
+  margin: 0 auto;
+}
+
+.cover-thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* ---- 标题 ---- */
 .article-title-link {
   display: block;
   font-weight: 600;
@@ -295,6 +377,21 @@ watch(() => route.params.gameId, (newId) => {
 .col-time {
   font-size: var(--font-size-small);
   color: var(--color-secondary-text);
+}
+
+/* ---- 画廊网格 ---- */
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--spacing-lg);
+  margin-bottom: var(--spacing-lg);
+}
+
+@media (max-width: 640px) {
+  .gallery-grid {
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: var(--spacing-md);
+  }
 }
 
 /* ---- 分页 ---- */

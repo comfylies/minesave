@@ -101,6 +101,7 @@ CREATE TABLE article (
     status          VARCHAR(20)     NOT NULL DEFAULT 'UPLOADING'
                                     COMMENT '处理状态: UPLOADING(上传中), EXTRACTING(解压中), READY(就绪), FAILED(失败)',
     error_message   VARCHAR(1000)   DEFAULT NULL             COMMENT '处理失败时的错误详情',
+    cover_image     VARCHAR(500)    DEFAULT NULL             COMMENT '封面图相对路径，如 /storage/1/2/42/cover.png',
     created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '上传/创建时间',
     updated_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',
     PRIMARY KEY (id),

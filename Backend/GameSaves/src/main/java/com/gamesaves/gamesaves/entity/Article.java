@@ -72,6 +72,9 @@ public class Article {
     @Column(name = "error_message", length = 1000)
     private String errorMessage;
 
+    @Column(name = "cover_image", length = 500)
+    private String coverImage;
+
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(name = "article_tags",
             joinColumns = @JoinColumn(name = "article_id"),

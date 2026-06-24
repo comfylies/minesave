@@ -65,6 +65,30 @@
           <div class="tag-hint">选择标签或输入新标签名创建</div>
         </el-form-item>
 
+        <!-- 封面图 -->
+        <el-form-item label="封面图（可选）">
+          <el-upload
+            ref="coverUploadRef"
+            :auto-upload="false"
+            :limit="1"
+            accept="image/png,image/jpeg,image/gif,image/webp"
+            :on-change="handleCoverChange"
+            :on-remove="handleCoverRemove"
+            :file-list="coverFileList"
+            list-type="picture"
+          >
+            <el-button type="default" :disabled="uploading">
+              <el-icon><Picture /></el-icon>
+              选择封面图
+            </el-button>
+            <template #tip>
+              <div class="el-upload__tip">
+                支持 PNG/JPG/GIF/WebP，建议 16:9。不上传则显示默认占位图。
+              </div>
+            </template>
+          </el-upload>
+        </el-form-item>
+
         <!-- README（Markdown） -->
         <el-form-item label="README（Markdown）">
           <div class="readme-inputs">
@@ -187,6 +211,11 @@ const readmeUploadRef = ref(null)
 const selectedReadmeFile = ref(null)
 const readmeFileList = ref([])
 
+// 封面图
+const coverUploadRef = ref(null)
+const selectedCoverFile = ref(null)
+const coverFileList = ref([])
+
 // 处理状态
 const processingStatus = ref('')
 const processingType = ref('info')
@@ -246,6 +275,18 @@ function handleReadmeFileChange(file) {
 function handleReadmeFileRemove() {
   selectedReadmeFile.value = null
   readmeFileList.value = []
+}
+
+function handleCoverChange(file) {
+  const rawFile = file.raw
+  if (rawFile) {
+    selectedCoverFile.value = rawFile
+  }
+}
+
+function handleCoverRemove() {
+  selectedCoverFile.value = null
+  coverFileList.value = []
 }
 
 function updateProcessing(status, errorMessage) {
@@ -355,6 +396,11 @@ async function handleUpload() {
     // 上传 .md 文件模式 → 附加 readmeFile
     if (readmeMode.value === 'upload' && selectedReadmeFile.value) {
       formData.append('readmeFile', selectedReadmeFile.value)
+    }
+
+    // 附加封面图
+    if (selectedCoverFile.value) {
+      formData.append('coverFile', selectedCoverFile.value)
     }
 
     const article = await articleApi.create(formData)

@@ -21,6 +21,7 @@ import com.gamesaves.gamesaves.repository.UserRepository;
 import com.gamesaves.gamesaves.service.ArticleService;
 import com.gamesaves.gamesaves.service.SearchSyncService;
 import com.gamesaves.gamesaves.service.ZipExtractionService;
+import com.gamesaves.gamesaves.util.ImageThumbnailService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -83,7 +84,7 @@ public class ArticleServiceImpl implements ArticleService {
 
     @Override
     public ArticleDetailResponse createArticle(ArticleCreateRequest request, MultipartFile file,
-                                                MultipartFile readmeFile) {
+                                                MultipartFile readmeFile, MultipartFile coverFile) {
         // Validate
         Game game = gameRepository.findById(request.getGameId())
                 .orElseThrow(() -> new ResourceNotFoundException("Game", request.getGameId()));
@@ -155,6 +156,29 @@ public class ArticleServiceImpl implements ArticleService {
 
             article.setFileSize(Files.size(zipPath));
             article = articleRepository.save(article);
+
+            // Save cover image if provided
+            if (coverFile != null && !coverFile.isEmpty()) {
+                try {
+                    String coverExt = validateAndGetImageExtension(coverFile);
+                    String coverFilename = "cover." + coverExt;
+                    Path coverPath = storageDir.resolve(coverFilename);
+                    coverFile.transferTo(coverPath.toFile());
+                    article.setCoverImage("/storage/"
+                            + user.getId() + "/" + game.getId() + "/"
+                            + article.getId() + "/" + coverFilename);
+                    article = articleRepository.save(article);
+
+                    // Generate thumbnails: 270, 360, 720 width, center-cropped to 16:9
+                    ImageThumbnailService.generateCoverThumbnails(coverPath, storageDir);
+                    log.info("Cover image & thumbnails saved for article {}: {}", article.getId(), coverFilename);
+                } catch (BadRequestException e) {
+                    throw e;
+                } catch (IOException e) {
+                    log.error("Failed to save cover image for article {}: {}", article.getId(), e.toString());
+                    throw new FileProcessingException("Failed to save cover image: " + e.getMessage(), e);
+                }
+            }
 
             log.info("Article {} created, ZIP saved to {}", article.getId(), zipPath);
 
@@ -271,6 +295,54 @@ public class ArticleServiceImpl implements ArticleService {
                 .collect(Collectors.toList());
 
         return PageDTO.of(content, page, size, total);
+    }
+
+    /**
+     * Validate cover image by magic bytes and return the file extension.
+     * Accepts PNG, JPEG, GIF, WebP. Throws BadRequestException for invalid images.
+     */
+    private String validateAndGetImageExtension(MultipartFile file) {
+        try {
+            byte[] header = new byte[12];
+            int read;
+            try (var in = file.getInputStream()) {
+                read = in.read(header);
+            }
+            if (read < 4) {
+                throw new BadRequestException("Cover image file is too small");
+            }
+
+            // PNG: 89 50 4E 47
+            if (header[0] == (byte) 0x89 && header[1] == (byte) 0x50
+                    && header[2] == (byte) 0x4E && header[3] == (byte) 0x47) {
+                return "png";
+            }
+            // JPEG: FF D8 FF
+            if (header[0] == (byte) 0xFF && header[1] == (byte) 0xD8
+                    && header[2] == (byte) 0xFF) {
+                return "jpg";
+            }
+            // GIF: 47 49 46 38 (GIF8)
+            if (header[0] == (byte) 0x47 && header[1] == (byte) 0x49
+                    && header[2] == (byte) 0x46 && header[3] == (byte) 0x38) {
+                return "gif";
+            }
+            // WebP: 52 49 46 46 ... 57 45 42 50 (RIFF....WEBP)
+            if (header[0] == (byte) 0x52 && header[1] == (byte) 0x49
+                    && header[2] == (byte) 0x46 && header[3] == (byte) 0x46
+                    && read >= 12
+                    && header[8] == (byte) 0x57 && header[9] == (byte) 0x45
+                    && header[10] == (byte) 0x42 && header[11] == (byte) 0x50) {
+                return "webp";
+            }
+
+            throw new BadRequestException(
+                    "Unsupported cover image format. Accepted: PNG, JPEG, GIF, WebP");
+        } catch (BadRequestException e) {
+            throw e;
+        } catch (IOException e) {
+            throw new BadRequestException("Failed to read cover image: " + e.getMessage());
+        }
     }
 
     private void deleteRecursively(Path path) throws IOException {

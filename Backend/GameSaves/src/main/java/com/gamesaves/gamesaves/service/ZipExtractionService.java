@@ -7,6 +7,7 @@ import com.gamesaves.gamesaves.exception.ExtractionTimeoutException;
 import com.gamesaves.gamesaves.repository.ArticleRepository;
 import com.gamesaves.gamesaves.repository.SavingItemRepository;
 import com.gamesaves.gamesaves.repository.SavingsRepository;
+import com.gamesaves.gamesaves.util.ImageThumbnailService;
 import com.gamesaves.gamesaves.util.MarkdownRenderer;
 import com.gamesaves.gamesaves.util.ZipExtractor;
 import org.slf4j.Logger;
@@ -141,6 +142,14 @@ public class ZipExtractionService {
                 Path imgPath = readmeImagesDir.resolve(img.getRelativePath());
                 Files.createDirectories(imgPath.getParent());
                 Files.write(imgPath, img.getData());
+
+                // Generate 720-wide proportional thumbnail for README images
+                try {
+                    ImageThumbnailService.generateReadmeThumbnail(imgPath);
+                } catch (Exception e) {
+                    log.warn("Failed to generate README thumbnail for {}: {}",
+                            img.getRelativePath(), e.getMessage());
+                }
             }
             log.info("Extracted {} readme images to {}", result.getReadmeImages().size(), readmeImagesDir);
         }

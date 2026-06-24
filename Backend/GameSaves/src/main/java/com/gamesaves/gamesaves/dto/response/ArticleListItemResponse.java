@@ -18,12 +18,15 @@ public class ArticleListItemResponse {
     private Long id;
     private String title;
     private String version;
+    private Long gameId;
     private String gameName;
+    private Long userId;
     private String nickname;
     private String description;
     private Long fileSize;
     private Integer downloadCount;
     private String status;
+    private String coverImage;
     private List<String> tagNames;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
@@ -39,11 +42,14 @@ public class ArticleListItemResponse {
                 .id(article.getId())
                 .title(article.getTitle())
                 .version(article.getVersion())
+                .gameId(article.getGame() != null ? article.getGame().getId() : null)
                 .gameName(article.getGame() != null ? article.getGame().getName() : null)
+                .userId(article.getUser() != null ? article.getUser().getId() : null)
                 .nickname(article.getUser() != null ? article.getUser().getNickname() : null)
                 .description(article.getDescription())
                 .fileSize(article.getFileSize())
                 .downloadCount(article.getDownloadCount())
+                .coverImage(article.getCoverImage())
                 .status(article.getStatus().name())
                 .tagNames(tagNameList)
                 .createdAt(article.getCreatedAt())

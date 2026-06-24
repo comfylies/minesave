@@ -16,4 +16,5 @@ public class DashboardStatsResponse {
     private long gameCount;
     private long commentCount;
     private long downloadCount;
+    private long imageStorageBytes;
 }

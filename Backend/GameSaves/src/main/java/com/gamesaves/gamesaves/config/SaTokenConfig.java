@@ -52,8 +52,11 @@ public class SaTokenConfig implements WebMvcConfigurer {
                         .match("/api/files/**", r -> refreshIfLogin()).stop()
                         // 批注：GET 公开（stop），POST/DELETE 需登录走下一级 checkLogin
                         .matchMethod("GET").match("/api/comments/**", r -> refreshIfLogin()).stop()
-                        // 其他 /api/** 需要登录
-                        .match("/api/**", r -> StpUtil.checkLogin());
+                        // 其他 /api/** 需要登录，并刷新活跃时间
+                        .match("/api/**", r -> {
+                            refreshIfLogin();
+                            StpUtil.checkLogin();
+                        });
                 }))
                 .addPathPatterns("/api/**")
                 .excludePathPatterns("/storage/**");

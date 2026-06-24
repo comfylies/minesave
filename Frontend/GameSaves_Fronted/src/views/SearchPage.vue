@@ -11,9 +11,21 @@
           @keyup.enter="doSearch"
         />
       </div>
-      <span v-if="totalHits >= 0" class="search-stats">
-        约 {{ totalHits }} 条结果
-      </span>
+      <div class="search-header-row">
+        <span v-if="totalHits >= 0" class="search-stats">
+          约 {{ totalHits }} 条结果
+        </span>
+        <el-radio-group v-if="articleHits.length > 0 && totalHits >= 0" v-model="viewMode" size="small">
+          <el-radio-button value="list">
+            <el-icon><List /></el-icon>
+            列表
+          </el-radio-button>
+          <el-radio-button value="gallery">
+            <el-icon><Grid /></el-icon>
+            画廊
+          </el-radio-button>
+        </el-radio-group>
+      </div>
     </div>
 
     <!-- 搜索结果 -->
@@ -34,7 +46,7 @@
     </div>
 
     <div v-else class="search-results">
-      <!-- 游戏结果 -->
+      <!-- 游戏结果 — 始终使用紧凑卡片 -->
       <div v-if="gameHits.length > 0" class="result-section">
         <h3 class="section-title">🎮 游戏</h3>
         <div
@@ -56,29 +68,42 @@
       <!-- 存档结果 -->
       <div v-if="articleHits.length > 0" class="result-section">
         <h3 class="section-title">📦 存档</h3>
-        <div
-          v-for="hit in articleHits"
-          :key="hit.id"
-          class="result-card card"
-          @click="$router.push(`/articles/${hit.id}`)"
-        >
-          <div class="result-main">
-            <h4 class="result-title" v-html="highlightOr(hit, 'title', hit.title)"></h4>
-            <p class="result-desc" v-html="highlightOr(hit, 'description', hit.description)"></p>
-            <div class="result-tags">
-              <span class="result-game">{{ hit.gameName }}</span>
-              <el-tag
-                v-for="tag in hit.tags"
-                :key="tag"
-                size="small"
-                type="info"
-                class="tag-chip"
-              >{{ tag }}</el-tag>
+
+        <!-- 列表视图 -->
+        <template v-if="viewMode === 'list'">
+          <div
+            v-for="hit in articleHits"
+            :key="hit.id"
+            class="result-card card"
+            @click="$router.push(`/articles/${hit.id}`)"
+          >
+            <div class="result-main">
+              <h4 class="result-title" v-html="highlightOr(hit, 'title', hit.title)"></h4>
+              <p class="result-desc" v-html="highlightOr(hit, 'description', hit.description)"></p>
+              <div class="result-tags">
+                <span class="result-game">{{ hit.gameName }}</span>
+                <el-tag
+                  v-for="tag in hit.tags"
+                  :key="tag"
+                  size="small"
+                  type="info"
+                  class="tag-chip"
+                >{{ tag }}</el-tag>
+              </div>
+            </div>
+            <div class="result-meta">
+              <span class="meta-badge">下载 {{ hit.downloadCount }}</span>
             </div>
           </div>
-          <div class="result-meta">
-            <span class="meta-badge">下载 {{ hit.downloadCount }}</span>
-          </div>
+        </template>
+
+        <!-- 画廊视图 — 使用 ArticleCard（搜索结果的 coverImage 字段需后端提供） -->
+        <div v-else class="gallery-grid">
+          <ArticleCard
+            v-for="hit in articleHits"
+            :key="hit.id"
+            :article="hit"
+          />
         </div>
       </div>
 
@@ -94,11 +119,14 @@
 import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { searchApi } from '../api/searchApi'
+import { useViewMode } from '../composables/useViewMode'
 import LoadingSkeleton from '../components/common/LoadingSkeleton.vue'
 import EmptyState from '../components/common/EmptyState.vue'
+import ArticleCard from '../components/article/ArticleCard.vue'
 
 const route = useRoute()
 const router = useRouter()
+const { viewMode } = useViewMode()
 
 const query = ref(route.query.q || '')
 const hits = ref([])
@@ -185,6 +213,14 @@ watch(() => route.query.q, (newQ) => {
 .search-input-wrap {
   position: relative;
   margin-bottom: 8px;
+}
+
+.search-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
 }
 
 .search-icon-big {
@@ -308,6 +344,20 @@ watch(() => route.query.q, (newQ) => {
   font-size: var(--font-size-small);
   color: var(--color-secondary-text);
   white-space: nowrap;
+}
+
+/* ---- 画廊网格 ---- */
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--spacing-lg);
+}
+
+@media (max-width: 640px) {
+  .gallery-grid {
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: var(--spacing-md);
+  }
 }
 
 /* ---- 加载更多 ---- */

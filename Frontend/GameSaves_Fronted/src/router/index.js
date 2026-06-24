@@ -6,7 +6,7 @@ const routes = [
     component: () => import('../layouts/DefaultLayout.vue'),
     children: [
       { path: '', name: 'Home', component: () => import('../views/HomePage.vue') },
-      { path: 'games/:gameId', name: 'Game', component: () => import('../views/GamePage.vue') },
+      { path: 'games/:gameId', name: 'Game', component: () => import('../views/GamePage.vue'), meta: { wide: true } },
       { path: 'articles/:articleId', name: 'Article', component: () => import('../views/ArticlePage.vue') },
       { path: 'my-saves', name: 'MySaves', component: () => import('../views/MySavesPage.vue'), meta: { requiresAuth: true } },
       { path: 'users/:userId', name: 'UserProfile', component: () => import('../views/UserProfilePage.vue') },
@@ -28,7 +28,7 @@ const routes = [
     path: '/search',
     component: () => import('../layouts/DefaultLayout.vue'),
     children: [
-      { path: '', name: 'Search', component: () => import('../views/SearchPage.vue') }
+      { path: '', name: 'Search', component: () => import('../views/SearchPage.vue'), meta: { wide: true } }
     ]
   },
   // 管理后台路由

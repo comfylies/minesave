@@ -37,8 +37,11 @@
             <el-descriptions-item label="评论总数">
               {{ stats.commentCount }}
             </el-descriptions-item>
-            <el-descriptions-item label="下载总次数" :span="2">
+            <el-descriptions-item label="下载总次数">
               {{ stats.downloadCount }}
+            </el-descriptions-item>
+            <el-descriptions-item label="图片存储空间">
+              {{ formatStorage(stats.imageStorageBytes) }}
             </el-descriptions-item>
           </el-descriptions>
         </el-card>
@@ -51,7 +54,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { adminApi } from '../../api/adminApi'
 import {
-  User, Document, Monitor, ChatLineSquare, Download
+  User, Document, Monitor, ChatLineSquare, PictureFilled
 } from '@element-plus/icons-vue'
 
 const stats = ref({
@@ -59,14 +62,25 @@ const stats = ref({
   articleCount: 0,
   gameCount: 0,
   commentCount: 0,
-  downloadCount: 0
+  downloadCount: 0,
+  imageStorageBytes: 0
 })
+
+function formatStorage(bytes) {
+  if (!bytes || bytes === 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  let i = 0
+  let size = bytes
+  while (size >= 1024 && i < units.length - 1) { size /= 1024; i++ }
+  return size.toFixed(i === 0 ? 0 : 1) + ' ' + units[i]
+}
 
 const statCards = computed(() => [
   { label: '用户数', value: stats.value.userCount, icon: User, color: '#409EFF' },
   { label: '文章数', value: stats.value.articleCount, icon: Document, color: '#67C23A' },
   { label: '游戏数', value: stats.value.gameCount, icon: Monitor, color: '#E6A23C' },
-  { label: '评论数', value: stats.value.commentCount, icon: ChatLineSquare, color: '#F56C6C' }
+  { label: '评论数', value: stats.value.commentCount, icon: ChatLineSquare, color: '#F56C6C' },
+  { label: '图片存储', value: formatStorage(stats.value.imageStorageBytes), icon: PictureFilled, color: '#8B5CF6' }
 ])
 
 onMounted(async () => {

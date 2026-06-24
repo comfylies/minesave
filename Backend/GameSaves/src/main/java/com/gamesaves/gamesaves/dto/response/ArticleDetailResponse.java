@@ -32,6 +32,7 @@ public class ArticleDetailResponse {
     private Integer downloadCount;
     private String status;
     private String errorMessage;
+    private String coverImage;
     private List<TagResponse> tags;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
@@ -65,6 +66,7 @@ public class ArticleDetailResponse {
                 .downloadCount(article.getDownloadCount())
                 .status(article.getStatus().name())
                 .errorMessage(article.getErrorMessage())
+                .coverImage(article.getCoverImage())
                 .tags(tagList)
                 .createdAt(article.getCreatedAt())
                 .updatedAt(article.getUpdatedAt())

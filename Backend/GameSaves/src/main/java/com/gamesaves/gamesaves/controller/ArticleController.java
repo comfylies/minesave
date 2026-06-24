@@ -27,8 +27,9 @@ public class ArticleController {
     public ApiResponse<ArticleDetailResponse> createArticle(
             @Valid @RequestPart("metadata") ArticleCreateRequest request,
             @RequestPart("file") MultipartFile file,
-            @RequestPart(value = "readmeFile", required = false) MultipartFile readmeFile) {
-        ArticleDetailResponse article = articleService.createArticle(request, file, readmeFile);
+            @RequestPart(value = "readmeFile", required = false) MultipartFile readmeFile,
+            @RequestPart(value = "coverFile", required = false) MultipartFile coverFile) {
+        ArticleDetailResponse article = articleService.createArticle(request, file, readmeFile, coverFile);
         return ApiResponse.success("Article created, extraction started", article);
     }
 

@@ -31,21 +31,35 @@
       <div class="profile-divider" />
 
       <!-- 用户存档列表 -->
-      <h2 class="section-title">{{ user.nickname || user.username }} 的存档</h2>
+      <div class="section-header">
+        <h2 class="section-title">{{ user.nickname || user.username }} 的存档</h2>
+        <el-radio-group v-model="viewMode" size="small">
+          <el-radio-button value="list">
+            <el-icon><List /></el-icon>
+            列表
+          </el-radio-button>
+          <el-radio-button value="gallery">
+            <el-icon><Grid /></el-icon>
+            画廊
+          </el-radio-button>
+        </el-radio-group>
+      </div>
 
       <LoadingSkeleton v-if="articleStore.loading" :rows="8" />
 
       <template v-else>
         <div v-if="articleStore.articleList.length > 0">
-          <table class="data-table article-table">
+          <!-- 列表视图 -->
+          <table v-if="viewMode === 'list'" class="data-table article-table">
             <thead>
               <tr>
-                <th style="width: 40%">标题</th>
+                <th class="th-cover"></th>
+                <th style="width: 36%">标题</th>
                 <th style="width: 15%">游戏</th>
-                <th style="width: 15%">版本</th>
-                <th style="width: 10%">大小</th>
-                <th style="width: 10%">下载</th>
-                <th style="width: 10%">时间</th>
+                <th style="width: 10%">版本</th>
+                <th style="width: 8%">大小</th>
+                <th style="width: 8%">下载</th>
+                <th style="width: 18%">时间</th>
               </tr>
             </thead>
             <tbody>
@@ -55,6 +69,19 @@
                 class="article-row"
                 @click="$router.push(`/articles/${article.id}`)"
               >
+                <td class="col-cover">
+                  <div class="cover-thumb">
+                    <img
+                      v-if="article.coverImage"
+                      :src="thumbUrl(article.coverImage, 270)"
+                      :alt="article.title"
+                      class="cover-thumb-img"
+                      loading="lazy"
+                      @error="e => e.target.style.display = 'none'"
+                    />
+                    <el-icon v-else :size="20"><FolderOpened /></el-icon>
+                  </div>
+                </td>
                 <td>
                   <span class="article-title-link">{{ article.title }}</span>
                 </td>
@@ -76,6 +103,16 @@
               </tr>
             </tbody>
           </table>
+
+          <!-- 画廊视图 -->
+          <div v-else class="gallery-grid">
+            <ArticleCard
+              v-for="article in articleStore.articleList"
+              :key="article.id"
+              :article="article"
+            />
+          </div>
+
           <div class="pagination-wrap">
             <el-pagination
               v-model:current-page="currentPage"
@@ -101,12 +138,16 @@ import { useRoute } from 'vue-router'
 import { userApi } from '../api/userApi'
 import { useArticleStore } from '../stores/articles'
 import { useAuthStore } from '../stores/auth'
+import { useViewMode } from '../composables/useViewMode'
 import EmptyState from '../components/common/EmptyState.vue'
 import LoadingSkeleton from '../components/common/LoadingSkeleton.vue'
+import ArticleCard from '../components/article/ArticleCard.vue'
+import { thumbUrl } from '../utils/imageUrl'
 
 const route = useRoute()
 const articleStore = useArticleStore()
 const auth = useAuthStore()
+const { viewMode } = useViewMode()
 
 const user = ref(null)
 const loadingUser = ref(false)
@@ -244,10 +285,17 @@ watch(() => route.params.userId, () => {
 }
 
 /* ---- 存档列表 ---- */
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--spacing-md);
+}
+
 .section-title {
   font-size: var(--font-size-xlarge);
   font-weight: 600;
-  margin-bottom: var(--spacing-md);
+  margin: 0;
 }
 
 .article-table {
@@ -256,6 +304,34 @@ watch(() => route.params.userId, () => {
 
 .article-row {
   cursor: pointer;
+}
+
+/* ---- 封面缩略图 ---- */
+.th-cover { width: 48px; }
+
+.col-cover {
+  padding: var(--spacing-xs) var(--spacing-sm) !important;
+}
+
+.cover-thumb {
+  width: 36px;
+  height: 36px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--color-bg-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-secondary-text);
+  flex-shrink: 0;
+  margin: 0 auto;
+}
+
+.cover-thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .article-title-link {
@@ -286,6 +362,21 @@ watch(() => route.params.userId, () => {
 
 .col-time {
   text-align: right;
+}
+
+/* ---- 画廊网格 ---- */
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--spacing-lg);
+  margin-bottom: var(--spacing-lg);
+}
+
+@media (max-width: 640px) {
+  .gallery-grid {
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: var(--spacing-md);
+  }
 }
 
 .pagination-wrap {
