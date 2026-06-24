@@ -9,6 +9,7 @@ import com.gamesaves.gamesaves.dto.response.*;
 import com.gamesaves.gamesaves.exception.BadRequestException;
 import com.gamesaves.gamesaves.service.AdminService;
 import com.gamesaves.gamesaves.service.AnnouncementService;
+import com.gamesaves.gamesaves.service.CleanupScheduler;
 import com.gamesaves.gamesaves.service.SafePathService;
 import com.gamesaves.gamesaves.service.SearchSyncService;
 import com.gamesaves.gamesaves.service.TagService;
@@ -38,18 +39,21 @@ public class AdminController {
     private final TagService tagService;
     private final SearchSyncService searchSyncService;
     private final SafePathService safePathService;
+    private final CleanupScheduler cleanupScheduler;
 
     @Value("${app.storage.database-path:../../Database}")
     private String databasePath;
 
     public AdminController(AdminService adminService, AnnouncementService announcementService,
                            TagService tagService, SearchSyncService searchSyncService,
-                           SafePathService safePathService) {
+                           SafePathService safePathService,
+                           CleanupScheduler cleanupScheduler) {
         this.adminService = adminService;
         this.announcementService = announcementService;
         this.tagService = tagService;
         this.searchSyncService = searchSyncService;
         this.safePathService = safePathService;
+        this.cleanupScheduler = cleanupScheduler;
     }
 
     @GetMapping("/dashboard")
@@ -299,5 +303,50 @@ public class AdminController {
         } catch (IOException e) {
             throw new BadRequestException("文件上传失败: " + e.getMessage());
         }
+    }
+
+    // ==================== 失败存档清理 ====================
+
+    private volatile long lastManualTriggerTime = 0;
+
+    /** 手动触发清理 */
+    @PostMapping("/cleanup/trigger")
+    @SaCheckPermission("user:manage")
+    public ApiResponse<Map<String, Object>> triggerCleanup(
+            @RequestParam(defaultValue = "all") String mode) {
+
+        // Rate limit: 60s between manual triggers
+        long now = System.currentTimeMillis();
+        long elapsed = now - lastManualTriggerTime;
+        if (elapsed < 60_000) {
+            throw new BadRequestException("清理间隔需大于 60 秒，请 " + (60 - elapsed / 1000) + " 秒后再试");
+        }
+        lastManualTriggerTime = now;
+
+        if (!mode.equals("all") && !mode.equals("failed-only")) {
+            throw new BadRequestException("无效的清理模式，仅支持 all 或 failed-only");
+        }
+
+        CleanupScheduler.CleanupProgress progress = cleanupScheduler.cleanup(mode);
+        return ApiResponse.success("清理完成", Map.of(
+                "mode", mode,
+                "batchesCompleted", progress.batchesCompleted(),
+                "totalDeleted", progress.totalDeleted(),
+                "durationMs", progress.durationMs()
+        ));
+    }
+
+    /** 查询清理进度 */
+    @GetMapping("/cleanup/status")
+    @SaCheckPermission("user:manage")
+    public ApiResponse<Map<String, Object>> cleanupStatus() {
+        CleanupScheduler.CleanupProgress progress = cleanupScheduler.getStatus();
+        return ApiResponse.success(Map.of(
+                "completed", progress.completed(),
+                "batchesCompleted", progress.batchesCompleted(),
+                "totalDeleted", progress.totalDeleted(),
+                "estimatedRemaining", progress.estimatedRemaining(),
+                "durationMs", progress.durationMs()
+        ));
     }
 }

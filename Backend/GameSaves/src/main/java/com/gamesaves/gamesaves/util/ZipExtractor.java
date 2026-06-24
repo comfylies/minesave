@@ -2,6 +2,7 @@ package com.gamesaves.gamesaves.util;
 
 import com.gamesaves.gamesaves.entity.SavingItem;
 import com.gamesaves.gamesaves.exception.FileProcessingException;
+import com.gamesaves.gamesaves.exception.MagicNumberViolationException;
 import com.gamesaves.gamesaves.exception.PathTraversalException;
 import lombok.Builder;
 import lombok.Data;
@@ -32,11 +33,14 @@ public class ZipExtractor {
     private final Path zipPath;
     private final Path extractRoot;
     private final Long snapshotId;
+    private final MagicNumberValidator magicNumberValidator;
 
-    public ZipExtractor(Path zipPath, Path extractRoot, Long snapshotId) {
+    public ZipExtractor(Path zipPath, Path extractRoot, Long snapshotId,
+                        MagicNumberValidator magicNumberValidator) {
         this.zipPath = zipPath;
         this.extractRoot = extractRoot;
         this.snapshotId = snapshotId;
+        this.magicNumberValidator = magicNumberValidator;
     }
 
     public ExtractionResult extract() throws IOException {
@@ -77,6 +81,13 @@ public class ZipExtractor {
                 processZipEntries(zipPath, items, createdDirs, readmeContents, readmeImages, cs);
                 log.info("Extracted ZIP with {} charset, {} items", cs, items.size());
                 extracted = true;
+            } catch (MagicNumberViolationException e) {
+                // Magic number violations are charset-independent — do NOT retry
+                items.clear();
+                createdDirs.clear();
+                readmeContents.clear();
+                readmeImages.clear();
+                throw e;
             } catch (Exception e) {
                 log.warn("ZIP extraction failed with charset {}: {}", cs, e.getMessage());
                 lastError = e;
@@ -126,6 +137,8 @@ public class ZipExtractor {
                 .setFile(zipPath.toFile())
                 .setCharset(Charset.forName(charsetName))
                 .get()) {
+
+            List<String> violations = new ArrayList<>();
             Enumeration<ZipArchiveEntry> entries = zipFile.getEntries();
             while (entries.hasMoreElements()) {
                 ZipArchiveEntry entry = entries.nextElement();
@@ -163,6 +176,14 @@ public class ZipExtractor {
                     md5Hash = bytesToHex(md5Digest.digest(entryData));
                 } catch (java.security.NoSuchAlgorithmException e) {
                     throw new FileProcessingException("MD5 not available", e);
+                }
+
+                // Magic number validation — detect disguised executables
+                String magicViolation = magicNumberValidator.check(entryData, entryName);
+                if (magicViolation != null) {
+                    violations.add(magicViolation);
+                    log.warn("Magic number violation: {}", magicViolation);
+                    continue;   // skip this entry, keep collecting violations
                 }
 
                 // Handle README images: extract images/ folder to readme/images/ later
@@ -216,6 +237,12 @@ public class ZipExtractor {
                         || entryName.equalsIgnoreCase("readme.txt")) {
                     readmeContents.add(new String(entryData, StandardCharsets.UTF_8));
                 }
+            }
+
+            // If any disguised executables were found, reject the entire archive
+            if (!violations.isEmpty()) {
+                String message = "检测到伪装文件: " + String.join(", ", violations);
+                throw new MagicNumberViolationException(message);
             }
         }
     }

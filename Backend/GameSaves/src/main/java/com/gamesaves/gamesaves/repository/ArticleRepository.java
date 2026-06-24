@@ -4,10 +4,12 @@ import com.gamesaves.gamesaves.entity.Article;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -54,4 +56,43 @@ public interface ArticleRepository extends JpaRepository<Article, Long> {
     // Admin: all articles with user and game eager loaded
     @Query("SELECT a FROM Article a JOIN FETCH a.user JOIN FETCH a.game")
     Page<Article> findAllWithDetails(Pageable pageable);
+
+    // ── Utility (testing / admin) ─────────────────────────────────────
+
+    /** Directly update updatedAt timestamp, bypassing @PreUpdate. */
+    @Modifying
+    @Query("UPDATE Article a SET a.updatedAt = :updatedAt WHERE a.id = :id")
+    void setUpdatedAt(@Param("id") Long id, @Param("updatedAt") LocalDateTime updatedAt);
+
+    // ── Cleanup queries ───────────────────────────────────────────────
+
+    /** Find stale articles with a single status (for failed-only mode). */
+    @Query("SELECT a FROM Article a JOIN FETCH a.user JOIN FETCH a.game " +
+           "WHERE a.status = :status AND a.updatedAt < :cutoff " +
+           "ORDER BY a.updatedAt ASC")
+    List<Article> findStaleByStatus(@Param("status") Article.ArticleStatus status,
+                                    @Param("cutoff") LocalDateTime cutoff,
+                                    Pageable pageable);
+
+    /** Find stale FAILED + UPLOADING articles (for "all" mode). */
+    @Query("SELECT a FROM Article a JOIN FETCH a.user JOIN FETCH a.game " +
+           "WHERE a.status IN (com.gamesaves.gamesaves.entity.Article.ArticleStatus.FAILED, " +
+           "com.gamesaves.gamesaves.entity.Article.ArticleStatus.UPLOADING) " +
+           "AND a.updatedAt < :cutoff " +
+           "ORDER BY a.updatedAt ASC")
+    List<Article> findStaleFailedOrUploading(@Param("cutoff") LocalDateTime cutoff,
+                                             Pageable pageable);
+
+    /** Count stale articles with a single status. */
+    @Query("SELECT COUNT(a) FROM Article a " +
+           "WHERE a.status = :status AND a.updatedAt < :cutoff")
+    long countStaleByStatus(@Param("status") Article.ArticleStatus status,
+                            @Param("cutoff") LocalDateTime cutoff);
+
+    /** Count stale FAILED + UPLOADING articles. */
+    @Query("SELECT COUNT(a) FROM Article a " +
+           "WHERE a.status IN (com.gamesaves.gamesaves.entity.Article.ArticleStatus.FAILED, " +
+           "com.gamesaves.gamesaves.entity.Article.ArticleStatus.UPLOADING) " +
+           "AND a.updatedAt < :cutoff")
+    long countStaleFailedOrUploading(@Param("cutoff") LocalDateTime cutoff);
 }

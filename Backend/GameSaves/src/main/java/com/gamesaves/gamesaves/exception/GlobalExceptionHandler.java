@@ -3,6 +3,7 @@ package com.gamesaves.gamesaves.exception;
 import cn.dev33.satoken.exception.NotLoginException;
 import cn.dev33.satoken.exception.NotPermissionException;
 import com.gamesaves.gamesaves.dto.response.ApiResponse;
+import com.gamesaves.gamesaves.service.CleanupScheduler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -123,6 +124,12 @@ public class GlobalExceptionHandler {
     @ResponseStatus(HttpStatus.FORBIDDEN)
     public ApiResponse<Void> handleNotPermission(NotPermissionException e) {
         return ApiResponse.error(403, "权限不足");
+    }
+
+    @ExceptionHandler(CleanupScheduler.CleanupAlreadyRunningException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ApiResponse<Void> handleCleanupAlreadyRunning(CleanupScheduler.CleanupAlreadyRunningException e) {
+        return ApiResponse.error(409, e.getMessage());
     }
 
     @ExceptionHandler(Exception.class)

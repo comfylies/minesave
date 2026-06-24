@@ -34,6 +34,10 @@
           <el-icon><Platform /></el-icon>
           <span>游戏管理</span>
         </el-menu-item>
+        <el-menu-item index="/admin/cleanup">
+          <el-icon><Delete /></el-icon>
+          <span>存档清理</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
 

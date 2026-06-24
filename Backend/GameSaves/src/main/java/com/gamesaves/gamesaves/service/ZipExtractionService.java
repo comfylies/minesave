@@ -8,6 +8,7 @@ import com.gamesaves.gamesaves.repository.ArticleRepository;
 import com.gamesaves.gamesaves.repository.SavingItemRepository;
 import com.gamesaves.gamesaves.repository.SavingsRepository;
 import com.gamesaves.gamesaves.util.ImageThumbnailService;
+import com.gamesaves.gamesaves.util.MagicNumberValidator;
 import com.gamesaves.gamesaves.util.MarkdownRenderer;
 import com.gamesaves.gamesaves.util.ZipExtractor;
 import org.slf4j.Logger;
@@ -36,6 +37,7 @@ public class ZipExtractionService {
     private final SavingsRepository savingsRepository;
     private final SavingItemRepository savingItemRepository;
     private final SearchSyncService searchSyncService;
+    private final MagicNumberValidator magicNumberValidator;
 
     @Value("${app.extraction.timeout-seconds:30}")
     private int timeoutSeconds;
@@ -54,11 +56,13 @@ public class ZipExtractionService {
     public ZipExtractionService(ArticleRepository articleRepository,
                                 SavingsRepository savingsRepository,
                                 SavingItemRepository savingItemRepository,
-                                SearchSyncService searchSyncService) {
+                                SearchSyncService searchSyncService,
+                                MagicNumberValidator magicNumberValidator) {
         this.articleRepository = articleRepository;
         this.savingsRepository = savingsRepository;
         this.savingItemRepository = savingItemRepository;
         this.searchSyncService = searchSyncService;
+        this.magicNumberValidator = magicNumberValidator;
     }
 
     /**
@@ -111,7 +115,7 @@ public class ZipExtractionService {
 
         // Run extraction
         Path zipPath = storageRoot.resolve(article.getZipFilename());
-        ZipExtractor extractor = new ZipExtractor(zipPath, extractRoot, savings.getId());
+        ZipExtractor extractor = new ZipExtractor(zipPath, extractRoot, savings.getId(), magicNumberValidator);
         ZipExtractor.ExtractionResult result = extractor.extract();
 
         // Save all file/directory entries in batch

@@ -40,5 +40,17 @@ export const adminApi = {
   /** 查询游戏标准结构状态 */
   getSafeStructure(gameId) {
     return client.get(`/admin/games/${gameId}/safe-structure`)
+  },
+
+  // ==================== 失败存档清理 ====================
+
+  /** 手动触发清理 */
+  triggerCleanup(mode = 'all') {
+    return client.post('/admin/cleanup/trigger', null, { params: { mode } })
+  },
+
+  /** 查询清理进度 */
+  getCleanupStatus() {
+    return client.get('/admin/cleanup/status')
   }
 }
