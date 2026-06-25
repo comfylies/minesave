@@ -13,17 +13,13 @@ import com.gamesaves.gamesaves.repository.DownloadLogRepository;
 import com.gamesaves.gamesaves.repository.GameRepository;
 import com.gamesaves.gamesaves.repository.UserRepository;
 import com.gamesaves.gamesaves.service.AdminService;
-import com.gamesaves.gamesaves.util.ImageThumbnailService;
+import com.gamesaves.gamesaves.service.StorageService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.nio.file.Path;
-import java.nio.file.Paths;
 
 @Service
 @Transactional
@@ -36,20 +32,20 @@ public class AdminServiceImpl implements AdminService {
     private final GameRepository gameRepository;
     private final CommentRepository commentRepository;
     private final DownloadLogRepository downloadLogRepository;
-
-    @Value("${app.storage.database-path:../../Database}")
-    private String databasePathConfig;
+    private final StorageService storageService;
 
     public AdminServiceImpl(UserRepository userRepository,
                             ArticleRepository articleRepository,
                             GameRepository gameRepository,
                             CommentRepository commentRepository,
-                            DownloadLogRepository downloadLogRepository) {
+                            DownloadLogRepository downloadLogRepository,
+                            StorageService storageService) {
         this.userRepository = userRepository;
         this.articleRepository = articleRepository;
         this.gameRepository = gameRepository;
         this.commentRepository = commentRepository;
         this.downloadLogRepository = downloadLogRepository;
+        this.storageService = storageService;
     }
 
     @Override
@@ -57,8 +53,7 @@ public class AdminServiceImpl implements AdminService {
     public DashboardStatsResponse getDashboardStats() {
         long imageBytes = 0;
         try {
-            Path dbPath = Paths.get(databasePathConfig).toAbsolutePath().normalize();
-            imageBytes = ImageThumbnailService.totalImageSize(dbPath);
+            imageBytes = storageService.totalImageSize("articles/");
         } catch (Exception e) {
             log.warn("Failed to calculate image storage size: {}", e.getMessage());
         }

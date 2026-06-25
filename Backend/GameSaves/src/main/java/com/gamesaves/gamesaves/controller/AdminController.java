@@ -12,9 +12,9 @@ import com.gamesaves.gamesaves.service.AnnouncementService;
 import com.gamesaves.gamesaves.service.CleanupScheduler;
 import com.gamesaves.gamesaves.service.SafePathService;
 import com.gamesaves.gamesaves.service.SearchSyncService;
+import com.gamesaves.gamesaves.service.StorageService;
 import com.gamesaves.gamesaves.service.TagService;
 import jakarta.validation.Valid;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -24,7 +24,6 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -40,20 +39,20 @@ public class AdminController {
     private final SearchSyncService searchSyncService;
     private final SafePathService safePathService;
     private final CleanupScheduler cleanupScheduler;
-
-    @Value("${app.storage.database-path:../../Database}")
-    private String databasePath;
+    private final StorageService storageService;
 
     public AdminController(AdminService adminService, AnnouncementService announcementService,
                            TagService tagService, SearchSyncService searchSyncService,
                            SafePathService safePathService,
-                           CleanupScheduler cleanupScheduler) {
+                           CleanupScheduler cleanupScheduler,
+                           StorageService storageService) {
         this.adminService = adminService;
         this.announcementService = announcementService;
         this.tagService = tagService;
         this.searchSyncService = searchSyncService;
         this.safePathService = safePathService;
         this.cleanupScheduler = cleanupScheduler;
+        this.storageService = storageService;
     }
 
     @GetMapping("/dashboard")
@@ -180,14 +179,15 @@ public class AdminController {
             }
             String filename = UUID.randomUUID().toString().substring(0, 8) + ext;
 
-            // 保存到 Database/announcements/images/
-            Path storageDir = Paths.get(databasePath, "announcements", "images");
-            Files.createDirectories(storageDir);
-            Path targetPath = storageDir.resolve(filename);
-            file.transferTo(targetPath);
+            // 保存到临时文件，上传到 storage
+            Path tempFile = Files.createTempFile("ann-img-", ext);
+            file.transferTo(tempFile);
+            String key = "announcements/images/" + filename;
+            storageService.storeFromPath(key, tempFile);
+            Files.deleteIfExists(tempFile);
 
-            // 返回访问 URL（通过 /storage/** 静态资源映射）
-            String url = "/storage/announcements/images/" + filename;
+            // 返回访问 URL
+            String url = storageService.getPublicUrl(key);
             return ApiResponse.success(Map.of(
                     "url", url,
                     "markdown", "![](" + url + ")",
@@ -281,24 +281,21 @@ public class AdminController {
         }
 
         try {
-            // 保存原档到 Database/announcements/md/
-            Path mdDir = Paths.get(databasePath, "announcements", "md");
-            Files.createDirectories(mdDir);
-
             // 保留原始文件名，加时间戳防重名
             String baseName = originalName.replaceAll("\\.md$", "");
             String timestamp = String.valueOf(System.currentTimeMillis()).substring(0, 10);
             String savedName = baseName + "_" + timestamp + ".md";
-            Path targetPath = mdDir.resolve(savedName);
-            file.transferTo(targetPath);
 
-            // 读取文件内容返回给前端填充到编辑器
-            String content = Files.readString(targetPath);
+            // 读取内容，上传到 storage
+            byte[] mdBytes = file.getBytes();
+            String content = new String(mdBytes, java.nio.charset.StandardCharsets.UTF_8);
+            String key = "announcements/md/" + savedName;
+            storageService.store(key, mdBytes);
 
             return ApiResponse.success(Map.of(
                     "content", content,
                     "filename", savedName,
-                    "path", "/storage/announcements/md/" + savedName
+                    "path", storageService.getPublicUrl(key)
             ));
         } catch (IOException e) {
             throw new BadRequestException("文件上传失败: " + e.getMessage());

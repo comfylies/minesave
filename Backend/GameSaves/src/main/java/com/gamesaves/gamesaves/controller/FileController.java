@@ -14,8 +14,6 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 
 @RestController
 @RequestMapping("/api/files")
@@ -105,9 +103,10 @@ public class FileController {
 
     /**
      * Download the original ZIP archive (with rate limiting).
+     * Uses 302 redirect — local mode redirects to /storage/..., COS mode to pre-signed URL.
      */
     @GetMapping("/{articleId}/download")
-    public ResponseEntity<Resource> downloadZip(
+    public ResponseEntity<Void> downloadZip(
             @PathVariable Long articleId,
             HttpServletRequest request) {
 
@@ -117,20 +116,19 @@ public class FileController {
         downloadService.checkRateLimit(ip, articleId);
 
         // Record download
-        String zipFilename = downloadService.recordDownload(articleId, request);
+        downloadService.recordDownload(articleId, request);
 
-        Resource resource = fileExplorerService.getZipForDownload(articleId);
+        // Get download URL (pre-signed URL for COS, /storage/ path for local)
+        String downloadUrl = fileExplorerService.getZipDownloadUrl(articleId)
+                .orElseThrow(() -> new com.gamesaves.gamesaves.exception.ResourceNotFoundException(
+                        "ZIP not available for download"));
 
-        String encodedFilename = URLEncoder.encode(zipFilename, StandardCharsets.UTF_8)
-                .replace("+", "%20");
+        log.info("Download redirect: article={}, ip={}, url={}", articleId, ip,
+                downloadUrl.substring(0, Math.min(80, downloadUrl.length())) + "...");
 
-        log.info("Download: article={}, ip={}, file={}", articleId, ip, zipFilename);
-
-        return ResponseEntity.ok()
-                .contentType(MediaType.APPLICATION_OCTET_STREAM)
-                .header(HttpHeaders.CONTENT_DISPOSITION,
-                        "attachment; filename=\"" + encodedFilename + "\"")
-                .body(resource);
+        return ResponseEntity.status(org.springframework.http.HttpStatus.FOUND)
+                .header(HttpHeaders.LOCATION, downloadUrl)
+                .build();
     }
 
     /**

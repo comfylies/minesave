@@ -20,11 +20,11 @@ import com.gamesaves.gamesaves.repository.TagRepository;
 import com.gamesaves.gamesaves.repository.UserRepository;
 import com.gamesaves.gamesaves.service.ArticleService;
 import com.gamesaves.gamesaves.service.SearchSyncService;
+import com.gamesaves.gamesaves.service.StorageService;
 import com.gamesaves.gamesaves.service.ZipExtractionService;
 import com.gamesaves.gamesaves.util.ImageThumbnailService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,13 +33,10 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
-
-import jakarta.annotation.PostConstruct;
 
 @Service
 @Transactional
@@ -54,17 +51,7 @@ public class ArticleServiceImpl implements ArticleService {
     private final TagRepository tagRepository;
     private final ZipExtractionService zipExtractionService;
     private final SearchSyncService searchSyncService;
-
-    @Value("${app.storage.database-path:../../Database}")
-    private String databasePathConfig;
-
-    private Path storageBasePath;
-
-    @PostConstruct
-    public void init() {
-        storageBasePath = Paths.get(databasePathConfig).toAbsolutePath().normalize();
-        log.info("Storage base path: {} (from config: {})", storageBasePath, databasePathConfig);
-    }
+    private final StorageService storageService;
 
     public ArticleServiceImpl(ArticleRepository articleRepository,
                                GameRepository gameRepository,
@@ -72,7 +59,8 @@ public class ArticleServiceImpl implements ArticleService {
                                SavingsRepository savingsRepository,
                                TagRepository tagRepository,
                                ZipExtractionService zipExtractionService,
-                               SearchSyncService searchSyncService) {
+                               SearchSyncService searchSyncService,
+                               StorageService storageService) {
         this.articleRepository = articleRepository;
         this.gameRepository = gameRepository;
         this.userRepository = userRepository;
@@ -80,6 +68,7 @@ public class ArticleServiceImpl implements ArticleService {
         this.tagRepository = tagRepository;
         this.zipExtractionService = zipExtractionService;
         this.searchSyncService = searchSyncService;
+        this.storageService = storageService;
     }
 
     @Override
@@ -109,13 +98,11 @@ public class ArticleServiceImpl implements ArticleService {
             }
         }
 
-        // Build storage path prefix (without article ID, which we get after save)
-        String storagePrefix = storageBasePath.resolve(String.valueOf(user.getId()))
-                .resolve(String.valueOf(game.getId())).toString().replace("\\", "/") + "/";
+        // Build storage prefix (without article ID, which we get after save)
+        String storagePrefix = user.getId() + "/" + game.getId() + "/";
 
         final String finalReadmeRaw = resolvedReadmeRaw;
         // Create article with placeholder storageRoot (ID not yet generated)
-        // IDENTITY generation forces immediate INSERT, so storage_root must be NOT NULL
         Article article = Article.builder()
                 .title(request.getTitle())
                 .version(request.getVersion())
@@ -143,35 +130,57 @@ public class ArticleServiceImpl implements ArticleService {
 
         article = articleRepository.save(article);
 
-        // Save ZIP to disk
+        // Save files using StorageService
         try {
-            Path storageDir = storageBasePath
-                    .resolve(String.valueOf(user.getId()))
-                    .resolve(String.valueOf(game.getId()))
-                    .resolve(String.valueOf(article.getId()));
-            Files.createDirectories(storageDir);
+            String cosPrefix = storageService.articleKey(user.getId(), game.getId(), article.getId(), "");
 
-            Path zipPath = storageDir.resolve(article.getZipFilename());
-            file.transferTo(zipPath.toFile());
+            // Save ZIP to temp then upload to storage
+            Path tempZip = Files.createTempFile("upload-", ".zip");
+            try {
+                file.transferTo(tempZip.toFile());
+                long zipSize = Files.size(tempZip);
+                article.setFileSize(zipSize);
 
-            article.setFileSize(Files.size(zipPath));
-            article = articleRepository.save(article);
+                String zipKey = cosPrefix + article.getZipFilename();
+                storageService.storeFromPath(zipKey, tempZip);
+
+                log.info("Article {} created, ZIP uploaded to {}", article.getId(), zipKey);
+            } finally {
+                Files.deleteIfExists(tempZip);
+            }
 
             // Save cover image if provided
             if (coverFile != null && !coverFile.isEmpty()) {
                 try {
                     String coverExt = validateAndGetImageExtension(coverFile);
-                    String coverFilename = "cover." + coverExt;
-                    Path coverPath = storageDir.resolve(coverFilename);
-                    coverFile.transferTo(coverPath.toFile());
-                    article.setCoverImage("/storage/"
-                            + user.getId() + "/" + game.getId() + "/"
-                            + article.getId() + "/" + coverFilename);
-                    article = articleRepository.save(article);
+                    Path tempCover = Files.createTempFile("cover-", "." + coverExt);
+                    try {
+                        coverFile.transferTo(tempCover.toFile());
 
-                    // Generate thumbnails: 270, 360, 720 width, center-cropped to 16:9
-                    ImageThumbnailService.generateCoverThumbnails(coverPath, storageDir);
-                    log.info("Cover image & thumbnails saved for article {}: {}", article.getId(), coverFilename);
+                        // Upload original cover
+                        String coverFilename = "cover." + coverExt;
+                        String coverKey = cosPrefix + coverFilename;
+                        storageService.storeFromPath(coverKey, tempCover);
+                        article.setCoverImage(storageService.getPublicUrl(coverKey));
+
+                        // Generate thumbnails locally, upload each
+                        Path thumbDir = Files.createTempDirectory("thumbs-");
+                        try {
+                            ImageThumbnailService.generateCoverThumbnails(tempCover, thumbDir);
+                            for (int size : new int[]{270, 360, 720}) {
+                                Path thumbPath = thumbDir.resolve("cover_thumb_" + size + ".jpg");
+                                if (Files.exists(thumbPath)) {
+                                    String thumbKey = cosPrefix + "cover_thumb_" + size + ".jpg";
+                                    storageService.storeFromPath(thumbKey, thumbPath);
+                                }
+                            }
+                        } finally {
+                            deleteRecursively(thumbDir);
+                        }
+                        log.info("Cover image & thumbnails uploaded for article {}: {}", article.getId(), coverFilename);
+                    } finally {
+                        Files.deleteIfExists(tempCover);
+                    }
                 } catch (BadRequestException e) {
                     throw e;
                 } catch (IOException e) {
@@ -180,10 +189,9 @@ public class ArticleServiceImpl implements ArticleService {
                 }
             }
 
-            log.info("Article {} created, ZIP saved to {}", article.getId(), zipPath);
+            article = articleRepository.save(article);
 
-            // Submit async extraction AFTER current transaction commits.
-            // The async thread needs the article to be visible in the database.
+            // Submit async extraction AFTER current transaction commits
             final Long savedArticleId = article.getId();
             org.springframework.transaction.support.TransactionSynchronizationManager
                     .registerSynchronization(new org.springframework.transaction.support.TransactionSynchronization() {
@@ -194,7 +202,7 @@ public class ArticleServiceImpl implements ArticleService {
                     });
 
         } catch (IOException e) {
-            log.error("Failed to save ZIP for article {}: {}", article.getId(), e.toString());
+            log.error("Failed to process files for article {}: {}", article.getId(), e.toString());
             throw new FileProcessingException(
                     "Failed to save uploaded file: " + e.getMessage(), e);
         }
@@ -236,18 +244,10 @@ public class ArticleServiceImpl implements ArticleService {
         Article article = articleRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Article", id));
 
-        // Delete physical files
-        try {
-            Path storageRoot = storageBasePath
-                    .resolve(String.valueOf(article.getUser().getId()))
-                    .resolve(String.valueOf(article.getGame().getId()))
-                    .resolve(String.valueOf(article.getId()));
-            if (Files.exists(storageRoot)) {
-                deleteRecursively(storageRoot);
-            }
-        } catch (IOException e) {
-            log.warn("Failed to delete physical files for article {}", id, e);
-        }
+        // Delete physical files via storage service
+        String prefix = storageService.articleKey(
+                article.getUser().getId(), article.getGame().getId(), article.getId(), "");
+        storageService.deleteDirectory(prefix);
 
         // Remove from search index
         searchSyncService.deleteArticle(id);

@@ -10,14 +10,20 @@ import java.nio.file.Paths;
 @Configuration
 public class WebMvcConfig implements WebMvcConfigurer {
 
+    @Value("${app.storage.type:local}")
+    private String storageType;
+
     @Value("${app.storage.database-path:Database}")
     private String databasePath;
 
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
-        // Serve physical storage files for preview/download
-        String absolutePath = Paths.get(databasePath).toAbsolutePath().toUri().toString();
-        registry.addResourceHandler("/storage/**")
-                .addResourceLocations(absolutePath);
+        // Only register /storage/** static resource handler in local mode.
+        // In COS mode, files are served via StorageService (pre-signed URLs or direct COS URLs).
+        if ("local".equals(storageType)) {
+            String absolutePath = Paths.get(databasePath).toAbsolutePath().toUri().toString();
+            registry.addResourceHandler("/storage/**")
+                    .addResourceLocations(absolutePath);
+        }
     }
 }

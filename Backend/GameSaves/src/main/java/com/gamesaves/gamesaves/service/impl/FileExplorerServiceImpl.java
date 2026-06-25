@@ -11,25 +11,19 @@ import com.gamesaves.gamesaves.repository.SafePathRepository;
 import com.gamesaves.gamesaves.repository.SavingItemRepository;
 import com.gamesaves.gamesaves.repository.SavingsRepository;
 import com.gamesaves.gamesaves.service.FileExplorerService;
+import com.gamesaves.gamesaves.service.StorageService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ByteArrayResource;
-import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
-
-import jakarta.annotation.PostConstruct;
 
 @Service
 @Transactional(readOnly = true)
@@ -41,26 +35,18 @@ public class FileExplorerServiceImpl implements FileExplorerService {
     private final SavingItemRepository savingItemRepository;
     private final ArticleRepository articleRepository;
     private final SafePathRepository safePathRepository;
-
-    @Value("${app.storage.database-path:../../Database}")
-    private String databasePathConfig;
-
-    private Path storageBasePath;
-
-    @PostConstruct
-    public void init() {
-        storageBasePath = Paths.get(databasePathConfig).toAbsolutePath().normalize();
-        log.info("FileExplorer storage base path: {}", storageBasePath);
-    }
+    private final StorageService storageService;
 
     public FileExplorerServiceImpl(SavingsRepository savingsRepository,
                                     SavingItemRepository savingItemRepository,
                                     ArticleRepository articleRepository,
-                                    SafePathRepository safePathRepository) {
+                                    SafePathRepository safePathRepository,
+                                    StorageService storageService) {
         this.savingsRepository = savingsRepository;
         this.savingItemRepository = savingItemRepository;
         this.articleRepository = articleRepository;
         this.safePathRepository = safePathRepository;
+        this.storageService = storageService;
     }
 
     @Override
@@ -98,7 +84,7 @@ public class FileExplorerServiceImpl implements FileExplorerService {
         List<FileEntryResponse> dirEntries = directories.stream()
                 .map(item -> {
                     FileEntryResponse entry = FileEntryResponse.fromEntity(item);
-                    entry.setSecurityLevel("safe"); // 目录不参与安全标记
+                    entry.setSecurityLevel("safe");
                     return entry;
                 })
                 .collect(Collectors.toList());
@@ -135,106 +121,74 @@ public class FileExplorerServiceImpl implements FileExplorerService {
             throw new ResourceNotFoundException("Cannot preview a directory", virtualPath);
         }
 
-        // 构建物理文件路径：使用 Savings 直接存储的 userId/gameId/articleId
-        // 避免依赖 extract_root（其格式可能为相对路径或绝对路径，数据不一致）
-        Path physicalFilePath = storageBasePath
-                .resolve(String.valueOf(savings.getUserId()))
-                .resolve(String.valueOf(savings.getGameId()))
-                .resolve(String.valueOf(savings.getArticleId()))
-                .resolve("extracted")
-                .resolve(item.getPhysicalKey())
-                .toAbsolutePath()
-                .normalize();
-        log.debug("Preview file: {} (exists={})", physicalFilePath, Files.exists(physicalFilePath));
-        if (!Files.exists(physicalFilePath)) {
-            throw new ResourceNotFoundException("File not found on disk", physicalFilePath.toString());
+        String fileKey = storageService.articleKey(
+                savings.getUserId(), savings.getGameId(), savings.getArticleId(),
+                "extracted/" + item.getPhysicalKey());
+
+        if (!storageService.exists(fileKey)) {
+            throw new ResourceNotFoundException("File not found in storage", fileKey);
         }
-        try {
-            return new ByteArrayResource(Files.readAllBytes(physicalFilePath));
-        } catch (java.io.IOException e) {
-            throw new RuntimeException("Failed to read file: " + physicalFilePath, e);
-        }
+
+        byte[] data = storageService.read(fileKey);
+        return new ByteArrayResource(data);
     }
 
     @Override
     public Resource getReadmeImage(Long articleId, String relativePath) {
-        // 读取 Article 获取 userId/gameId 构建路径
         Article article = articleRepository.findById(articleId)
                 .orElseThrow(() -> new ResourceNotFoundException("Article", articleId));
 
-        Path imagePath = storageBasePath
-                .resolve(String.valueOf(article.getUser().getId()))
-                .resolve(String.valueOf(article.getGame().getId()))
-                .resolve(String.valueOf(articleId))
-                .resolve("readme")
-                .resolve("images")
-                .resolve(relativePath)
-                .toAbsolutePath()
-                .normalize();
-
-        // 安全检查：确保路径不逃逸出 readme/images/
-        Path readmeImagesRoot = storageBasePath
-                .resolve(String.valueOf(article.getUser().getId()))
-                .resolve(String.valueOf(article.getGame().getId()))
-                .resolve(String.valueOf(articleId))
-                .resolve("readme")
-                .resolve("images")
-                .toAbsolutePath()
-                .normalize();
-        if (!imagePath.startsWith(readmeImagesRoot)) {
+        // Safety check: prevent path traversal
+        if (relativePath.contains("..") || relativePath.contains("\\")) {
             throw new ResourceNotFoundException("Invalid image path", relativePath);
         }
 
-        if (!Files.exists(imagePath)) {
+        String imageKey = storageService.articleKey(
+                article.getUser().getId(), article.getGame().getId(), articleId,
+                "readme/images/" + relativePath);
+
+        if (!storageService.exists(imageKey)) {
             throw new ResourceNotFoundException("Readme image not found", relativePath);
         }
-        try {
-            return new ByteArrayResource(Files.readAllBytes(imagePath));
-        } catch (java.io.IOException e) {
-            throw new RuntimeException("Failed to read image: " + imagePath, e);
-        }
+
+        byte[] data = storageService.read(imageKey);
+        return new ByteArrayResource(data);
     }
 
     @Override
     public Resource getZipForDownload(Long articleId) {
-        // Compute path from article's fields + configured databasePath.
-        // This is more reliable than article.storageRoot which may have been set
-        // relative to a different working directory.
+        // Legacy method — kept for backward compat, delegates to getZipDownloadUrl
+        // and reads the bytes. Prefer getZipDownloadUrl for new code.
         Article article = articleRepository.findById(articleId)
                 .orElseThrow(() -> new ResourceNotFoundException("Article", articleId));
 
-        Path zipPath = storageBasePath
-                .resolve(String.valueOf(article.getUser().getId()))
-                .resolve(String.valueOf(article.getGame().getId()))
-                .resolve(String.valueOf(articleId))
-                .resolve(article.getZipFilename());
+        String zipKey = storageService.articleKey(
+                article.getUser().getId(), article.getGame().getId(), articleId,
+                article.getZipFilename());
 
-        log.debug("Download path: {} (exists={})", zipPath, Files.exists(zipPath));
-
-        if (!Files.exists(zipPath)) {
-            // Fallback: use article.storageRoot (for backward compat with old data)
-            Path fallbackPath = Paths.get(article.getStorageRoot(), article.getZipFilename());
-            log.debug("Fallback path: {} (exists={})", fallbackPath, Files.exists(fallbackPath));
-            if (Files.exists(fallbackPath)) {
-                zipPath = fallbackPath;
-            } else {
-                // Last resort: try Savings.zipPath
-                Savings savings = savingsRepository.findByArticleId(articleId).orElse(null);
-                if (savings != null) {
-                    Path savingsPath = Paths.get(savings.getZipPath());
-                    log.debug("Savings path: {} (exists={})", savingsPath, Files.exists(savingsPath));
-                    if (Files.exists(savingsPath)) {
-                        zipPath = savingsPath;
-                    }
-                }
-            }
+        if (!storageService.exists(zipKey)) {
+            throw new ResourceNotFoundException("ZIP file not found in storage", zipKey);
         }
 
-        if (!Files.exists(zipPath)) {
-            throw new ResourceNotFoundException("ZIP file not found on disk: " + zipPath);
+        return new ByteArrayResource(storageService.read(zipKey));
+    }
+
+    @Override
+    public Optional<String> getZipDownloadUrl(Long articleId) {
+        Article article = articleRepository.findById(articleId)
+                .orElseThrow(() -> new ResourceNotFoundException("Article", articleId));
+
+        String zipKey = storageService.articleKey(
+                article.getUser().getId(), article.getGame().getId(), articleId,
+                article.getZipFilename());
+
+        if (!storageService.exists(zipKey)) {
+            return Optional.empty();
         }
 
-        return new FileSystemResource(zipPath);
+        // COS mode: pre-signed URL; local mode: /storage/ path
+        String url = storageService.generatePresignedUrl(zipKey, 5);
+        return Optional.of(url);
     }
 
     /**

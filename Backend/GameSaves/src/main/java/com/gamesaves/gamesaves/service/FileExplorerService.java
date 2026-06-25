@@ -18,4 +18,7 @@ public interface FileExplorerService {
 
     /** 获取 README 图片（从 readme/images/ 目录） */
     Resource getReadmeImage(Long articleId, String relativePath);
+
+    /** 获取 ZIP 下载 URL（预签名 URL 或 /storage/ 路径），用于 302 重定向 */
+    Optional<String> getZipDownloadUrl(Long articleId);
 }

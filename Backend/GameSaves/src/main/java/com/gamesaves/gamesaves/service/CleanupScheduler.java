@@ -13,10 +13,6 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -25,8 +21,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * Scheduled cleanup of failed/stale article uploads.
  *
- * <p>Batch-processes FAILED and stale UPLOADING articles to prevent disk-space
- * exhaustion from orphaned physical files. Each batch runs in an independent
+ * <p>Batch-processes FAILED and stale UPLOADING articles to prevent storage
+ * exhaustion from orphaned files. Each batch runs in an independent
  * transaction with configurable sleep between batches.
  *
  * <p>Triggers:
@@ -43,6 +39,7 @@ public class CleanupScheduler {
 
     private final ArticleRepository articleRepository;
     private final TransactionTemplate transactionTemplate;
+    private final StorageService storageService;
 
     // ── Configuration ─────────────────────────────────────────────────
 
@@ -58,9 +55,6 @@ public class CleanupScheduler {
     @Value("${app.cleanup.delete-physical-files:true}")
     private boolean deletePhysicalFiles;
 
-    @Value("${app.storage.database-path:../../Database}")
-    private String databasePathConfig;
-
     // ── Progress tracking (read by status endpoint) ───────────────────
 
     private final AtomicBoolean running = new AtomicBoolean(false);
@@ -71,10 +65,12 @@ public class CleanupScheduler {
     private volatile String lastRunMode = null;
 
     public CleanupScheduler(ArticleRepository articleRepository,
-                            PlatformTransactionManager transactionManager) {
+                            PlatformTransactionManager transactionManager,
+                            StorageService storageService) {
         this.articleRepository = articleRepository;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.transactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        this.storageService = storageService;
     }
 
     // ── Triggers ──────────────────────────────────────────────────────
@@ -178,19 +174,19 @@ public class CleanupScheduler {
 
     /**
      * Executes ONE batch in an independent transaction.
-     * Uses TransactionTemplate to guarantee per-batch transaction boundaries
-     * (avoids Spring AOP self-invocation issues).
      */
     private int executeBatch(String mode) {
         return transactionTemplate.execute(status -> {
-            // Query one page of stale articles inside the transaction
             List<Article> batch = findStaleBatch(mode);
 
             for (Article article : batch) {
-                // 1. Delete physical files (before DB delete — if this fails,
-                //    we keep the DB record for the next run to retry)
-                Path storagePath = resolveStoragePath(article);
-                deletePhysicalDirectory(storagePath);
+                // 1. Delete physical files via storage service
+                if (deletePhysicalFiles) {
+                    String prefix = storageService.articleKey(
+                            article.getUser().getId(), article.getGame().getId(),
+                            article.getId(), "");
+                    storageService.deleteDirectory(prefix);
+                }
 
                 // 2. Delete DB record
                 articleRepository.delete(article);
@@ -201,7 +197,7 @@ public class CleanupScheduler {
     }
 
     /**
-     * Fetches one batch of stale articles. Paginated for the batch-size limit.
+     * Fetches one batch of stale articles.
      */
     private List<Article> findStaleBatch(String mode) {
         LocalDateTime cutoff = LocalDateTime.now().minusHours(retentionHours);
@@ -212,7 +208,6 @@ public class CleanupScheduler {
                     PageRequest.of(0, batchSize));
         }
 
-        // mode "all": FAILED + stale UPLOADING
         return articleRepository.findStaleFailedOrUploading(
                 cutoff, PageRequest.of(0, batchSize));
     }
@@ -228,70 +223,10 @@ public class CleanupScheduler {
         return articleRepository.countStaleFailedOrUploading(cutoff);
     }
 
-    // ── Physical file cleanup ─────────────────────────────────────────
-
-    /**
-     * Resolves the storage root path for an article based on its entity fields.
-     * Path pattern: {databasePath}/{userId}/{gameId}/{articleId}/
-     */
-    private Path resolveStoragePath(Article article) {
-        Path basePath = Paths.get(databasePathConfig).toAbsolutePath().normalize();
-        return basePath
-                .resolve(String.valueOf(article.getUser().getId()))
-                .resolve(String.valueOf(article.getGame().getId()))
-                .resolve(String.valueOf(article.getId()));
-    }
-
-    /**
-     * Recursively deletes a directory with safety checks.
-     * JDK 17 compatible (no Files.deleteRecursively which is JDK 21+).
-     */
-    private void deletePhysicalDirectory(Path targetPath) {
-        if (!deletePhysicalFiles) {
-            log.debug("Physical deletion disabled — skipping {}", targetPath);
-            return;
-        }
-
-        if (!Files.exists(targetPath)) {
-            log.debug("Storage directory not found (already cleaned?): {}", targetPath);
-            return;
-        }
-
-        // ── Safety assertions ──────────────────────────────────────────
-        // Verify the target is under the configured storage base path
-        Path basePath = Paths.get(databasePathConfig).toAbsolutePath().normalize();
-        Path normalizedTarget = targetPath.toAbsolutePath().normalize();
-        if (!normalizedTarget.startsWith(basePath)) {
-            log.error("SAFETY: Refusing to delete path outside storage base: {}", normalizedTarget);
-            return;
-        }
-        // Verify the path contains numeric directory segments (userId/gameId/articleId)
-        // — prevents accidental deletion of non-article directories
-        String relPath = basePath.relativize(normalizedTarget).toString().replace('\\', '/');
-        if (!relPath.matches("\\d+/\\d+/\\d+")) {
-            log.error("SAFETY: Path pattern mismatch (expected userId/gameId/articleId): {}", relPath);
-            return;
-        }
-
-        try {
-            // Walk bottom-up: delete files first, then directories
-            try (var stream = Files.walk(normalizedTarget)) {
-                var paths = stream.sorted(java.util.Comparator.reverseOrder()).toList();
-                for (Path p : paths) {
-                    Files.deleteIfExists(p);
-                }
-            }
-            log.debug("Deleted directory: {}", normalizedTarget);
-        } catch (IOException e) {
-            log.error("Failed to delete directory {}: {}", normalizedTarget, e.getMessage());
-            // Don't re-throw — we want to continue with other articles
-        }
-    }
-
     // ── Progress DTO ──────────────────────────────────────────────────
 
     public record CleanupProgress(
-            boolean completed,      // true when cleanup has finished
+            boolean completed,
             int batchesCompleted,
             int totalDeleted,
             long estimatedRemaining,

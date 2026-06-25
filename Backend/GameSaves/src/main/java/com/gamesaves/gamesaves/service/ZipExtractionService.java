@@ -9,7 +9,6 @@ import com.gamesaves.gamesaves.repository.SavingItemRepository;
 import com.gamesaves.gamesaves.repository.SavingsRepository;
 import com.gamesaves.gamesaves.util.ImageThumbnailService;
 import com.gamesaves.gamesaves.util.MagicNumberValidator;
-import com.gamesaves.gamesaves.util.MarkdownRenderer;
 import com.gamesaves.gamesaves.util.ZipExtractor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,12 +20,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
-
-import jakarta.annotation.PostConstruct;
 
 @Service
 public class ZipExtractionService {
@@ -38,42 +34,31 @@ public class ZipExtractionService {
     private final SavingItemRepository savingItemRepository;
     private final SearchSyncService searchSyncService;
     private final MagicNumberValidator magicNumberValidator;
+    private final StorageService storageService;
 
     @Value("${app.extraction.timeout-seconds:30}")
     private int timeoutSeconds;
-
-    @Value("${app.storage.database-path:../../Database}")
-    private String databasePathConfig;
-
-    private Path storageBasePath;
-
-    @PostConstruct
-    public void init() {
-        storageBasePath = Paths.get(databasePathConfig).toAbsolutePath().normalize();
-        log.info("ZipExtraction storage base path: {}", storageBasePath);
-    }
 
     public ZipExtractionService(ArticleRepository articleRepository,
                                 SavingsRepository savingsRepository,
                                 SavingItemRepository savingItemRepository,
                                 SearchSyncService searchSyncService,
-                                MagicNumberValidator magicNumberValidator) {
+                                MagicNumberValidator magicNumberValidator,
+                                StorageService storageService) {
         this.articleRepository = articleRepository;
         this.savingsRepository = savingsRepository;
         this.savingItemRepository = savingItemRepository;
         this.searchSyncService = searchSyncService;
         this.magicNumberValidator = magicNumberValidator;
+        this.storageService = storageService;
     }
 
     /**
      * Async ZIP extraction with timeout.
-     * The MultipartFile should already be saved to disk before calling this.
+     * The ZIP file must already be saved to storage before calling this.
      */
     @Async("extractionExecutor")
     public CompletableFuture<Void> extractAsync(Long articleId) {
-        // Run extraction directly on the extraction executor thread
-        // (not via CompletableFuture.runAsync which uses ForkJoinPool).
-        // Called from TransactionSynchronization.afterCommit(), so article is visible.
         try {
             extract(articleId);
             return CompletableFuture.completedFuture(null);
@@ -91,98 +76,137 @@ public class ZipExtractionService {
         // Set status to EXTRACTING
         updateArticleStatus(articleId, Article.ArticleStatus.EXTRACTING);
 
-        Path storageRoot = storageBasePath
-                .resolve(String.valueOf(article.getUser().getId()))
-                .resolve(String.valueOf(article.getGame().getId()))
-                .resolve(String.valueOf(articleId));
-        Path extractRoot = storageRoot.resolve("extracted");
+        String cosPrefix = storageService.articleKey(
+                article.getUser().getId(), article.getGame().getId(), articleId, "");
 
-        // Create directories
-        Files.createDirectories(extractRoot);
+        // Get ZIP from storage — local mode returns direct path, COS mode downloads to temp
+        String zipFilename = article.getZipFilename();
+        Path tempDir = Files.createTempDirectory("extract-" + articleId + "-");
+        try {
+            // Get ZIP locally for extraction (ZIP must be a local file for Commons Compress)
+            Optional<Path> localZipOpt = storageService.getLocalPath(cosPrefix + zipFilename);
+            Path zipPath;
+            if (localZipOpt.isPresent()) {
+                zipPath = localZipOpt.get();
+            } else {
+                throw new RuntimeException("ZIP not found in storage: " + cosPrefix + zipFilename);
+            }
 
-        // Create savings record (we need the ID for saving_items)
-        Savings savings = Savings.builder()
-                .articleId(articleId)
-                .userId(article.getUser().getId())
-                .gameId(article.getGame().getId())
-                .zipPath(storageRoot.resolve(article.getZipFilename()).toString().replace("\\", "/"))
-                .extractRoot(extractRoot.toString().replace("\\", "/"))
-                .zipHash("pending")
-                .fileCount(0)
-                .totalSize(0L)
-                .build();
-        savings = savingsRepository.save(savings);
+            Path extractRoot = tempDir.resolve("extracted");
+            Files.createDirectories(extractRoot);
 
-        // Run extraction
-        Path zipPath = storageRoot.resolve(article.getZipFilename());
-        ZipExtractor extractor = new ZipExtractor(zipPath, extractRoot, savings.getId(), magicNumberValidator);
-        ZipExtractor.ExtractionResult result = extractor.extract();
+            // Create savings record
+            Savings savings = Savings.builder()
+                    .articleId(articleId)
+                    .userId(article.getUser().getId())
+                    .gameId(article.getGame().getId())
+                    .zipPath(cosPrefix + zipFilename)          // storage key, not local path
+                    .extractRoot(cosPrefix + "extracted/")       // storage key prefix
+                    .zipHash("pending")
+                    .fileCount(0)
+                    .totalSize(0L)
+                    .build();
+            savings = savingsRepository.save(savings);
 
-        // Save all file/directory entries in batch
-        List<SavingItem> items = result.getItems();
-        if (!items.isEmpty()) {
-            savingItemRepository.saveAll(items);
-        }
-        log.info("Saved {} saving_items for article {}", items.size(), articleId);
+            // Run extraction to temp directory
+            ZipExtractor extractor = new ZipExtractor(zipPath, extractRoot, savings.getId(), magicNumberValidator);
+            ZipExtractor.ExtractionResult result = extractor.extract();
 
-        // ---- 新建 readme/ 目录结构 ----
-        Path readmeDir = storageRoot.resolve("readme");
-        Path readmeImagesDir = readmeDir.resolve("images");
-        Files.createDirectories(readmeImagesDir);
-
-        // 写入 README.md 到 readme/ 目录
-        String readmeRawFromZip = null;
-        if (result.getReadmeContents() != null && !result.getReadmeContents().isEmpty()) {
-            readmeRawFromZip = result.getReadmeContents().get(0);
-        }
-        if (readmeRawFromZip != null && !readmeRawFromZip.isBlank()) {
-            Files.writeString(readmeDir.resolve("README.md"), readmeRawFromZip,
-                    java.nio.charset.StandardCharsets.UTF_8);
-        }
-
-        // 写入 images 到 readme/images/
-        if (result.getReadmeImages() != null) {
-            for (ZipExtractor.ReadmeImageEntry img : result.getReadmeImages()) {
-                Path imgPath = readmeImagesDir.resolve(img.getRelativePath());
-                Files.createDirectories(imgPath.getParent());
-                Files.write(imgPath, img.getData());
-
-                // Generate 720-wide proportional thumbnail for README images
-                try {
-                    ImageThumbnailService.generateReadmeThumbnail(imgPath);
-                } catch (Exception e) {
-                    log.warn("Failed to generate README thumbnail for {}: {}",
-                            img.getRelativePath(), e.getMessage());
+            // Upload extracted files to storage
+            List<SavingItem> items = result.getItems();
+            for (SavingItem item : items) {
+                if (!item.getIsDirectory()) {
+                    Path localFile = extractRoot.resolve(item.getPhysicalKey());
+                    if (Files.exists(localFile)) {
+                        String fileKey = cosPrefix + "extracted/" + item.getPhysicalKey();
+                        storageService.storeFromPath(fileKey, localFile);
+                    }
                 }
             }
-            log.info("Extracted {} readme images to {}", result.getReadmeImages().size(), readmeImagesDir);
+
+            // Save all file/directory entries in batch
+            if (!items.isEmpty()) {
+                savingItemRepository.saveAll(items);
+            }
+            log.info("Saved {} saving_items for article {}", items.size(), articleId);
+
+            // Write README.md to temp and upload
+            String readmeRawFromZip = null;
+            if (result.getReadmeContents() != null && !result.getReadmeContents().isEmpty()) {
+                readmeRawFromZip = result.getReadmeContents().get(0);
+            }
+            if (readmeRawFromZip != null && !readmeRawFromZip.isBlank()) {
+                Path readmePath = tempDir.resolve("README.md");
+                Files.writeString(readmePath, readmeRawFromZip, java.nio.charset.StandardCharsets.UTF_8);
+                storageService.storeFromPath(cosPrefix + "readme/README.md", readmePath);
+            }
+
+            // Upload README images
+            if (result.getReadmeImages() != null) {
+                Path imagesDir = tempDir.resolve("images");
+                Files.createDirectories(imagesDir);
+                for (ZipExtractor.ReadmeImageEntry img : result.getReadmeImages()) {
+                    Path imgPath = imagesDir.resolve(img.getRelativePath());
+                    Files.createDirectories(imgPath.getParent());
+                    Files.write(imgPath, img.getData());
+
+                    String imgKey = cosPrefix + "readme/images/" + img.getRelativePath();
+                    storageService.storeFromPath(imgKey, imgPath);
+
+                    // Generate 720-wide proportional thumbnail, upload to storage
+                    try {
+                        if (ImageThumbnailService.generateReadmeThumbnail(imgPath)) {
+                            // Thumbnail is at {name}_thumb.jpg next to original
+                            String origName = imgPath.getFileName().toString();
+                            String base = origName.contains(".")
+                                    ? origName.substring(0, origName.lastIndexOf('.'))
+                                    : origName;
+                            Path thumbPath = imgPath.resolveSibling(base + "_thumb.jpg");
+                            if (Files.exists(thumbPath)) {
+                                String parentDir = img.getRelativePath().contains("/")
+                                        ? img.getRelativePath().substring(0, img.getRelativePath().lastIndexOf('/') + 1)
+                                        : "";
+                                String thumbKey = cosPrefix + "readme/images/" + parentDir + base + "_thumb.jpg";
+                                storageService.storeFromPath(thumbKey, thumbPath);
+                            }
+                        }
+                    } catch (Exception e) {
+                        log.warn("Failed to generate README thumbnail for {}: {}",
+                                img.getRelativePath(), e.getMessage());
+                    }
+                }
+                log.info("Extracted {} readme images to storage", result.getReadmeImages().size());
+            }
+
+            // Update savings record
+            savings.setZipHash(result.getZipHash());
+            savings.setFileManifestHash(result.getFileManifestHash());
+            savings.setFileCount(result.getFileCount());
+            savings.setTotalSize(result.getTotalSize());
+            savingsRepository.save(savings);
+
+            // Update article: store raw markdown only, frontend renders with marked (GFM)
+            String finalReadmeRaw = article.getReadmeRaw();
+            if (finalReadmeRaw == null || finalReadmeRaw.isBlank()) {
+                finalReadmeRaw = readmeRawFromZip;
+            }
+
+            long fileSize = article.getFileSize();
+            if (fileSize <= 0) {
+                fileSize = Files.size(zipPath);
+            }
+            completeArticle(articleId, finalReadmeRaw, null, fileSize);
+            log.info("Article {} extraction complete: {} files, {} bytes",
+                    articleId, result.getFileCount(), result.getTotalSize());
+
+        } finally {
+            // Clean up temp directory
+            try {
+                deleteRecursively(tempDir);
+            } catch (Exception e) {
+                log.warn("Failed to clean temp directory {}: {}", tempDir, e.getMessage());
+            }
         }
-
-        // Update savings record
-        savings.setZipHash(result.getZipHash());
-        savings.setFileManifestHash(result.getFileManifestHash());
-        savings.setFileCount(result.getFileCount());
-        savings.setTotalSize(result.getTotalSize());
-        savingsRepository.save(savings);
-
-        // Update article: render README
-        String finalReadmeRaw = article.getReadmeRaw();
-        String finalReadmeContent;
-        if (finalReadmeRaw != null && !finalReadmeRaw.isBlank()) {
-            // User provided readme in the upload request
-            finalReadmeContent = MarkdownRenderer.render(finalReadmeRaw);
-        } else if (readmeRawFromZip != null && !readmeRawFromZip.isBlank()) {
-            // README.md extracted from ZIP
-            finalReadmeRaw = readmeRawFromZip;
-            finalReadmeContent = MarkdownRenderer.render(readmeRawFromZip);
-        } else {
-            finalReadmeContent = null;
-        }
-
-        long fileSize = Files.size(zipPath);
-        completeArticle(articleId, finalReadmeRaw, finalReadmeContent, fileSize);
-        log.info("Article {} extraction complete: {} files, {} bytes",
-                articleId, result.getFileCount(), result.getTotalSize());
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -202,10 +226,9 @@ public class ZipExtractionService {
         article.setReadmeContent(readmeContent);
         article.setFileSize(fileSize);
         article = articleRepository.save(article);
-        log.info("Article {} completed: readmeRaw={} chars, readmeContent={} chars, fileSize={}",
+        log.info("Article {} completed: readmeRaw={} chars, fileSize={}",
                 articleId,
                 readmeRaw != null ? readmeRaw.length() : 0,
-                readmeContent != null ? readmeContent.length() : 0,
                 fileSize);
 
         // Index in Meilisearch
@@ -224,5 +247,16 @@ public class ZipExtractionService {
         } catch (Exception e) {
             log.error("Failed to mark article {} as FAILED", articleId, e);
         }
+    }
+
+    private void deleteRecursively(Path path) throws java.io.IOException {
+        if (Files.isDirectory(path)) {
+            try (var entries = Files.list(path)) {
+                for (Path entry : entries.toList()) {
+                    deleteRecursively(entry);
+                }
+            }
+        }
+        Files.deleteIfExists(path);
     }
 }
