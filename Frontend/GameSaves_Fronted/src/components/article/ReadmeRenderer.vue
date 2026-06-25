@@ -32,7 +32,6 @@
 
 <script setup>
 import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue'
-import { useRouter } from 'vue-router'
 import { marked } from 'marked'
 import { ElMessage } from 'element-plus'
 import hljs from 'highlight.js'
@@ -47,7 +46,6 @@ import { commentApi } from '../../api/commentApi'
 
 const props = defineProps({
   articleId: { type: Number, default: 0 },
-  html: { type: String, default: '' },
   raw: { type: String, default: '' },
   loading: { type: Boolean, default: false }
 })
@@ -65,7 +63,7 @@ function renderMarkdown(src, articleId) {
       url = `/api/files/${articleId}/readme-image?path=${encodeURIComponent(imgPath)}`
     }
     const titleAttr = token.title ? ` title="${escapeAttr(token.title)}"` : ''
-    return `<img src="${url}" alt="${escapeAttr(token.text || '')}"${titleAttr}>`
+    return `<img src="${url}" alt="${escapeAttr(token.text || '')}" loading="lazy"${titleAttr}>`
   }
   return marked.parse(src, {
     renderer, breaks: false, gfm: true,
@@ -82,7 +80,8 @@ function escapeAttr(str) { return str.replace(/&/g, '&amp;').replace(/"/g, '&quo
 function escapeHtml(text) { return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }
 
 const renderedContent = computed(() => {
-  const src = props.raw || props.html
+  // Plan B: always render from raw Markdown via marked (GFM)
+  const src = props.raw
   if (!src) return ''
   try { return renderMarkdown(src, props.articleId) } catch { return `<pre>${escapeHtml(src)}</pre>` }
 })
@@ -252,21 +251,49 @@ const {
 
 const allComments = ref([])
 
+// Plan B: 本地 py 缓存 — 创建时直接测量存入，resize 时批量更新
+// 优先于 anchor.py，解决 DOM Range 重建的漂移问题
+const pyCache = ref(new Map())
+
 // ---- 位置计算（供 AnnotationPanel 卡片定位） ----
 function computeAnnotationPositions() {
   const container = contentContainer.value
   if (!container) return { positions: [], readmeContentTop: 0 }
   const containerRect = container.getBoundingClientRect()
   const results = []
+
   for (const comment of allComments.value) {
-    const start = comment.quoteStart ?? 0
-    const end = comment.quoteEnd ?? 0
-    if (end <= start) continue
-    const range = createRangeFromOffsets(container, start, end)
-    if (!range) continue
-    const rect = range.getBoundingClientRect()
-    results.push({ id: comment.id, top: Math.round(rect.top - containerRect.top), comment })
+    // Plan B: 优先 pyCache（resize 后更新）→ anchor.py（首次加载）→ Range 测量（老批注 fallback）
+    let py = pyCache.value.get(comment.id) ?? null
+
+    if (py == null) {
+      // 从 anchor JSON 读取创建时测量的 py
+      try {
+        const anchor = typeof comment.anchor === 'string'
+          ? JSON.parse(comment.anchor)
+          : comment.anchor
+        if (typeof anchor?.py === 'number') {
+          py = anchor.py
+          pyCache.value.set(comment.id, py) // 首次加载时缓存，后续 resize 不走此分支
+        }
+      } catch { /* anchor parse error, fall through */ }
+    }
+
+    if (py != null) {
+      // 用存储/缓存的 py（创建时测量，可靠值）
+      results.push({ id: comment.id, top: py, comment })
+    } else {
+      // 老批注 fallback：TreeWalker + Range 测量（可能受 recogito 二次扫描影响）
+      const start = comment.quoteStart ?? 0
+      const end = comment.quoteEnd ?? 0
+      if (end <= start) continue
+      const range = createRangeFromOffsets(container, start, end)
+      if (!range) continue
+      const rect = range.getBoundingClientRect()
+      results.push({ id: comment.id, top: Math.round(rect.top - containerRect.top), comment })
+    }
   }
+
   results.sort((a, b) => a.top - b.top)
   const cardH = 36, gap = 6
   for (let i = 1; i < results.length; i++) {
@@ -313,25 +340,40 @@ watch([renderedContent, contentContainer], async ([content, container]) => {
     try {
       const comments = await commentApi.getByArticle(props.articleId)
       allComments.value = comments || []
+      // Plan B: 从 anchor JSON 提取 py 填充本地缓存
+      if (comments) {
+        for (const c of comments) {
+          try {
+            const anchor = typeof c.anchor === 'string' ? JSON.parse(c.anchor) : c.anchor
+            if (typeof anchor?.py === 'number') pyCache.value.set(c.id, anchor.py)
+          } catch { /* anchor parse error */ }
+        }
+      }
       if (comments?.length) {
         // recogito 加载（用于 hover / click / scrollIntoView）
         loadComments(comments)
-        // 自定义渲染（HighlightManager + BorderLayer）
         await nextTick()
+        // 自定义渲染（HighlightManager + BorderLayer）
         renderAllHighlights(comments, container)
+        // Plan B: 首次加载时，为所有没有 anchor.py 的老批注预填充 pyCache。
+        // 此时 DOM 最干净，Range 测量最可靠。后续增量操作中不再依赖 fallback。
+        await nextTick()
+        const containerRect = container.getBoundingClientRect()
+        for (const comment of comments) {
+          if (pyCache.value.has(comment.id)) continue // 已有 anchor.py 的跳过
+          const start = comment.quoteStart ?? 0
+          const end = comment.quoteEnd ?? 0
+          if (end <= start) continue
+          const range = createRangeFromOffsets(container, start, end)
+          if (range) {
+            pyCache.value.set(comment.id, Math.round(range.getBoundingClientRect().top - containerRect.top))
+          }
+        }
         schedulePositionEmit()
       }
     } catch { /* */ }
   }
 })
-
-// ---- 页面重载（保持滚动位置） ----
-const router = useRouter()
-function reloadPage() {
-  // 保存当前滚动位置到 sessionStorage，刷新后恢复
-  sessionStorage.setItem(`scrollY_${props.articleId}`, String(window.scrollY))
-  router.go(0)
-}
 
 // ---- 新建批注 ----
 async function onPopupSubmit(content) {
@@ -341,26 +383,44 @@ async function onPopupSubmit(content) {
   const user = userStr ? JSON.parse(userStr) : null
   if (!user?.id) { showPopup.value = false; return }
 
+  // Plan B: 在 recogito 做任何额外操作前，立刻测量选中文字的像素 Y 坐标。
+  // 此时 DOM 处于干净状态（recogito 刚捕获选区，尚未调用 loadAnnotations），
+  // TreeWalker 输出与 offset 一致，测量值可靠。
+  let positionY = 0
+  if (contentContainer.value) {
+    const range = createRangeFromOffsets(contentContainer.value, sel.start, sel.end)
+    if (range) {
+      const containerRect = contentContainer.value.getBoundingClientRect()
+      positionY = Math.round(range.getBoundingClientRect().top - containerRect.top)
+    }
+  }
+
   try {
     const comment = await commentApi.create({
       articleId: props.articleId,
       userId: user.id,
       content,
-      anchor: JSON.stringify({ exact: sel.quote, start: sel.start, end: sel.end }),
+      anchor: JSON.stringify({ exact: sel.quote, start: sel.start, end: sel.end, py: positionY }),
       selectedText: sel.quote,
       quoteStart: sel.start,
       quoteEnd: sel.end
     })
     updateAnnotationId(sel.annotationId, comment.id)
-    await refreshAnnotations()
+    // 增量追加到本地列表
+    allComments.value = [...allComments.value, comment]
+    // Plan B: 新批注的 py 已存入 anchor，也写入本地缓存
+    pyCache.value.set(comment.id, positionY)
+    // recogito 加载（扫描文本节点建立 spatial index，用于 hover/click/scroll）
+    loadComments(allComments.value)
     await nextTick()
     if (contentContainer.value) {
       addHighlightForComment(comment, contentContainer.value)
     }
-    emitPositions()
+    // Plan B: computeAnnotationPositions 会从 pyCache 读取新批注的 py，
+    // 不再依赖受 recogito 扫描影响的 TreeWalker Range 重建。
+    // 使用 schedulePositionEmit（rAF）确保 DOM 布局完全稳定后再测量 readmeContentTop
+    schedulePositionEmit()
     emit('comment-created', comment)
-    // 提交后刷新页面以确保状态一致、滚动正常
-    reloadPage()
   } catch (e) {
     removePendingAnnotation(sel.annotationId)
     console.error('Save annotation failed:', e)
@@ -382,11 +442,11 @@ function removeLocalComment(commentId) {
   removeComment(commentId)
   // 自定义渲染层清理
   removeHighlightForComment(commentId)
+  // Plan B: 清理 py 缓存
+  pyCache.value.delete(commentId)
   // 本地数据清理
   allComments.value = allComments.value.filter(c => c.id !== commentId)
   schedulePositionEmit()
-  // 删除后刷新页面以确保状态一致、滚动正常
-  reloadPage()
 }
 
 async function handleDeleteComment(commentId) {
@@ -403,26 +463,77 @@ async function refreshAnnotations() {
   try {
     const comments = await commentApi.getByArticle(props.articleId)
     allComments.value = comments || []
+    // Plan B: 从 anchor JSON 提取 py 填充本地缓存
+    if (comments) {
+      for (const c of comments) {
+        try {
+          const anchor = typeof c.anchor === 'string' ? JSON.parse(c.anchor) : c.anchor
+          if (typeof anchor?.py === 'number') pyCache.value.set(c.id, anchor.py)
+        } catch { /* anchor parse error */ }
+      }
+    }
     if (comments?.length) {
       // 同步到 recogito（hover / click / scrollIntoView）
       loadComments(comments)
-      // 重新渲染视觉高亮
       await nextTick()
       if (contentContainer.value) {
         renderAllHighlights(comments, contentContainer.value)
+      }
+      // Plan B: 为所有没有 anchor.py 的老批注预填充 pyCache
+      await nextTick()
+      const container = contentContainer.value
+      if (container) {
+        const containerRect = container.getBoundingClientRect()
+        for (const comment of comments) {
+          if (pyCache.value.has(comment.id)) continue
+          const start = comment.quoteStart ?? 0
+          const end = comment.quoteEnd ?? 0
+          if (end <= start) continue
+          const range = createRangeFromOffsets(container, start, end)
+          if (range) {
+            pyCache.value.set(comment.id, Math.round(range.getBoundingClientRect().top - containerRect.top))
+          }
+        }
       }
       schedulePositionEmit()
     }
   } catch { /* */ }
 }
 
-defineExpose({ scrollTo, handleDeleteComment, removeLocalComment, refreshAnnotations })
+/**
+ * 统一控制批注视觉层的显隐（高亮 + 边框条）。
+ * 由父组件 ArticlePage 的批注开关调用。
+ */
+function setAnnotationsVisible(visible) {
+  highlightManager.setVisible(visible)
+  if (borderLayer.value) {
+    borderLayer.value.setVisible(visible)
+  }
+}
+
+defineExpose({ scrollTo, handleDeleteComment, removeLocalComment, refreshAnnotations, setAnnotationsVisible })
 
 function onResize() {
-  if (allComments.value.length) {
-    schedulePositionEmit()
-    // BorderLayer 自动通过 ResizeObserver 处理
+  if (!allComments.value.length) return
+  // Plan B: resize 时文本重排，py 会失效。清除缓存 → Range 重测 → 写入新 py。
+  // 此时 recogito 处于稳态（没有正在进行的选区创建），Range 重建结果可靠。
+  pyCache.value.clear()
+  // 用 Range 测量更新 pyCache（computeAnnotationPositions 的 fallback 路径）
+  const container = contentContainer.value
+  if (container) {
+    for (const comment of allComments.value) {
+      const start = comment.quoteStart ?? 0
+      const end = comment.quoteEnd ?? 0
+      if (end <= start) continue
+      const range = createRangeFromOffsets(container, start, end)
+      if (!range) continue
+      const containerRect = container.getBoundingClientRect()
+      const py = Math.round(range.getBoundingClientRect().top - containerRect.top)
+      pyCache.value.set(comment.id, py)
+    }
   }
+  schedulePositionEmit()
+  // BorderLayer 自动通过 ResizeObserver 处理
 }
 
 if (typeof window !== 'undefined') {

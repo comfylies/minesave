@@ -167,15 +167,16 @@ function truncate(text, maxLen) {
   return text.length > maxLen ? text.slice(0, maxLen) + '…' : text
 }
 
+// bodyOffsetTop > 0 在页面滚动后会变成负数（元素在viewport上方），
+// 导致 showPositioned 变为 false，positioned-layer 被销毁，卡片退回列表模式。
+// 改用独立标记：只要执行过一次 measureBodyOffset 就认为坐标系已就绪。
+const coordinateReady = ref(false)
+
 const showPositioned = computed(() => {
-  return props.marginPositions && props.marginPositions.length > 0 && bodyOffsetTop.value > 0
+  return props.marginPositions && props.marginPositions.length > 0 && coordinateReady.value
 })
 
 const adjustedPositions = computed(() => {
-  if (!showPositioned.value) return []
-
-  // 用 bodyOffsetTop（.positioned-layer 的 viewport 位置）和 readmeContentTop
-  // 计算坐标系偏移。两个值都反映 viewport 位置，差值固定，不受页面滚动影响。
   const bodyTop = bodyOffsetTop.value
   const contentTop = props.readmeContentTop
   const offsetAdjust = bodyTop - contentTop
@@ -185,30 +186,28 @@ const adjustedPositions = computed(() => {
     commentMap.set(c.id, c)
   }
 
-  return props.marginPositions
+  const result = props.marginPositions
     .filter(p => commentMap.has(p.id))
     .map(p => ({
       id: p.id,
-      // p.top 是 ReadmeRenderer 计算的容器相对坐标
-      // 减去 offsetAdjust 转换为 AnnotationPanel 的坐标系
       top: Math.round(p.top - offsetAdjust),
       comment: commentMap.get(p.id) || p.comment
     }))
     .sort((a, b) => a.top - b.top)
+
+  return showPositioned.value ? result : []
 })
 
 function measureBodyOffset() {
   if (layerRef.value) {
-    // 优先使用 .positioned-layer 的 viewport top（card 的定位原点）
     bodyOffsetTop.value = layerRef.value.getBoundingClientRect().top
   } else if (bodyRef.value) {
-    // .positioned-layer 尚未渲染，使用 .annotation-body 作为降级参考
-    // .annotation-body 有 padding: 8px，需补偿以匹配 layerRef 的坐标系
     const bodyRect = bodyRef.value.getBoundingClientRect()
     const bodyStyle = window.getComputedStyle(bodyRef.value)
     const padTop = parseFloat(bodyStyle.paddingTop) || 0
     bodyOffsetTop.value = bodyRect.top + padTop
   }
+  coordinateReady.value = true
 }
 
 function canDelete(comment) {
@@ -294,7 +293,11 @@ function onResize() {
 
 defineExpose({ fetchComments, addCommentToList, removeCommentFromList })
 
-watch(() => props.marginPositions, () => nextTick(() => measureBodyOffset()))
+watch(() => props.marginPositions, () => {
+  // 同步测量，确保 adjustedPositions 在本次渲染中使用与 readmeContentTop
+  // 同一时刻的坐标快照。避免 scroll 导致 bodyOffsetTop 与 readmeContentTop 不同步。
+  measureBodyOffset()
+})
 watch(() => props.readmeContentTop, () => nextTick(() => measureBodyOffset()))
 watch(() => props.articleId, () => { if (props.articleId) fetchComments() })
 watch(() => props.activeCommentId, (newId) => {
