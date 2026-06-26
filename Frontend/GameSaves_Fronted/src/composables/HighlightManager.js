@@ -51,6 +51,7 @@ export class HighlightManager {
   #entries = new Map()
 
   #supported = false
+  #visible = true
 
   constructor() {
     this.#supported = typeof Highlight !== 'undefined' && typeof CSS !== 'undefined' && CSS.highlights
@@ -120,6 +121,34 @@ export class HighlightManager {
    */
   getEntryIds() {
     return [...this.#entries.keys()]
+  }
+
+  /**
+   * 显示/隐藏所有高亮。
+   * 隐藏时调用 Highlight.clear() 清除范围（Highlight 对象保留在 CSS.highlights 中），
+   * 显示时从 #entries 中恢复所有 Range。使用标准 API，不操作样式表。
+   * @param {boolean} visible
+   */
+  setVisible(visible) {
+    this.#visible = visible
+    if (!this.#supported) return
+    if (visible) {
+      for (const [, { range, role }] of this.#entries) {
+        const hl = this.#highlights.get(role)
+        if (hl) {
+          try { hl.add(range) } catch { /* range may have been GC'd */ }
+        }
+      }
+    } else {
+      for (const hl of this.#highlights.values()) {
+        hl.clear()
+      }
+    }
+  }
+
+  /** 当前是否可见 */
+  getVisible() {
+    return this.#visible
   }
 
   /**

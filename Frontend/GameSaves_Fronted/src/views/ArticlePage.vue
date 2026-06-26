@@ -32,12 +32,13 @@
             <el-alert type="error" :title="fileStore.error" show-icon :closable="false" />
           </div>
 
-          <!-- 封面图（720px 压缩图） -->
-          <div v-if="articleStore.currentArticle.coverImage" class="cover-wrap">
+          <!-- 封面图（720px 压缩图，失败回退原图） -->
+          <div v-if="articleStore.currentArticle.coverImage && !coverFailed" class="cover-wrap">
             <img
-              :src="thumbUrl(articleStore.currentArticle.coverImage, 720)"
+              :src="coverSrc"
               :alt="articleStore.currentArticle.title"
               class="cover-image"
+              @error="onCoverError"
             />
           </div>
         </div>
@@ -57,13 +58,21 @@
         </ArticleSidebar>
       </div>
 
+      <!-- 批注显隐开关（封面图下方、README 上方） -->
+      <div class="annotations-toggle-bar">
+        <el-button size="small" @click="toggleAnnotations">
+          <el-icon><component :is="showAnnotations ? 'Hide' : 'View'" /></el-icon>
+          {{ showAnnotations ? '隐藏批注' : '显示批注' }}
+        </el-button>
+        <span class="annotations-toggle-hint">按 Ctrl+B 切换</span>
+      </div>
+
       <!-- README + 批注 同行布局 -->
       <div class="readme-row">
         <div class="article-main">
           <ReadmeRenderer
             ref="readmeRendererRef"
             :article-id="articleId"
-            :html="articleStore.currentArticle.readmeContent"
             :raw="articleStore.currentArticle.readmeRaw"
             :loading="false"
             @select-comment="onSelectComment"
@@ -72,17 +81,19 @@
           />
         </div>
 
-        <div class="article-sidebar">
-          <AnnotationPanel
-            ref="annotationPanelRef"
-            :article-id="articleId"
-            :active-comment-id="activeCommentId"
-            :margin-positions="marginPositions"
-            :readme-content-top="readmeContentTop"
-            @select-comment="onPanelSelectComment"
-            @delete-comment="onDeleteComment"
-          />
-        </div>
+        <Transition name="sidebar">
+          <div v-show="showAnnotations" class="article-sidebar">
+            <AnnotationPanel
+              ref="annotationPanelRef"
+              :article-id="articleId"
+              :active-comment-id="activeCommentId"
+              :margin-positions="marginPositions"
+              :readme-content-top="readmeContentTop"
+              @select-comment="onPanelSelectComment"
+              @delete-comment="onDeleteComment"
+            />
+          </div>
+        </Transition>
       </div>
     </template>
 
@@ -127,7 +138,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import hljs from 'highlight.js'
@@ -137,6 +148,23 @@ import { useAuthStore } from '../stores/auth'
 import { articleApi } from '../api/articleApi'
 import { fileApi } from '../api/fileApi'
 import { thumbUrl } from '../utils/imageUrl'
+
+// Cover image fallback: 720p → original
+const coverFailed = ref(false)
+const useOriginal = ref(false)
+const coverSrc = computed(() => {
+  const img = articleStore.currentArticle?.coverImage
+  if (!img) return ''
+  if (useOriginal.value) return img
+  return thumbUrl(img, 720) || img
+})
+function onCoverError() {
+  if (!useOriginal.value) {
+    useOriginal.value = true
+  } else {
+    coverFailed.value = true
+  }
+}
 import ArticleMeta from '../components/article/ArticleMeta.vue'
 import FileBrowser from '../components/article/FileBrowser.vue'
 import ArticleSidebar from '../components/article/ArticleSidebar.vue'
@@ -160,6 +188,27 @@ const annotationPanelRef = ref(null)
 const activeCommentId = ref(null)
 const marginPositions = ref([])
 const readmeContentTop = ref(0)
+const showAnnotations = ref(true)
+
+// 批注显隐切换
+function toggleAnnotations() {
+  showAnnotations.value = !showAnnotations.value
+  if (readmeRendererRef.value) {
+    readmeRendererRef.value.setAnnotationsVisible(showAnnotations.value)
+  }
+  // v-show 切换后等 Vue 更新完成，触发布局重算刷新批注卡定位
+  nextTick(() => {
+    window.dispatchEvent(new Event('resize'))
+  })
+}
+
+// Ctrl+B 快捷键
+function handleKeydown(e) {
+  if (e.ctrlKey && (e.key === 'b' || e.key === 'B')) {
+    e.preventDefault()
+    toggleAnnotations()
+  }
+}
 
 // 批注事件处理
 function onSelectComment(annotation) {
@@ -295,30 +344,9 @@ async function loadArticle() {
   fileStore.browse(articleId.value, '')
 }
 
-// 页面重载后恢复滚动位置（由 ReadmeRenderer.reloadPage() 在 sessionStorage 中保存）
-function restoreScrollPosition() {
-  const key = `scrollY_${articleId.value}`
-  const saved = sessionStorage.getItem(key)
-  if (saved) {
-    sessionStorage.removeItem(key)
-    const y = parseInt(saved, 10)
-    if (y > 0) {
-      // 等待 README 渲染完成再恢复（marginPositions 非空表示卡片定位已就绪）
-      const stop = watch(marginPositions, (positions) => {
-        if (positions && positions.length > 0) {
-          stop()
-          requestAnimationFrame(() => window.scrollTo(0, y))
-        }
-      })
-      // 兜底：2 秒后无论如何恢复
-      setTimeout(() => { stop(); window.scrollTo(0, y) }, 2000)
-    }
-  }
-}
-
 onMounted(() => {
+  window.addEventListener('keydown', handleKeydown)
   loadArticle()
-  restoreScrollPosition()
 })
 
 watch(() => route.params.articleId, () => {
@@ -327,6 +355,7 @@ watch(() => route.params.articleId, () => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeydown)
   fileStore.reset()
 })
 </script>
@@ -368,6 +397,20 @@ onUnmounted(() => {
   object-fit: cover;
 }
 
+/* ---- 批注显隐开关 ---- */
+.annotations-toggle-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-bottom: 0;
+  padding-bottom: var(--spacing-sm);
+}
+
+.annotations-toggle-hint {
+  font-size: var(--font-size-small);
+  color: var(--color-secondary-text);
+}
+
 /* ---- README + 批注 ---- */
 .readme-row {
   display: flex;
@@ -383,6 +426,19 @@ onUnmounted(() => {
 .article-sidebar {
   width: 280px;
   flex-shrink: 0;
+}
+
+/* Vue <Transition> 侧边栏滑入/滑出 */
+.sidebar-enter-active,
+.sidebar-leave-active {
+  transition: width 0.3s ease, opacity 0.3s ease;
+  overflow: hidden;
+}
+
+.sidebar-enter-from,
+.sidebar-leave-to {
+  width: 0 !important;
+  opacity: 0;
 }
 
 .file-error {
@@ -428,6 +484,20 @@ onUnmounted(() => {
   .article-sidebar {
     width: 100%;
     position: static;
+  }
+
+  /* 移动端侧边栏上下收起 */
+  .sidebar-enter-active,
+  .sidebar-leave-active {
+    transition: max-height 0.3s ease, opacity 0.3s ease;
+    overflow: hidden;
+  }
+
+  .sidebar-enter-from,
+  .sidebar-leave-to {
+    max-height: 0 !important;
+    width: 100% !important;
+    opacity: 0;
   }
 }
 </style>

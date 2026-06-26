@@ -1,5 +1,5 @@
 <template>
-  <header class="navbar">
+  <header class="navbar" :class="{ 'navbar--hidden': hidden }">
     <div class="navbar-inner container">
       <!-- 左侧：Logo + 导航链接 -->
       <div class="navbar-left">
@@ -65,7 +65,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
 import { ElMessage } from 'element-plus'
@@ -73,6 +73,26 @@ import { ElMessage } from 'element-plus'
 const router = useRouter()
 const auth = useAuthStore()
 const searchQuery = ref('')
+const hidden = ref(false)
+
+// Smart Header: 下滑隐藏，上滑出现
+let lastScrollY = 0
+const SCROLL_THRESHOLD = 60
+
+function onScroll() {
+  const currentY = window.scrollY
+  if (currentY < SCROLL_THRESHOLD) {
+    hidden.value = false
+  } else if (currentY > lastScrollY) {
+    hidden.value = true
+  } else if (currentY < lastScrollY) {
+    hidden.value = false
+  }
+  lastScrollY = currentY
+}
+
+onMounted(() => window.addEventListener('scroll', onScroll, { passive: true }))
+onUnmounted(() => window.removeEventListener('scroll', onScroll))
 
 function doSearch() {
   const q = searchQuery.value.trim()
@@ -93,9 +113,17 @@ function handleLogout() {
   height: var(--header-height);
   background: var(--color-header-bg);
   border-bottom: 1px solid var(--color-header-border);
-  position: sticky;
+  position: fixed;
   top: 0;
+  left: 0;
+  right: 0;
   z-index: 100;
+  transform: translateY(0);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.navbar--hidden {
+  transform: translateY(-100%);
 }
 
 .navbar-inner {

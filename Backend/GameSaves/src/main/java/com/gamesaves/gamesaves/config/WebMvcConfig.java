@@ -18,12 +18,11 @@ public class WebMvcConfig implements WebMvcConfigurer {
 
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
-        // Only register /storage/** static resource handler in local mode.
-        // In COS mode, files are served via StorageService (pre-signed URLs or direct COS URLs).
-        if ("local".equals(storageType)) {
-            String absolutePath = Paths.get(databasePath).toAbsolutePath().toUri().toString();
-            registry.addResourceHandler("/storage/**")
-                    .addResourceLocations(absolutePath);
-        }
+        // Register /storage/** static resource handler in all modes.
+        // In COS mode, this serves locally cached files (cover images, thumbnails)
+        // while bulk file storage goes through COS StorageService.
+        String absolutePath = Paths.get(databasePath).toAbsolutePath().toUri().toString();
+        registry.addResourceHandler("/storage/**")
+                .addResourceLocations(absolutePath);
     }
 }

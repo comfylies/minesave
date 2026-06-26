@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Game Save Sharing Platform (游戏存档分享平台) — GitHub-style file browsing + Zhihu-style Markdown rendering + Word-style collaborative annotations for game save files. Graduation project.
+Game Save Sharing Platform (游戏存档分享平台) — GitHub-style file browsing + Zhihu-style Markdown rendering + Word-style collaborative annotations for game save files. Personal project.
 
 ## Repository Structure
 
@@ -38,8 +38,14 @@ GameSaving/
 # Run a single test class
 ./mvnw test -Dtest=GameSavesApplicationTests
 
-# Start server (port 8080)
+# Start server (port 8080, local storage)
 ./mvnw spring-boot:run
+
+# Start with MinIO storage (simulates COS locally, requires MinIO on 192.168.100.2)
+./mvnw spring-boot:run -Dspring-boot.run.profiles=minio
+
+# Start with COS storage (production)
+./mvnw spring-boot:run -Dspring-boot.run.profiles=cos
 
 # Kill process on port 8080
 cmd //c "taskkill /PID $(netstat -ano | grep ':8080.*LISTENING' | awk '{print $NF}') /F"
@@ -136,7 +142,7 @@ Pagination uses `PageDTO<T>`: `{ "content": [...], "page": 0, "size": 20, "total
 | `GameController` | `/api/games` | Mixed | `GameService` |
 | `AdminController` | `/api/admin` | Login + Permission | `AdminService` |
 
-Additional service classes (no interface): `AuthService`, `EmailCodeService`, `ZipExtractionService`
+Additional service classes (no interface): `AuthService`, `EmailCodeService`, `ZipExtractionService`, `S3StorageServiceImpl`
 
 Key endpoints:
 - `POST /api/auth/login` — password login with captcha, returns Sa-Token token
@@ -171,7 +177,7 @@ Key endpoints:
 - `MethodArgumentNotValidException` → 400 (with field error mapping)
 - `Exception` (catch-all) → 500
 
-### Config Classes (6)
+### Config Classes (7)
 
 | Class | Purpose |
 |---|---|
@@ -179,10 +185,11 @@ Key endpoints:
 | `SaTokenConfig` | Route interceptors: `/api/admin/**` requires login, static resources excluded |
 | `StpInterfaceImpl` | Permission/role loading for Sa-Token (admin → `user:manage`, `article:manage`) |
 | `CorsConfig` | CORS allow-all for dev |
+| `S3Config` | AWS S3-compatible client config (MinIO local / COS production) |
 | `WebMvcConfig` | Static resource handlers for `/storage/**` |
 | `DataInitializer` | `@Profile("!prod")` — resets test user passwords on startup |
 
-### Utility Classes (8)
+### Utility Classes (7)
 
 | Class | Purpose |
 |---|---|
@@ -200,7 +207,15 @@ Key endpoints:
 ```yaml
 app:
   storage:
-    database-path: ../../Database            # Mixed storage root (relative to Backend/GameSaves/)
+    type: local                               # local | s3 — 存储后端
+    database-path: ../../Database            # local 模式：混合存储根目录
+    s3:                                      # S3 模式：MinIO（本地测试）或 COS（生产）
+      endpoint: http://192.168.100.2:9000
+      region: us-east-1
+      access-key: minioadmin
+      secret-key: minioadmin123
+      bucket-name: gamesaving
+      path-style-access: true               # MinIO=true, COS=false
   rate-limit:
     max-downloads-per-ip: 3                  # Memory layer cap
     window-seconds: 60                       # Rate limit window

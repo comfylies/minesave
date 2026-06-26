@@ -161,7 +161,8 @@ public class ArticleServiceImpl implements ArticleService {
                         String coverFilename = "cover." + coverExt;
                         String coverKey = cosPrefix + coverFilename;
                         storageService.storeFromPath(coverKey, tempCover);
-                        article.setCoverImage(storageService.getPublicUrl(coverKey));
+                        // Use presigned URL (24h) since COS bucket is private
+                        article.setCoverImage(storageService.generatePresignedUrl(coverKey, 1440));
 
                         // Generate thumbnails locally, upload each
                         Path thumbDir = Files.createTempDirectory("thumbs-");

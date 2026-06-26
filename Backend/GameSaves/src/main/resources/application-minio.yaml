@@ -1,0 +1,15 @@
+# ============================================================
+# MinIO Profile — 激活方式: --spring.profiles.active=minio
+# 本地模拟 COS，使用局域网 MinIO 服务 (192.168.100.2)
+# ============================================================
+app:
+  storage:
+    type: s3
+    s3:
+      endpoint: http://192.168.100.2:9000
+      region: us-east-1
+      access-key: minioadmin
+      secret-key: minioadmin
+      bucket-name: gamesaving
+      path-style-access: true
+      presigned-url-expiration-minutes: 5

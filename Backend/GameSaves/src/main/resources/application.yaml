@@ -78,13 +78,15 @@ meilisearch:
 # ============================================================
 app:
   storage:
-    type: local                                   # local | cos — 存储后端切换
+    type: local                                   # local | s3 — 存储后端切换
     database-path: ../../Database                # 混合存储根目录（local 模式使用）
-    cos:
-      secret-id: ${COS_SECRET_ID:}               # COS SecretId（环境变量注入）
-      secret-key: ${COS_SECRET_KEY:}             # COS SecretKey
-      region: ap-guangzhou                       # COS 地域
-      bucket-name: gamesaving                    # COS 桶名
+    s3:
+      endpoint: http://192.168.100.2:9000        # S3 endpoint（MinIO 或 COS）
+      region: us-east-1                          # MinIO 默认 region
+      access-key: minioadmin                     # S3 Access Key（MinIO 默认）
+      secret-key: minioadmin123                  # S3 Secret Key（MinIO 默认）
+      bucket-name: gamesaving                    # 桶名
+      path-style-access: true                    # MinIO 需要 path-style；COS 设为 false
       presigned-url-expiration-minutes: 5        # 预签名 URL 有效期（分钟）
   rate-limit:
     max-downloads-per-ip: 3                    # 每个IP每分钟最大下载次数

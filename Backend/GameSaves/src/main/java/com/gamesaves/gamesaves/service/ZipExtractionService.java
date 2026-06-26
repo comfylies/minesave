@@ -112,9 +112,9 @@ public class ZipExtractionService {
             ZipExtractor extractor = new ZipExtractor(zipPath, extractRoot, savings.getId(), magicNumberValidator);
             ZipExtractor.ExtractionResult result = extractor.extract();
 
-            // Upload extracted files to storage
+            // Upload extracted files to storage in parallel (COS: N concurrent uploads vs sequential)
             List<SavingItem> items = result.getItems();
-            for (SavingItem item : items) {
+            items.parallelStream().forEach(item -> {
                 if (!item.getIsDirectory()) {
                     Path localFile = extractRoot.resolve(item.getPhysicalKey());
                     if (Files.exists(localFile)) {
@@ -122,7 +122,7 @@ public class ZipExtractionService {
                         storageService.storeFromPath(fileKey, localFile);
                     }
                 }
-            }
+            });
 
             // Save all file/directory entries in batch
             if (!items.isEmpty()) {
