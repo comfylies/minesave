@@ -30,6 +30,13 @@ public class ZipExtractor {
 
     private static final int BUFFER_SIZE = 8192;
 
+    // ZIP bomb protection limits
+    private static final long MAX_ENTRY_SIZE = 100 * 1024 * 1024;             // 单条目解压后上限 100MB
+    private static final long MAX_TOTAL_UNCOMPRESSED_SIZE = 500 * 1024 * 1024; // 总解压后上限 500MB
+    private static final int MAX_ENTRY_COUNT = 10_000;                        // 最多 10000 个条目
+    private static final long SUSPICIOUS_COMPRESSED_SIZE = 100;               // 压缩后不足 100B 但解压巨大 → 炸弹特征
+    private static final long MIN_BOMB_UNCOMPRESSED_SIZE = 10 * 1024 * 1024;  // 解压后至少 10MB 才考虑炸弹
+
     private final Path zipPath;
     private final Path extractRoot;
     private final Long snapshotId;
@@ -47,12 +54,18 @@ public class ZipExtractor {
         // Ensure extract directory exists
         Files.createDirectories(extractRoot);
 
-        // Compute ZIP SHA-256 hash
+        // Compute ZIP SHA-256 hash (streaming — avoids loading entire ZIP into memory)
         String zipHash;
         try {
             MessageDigest sha256Digest = MessageDigest.getInstance("SHA-256");
-            byte[] zipBytes = Files.readAllBytes(zipPath);
-            zipHash = bytesToHex(sha256Digest.digest(zipBytes));
+            try (InputStream fis = Files.newInputStream(zipPath)) {
+                byte[] buffer = new byte[BUFFER_SIZE];
+                int len;
+                while ((len = fis.read(buffer)) != -1) {
+                    sha256Digest.update(buffer, 0, len);
+                }
+            }
+            zipHash = bytesToHex(sha256Digest.digest());
         } catch (java.security.NoSuchAlgorithmException e) {
             throw new FileProcessingException("SHA-256 not available", e);
         }
@@ -139,13 +152,26 @@ public class ZipExtractor {
                 .get()) {
 
             List<String> violations = new ArrayList<>();
+            long totalUncompressedSize = 0;
             Enumeration<ZipArchiveEntry> entries = zipFile.getEntries();
             while (entries.hasMoreElements()) {
                 ZipArchiveEntry entry = entries.nextElement();
                 String entryName = entry.getName().trim(); // strip \r etc. from cross-platform ZIPs
 
+                // ── Security: entry count limit ──
+                if (items.size() >= MAX_ENTRY_COUNT) {
+                    throw new FileProcessingException(
+                            "ZIP contains too many entries (max " + MAX_ENTRY_COUNT + ")");
+                }
+
                 // Skip directories
                 if (entry.isDirectory()) {
+                    continue;
+                }
+
+                // ── Security: symlink detection ──
+                if (entry.isUnixSymlink()) {
+                    log.warn("Skipping symlink entry: {}", entryName);
                     continue;
                 }
 
@@ -155,6 +181,30 @@ public class ZipExtractor {
                 } catch (PathTraversalException e) {
                     log.warn("Skipping entry due to security: {}", entryName);
                     continue;
+                }
+
+                // ── Security: per-entry size & compression ratio check ──
+                long uncompressedSize = entry.getSize();
+                long compressedSize = entry.getCompressedSize();
+                if (uncompressedSize > MAX_ENTRY_SIZE) {
+                    log.warn("Skipping oversized entry ({} bytes): {}", uncompressedSize, entryName);
+                    continue;
+                }
+                // 压缩比炸弹检测：压缩后极小（<100B）但解压后 >10MB → 典型炸弹特征
+                if (compressedSize > 0 && compressedSize < SUSPICIOUS_COMPRESSED_SIZE
+                        && uncompressedSize > MIN_BOMB_UNCOMPRESSED_SIZE) {
+                    throw new FileProcessingException(
+                            "Suspicious compression ratio in entry: " + entryName);
+                }
+
+                // ── Security: cumulative size check ──
+                if (uncompressedSize > 0) {
+                    totalUncompressedSize += uncompressedSize;
+                    if (totalUncompressedSize > MAX_TOTAL_UNCOMPRESSED_SIZE) {
+                        throw new FileProcessingException(
+                                "ZIP total uncompressed size exceeds limit ("
+                                        + MAX_TOTAL_UNCOMPRESSED_SIZE / (1024 * 1024) + "MB)");
+                    }
                 }
 
                 // Read entry content

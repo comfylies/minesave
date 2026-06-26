@@ -23,6 +23,7 @@ import com.gamesaves.gamesaves.service.SearchSyncService;
 import com.gamesaves.gamesaves.service.StorageService;
 import com.gamesaves.gamesaves.service.ZipExtractionService;
 import com.gamesaves.gamesaves.util.ImageThumbnailService;
+import com.gamesaves.gamesaves.util.XssFilter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
@@ -104,14 +105,15 @@ public class ArticleServiceImpl implements ArticleService {
         final String finalReadmeRaw = resolvedReadmeRaw;
         // Create article with placeholder storageRoot (ID not yet generated)
         Article article = Article.builder()
-                .title(request.getTitle())
-                .version(request.getVersion())
+                .title(XssFilter.sanitize(request.getTitle()))
+                .version(XssFilter.sanitize(request.getVersion()))
                 .game(game)
                 .user(user)
-                .description(request.getDescription())
+                .description(request.getDescription() != null
+                        ? XssFilter.sanitize(request.getDescription()) : null)
                 .readmeRaw(finalReadmeRaw)
                 .zipFilename(file.getOriginalFilename() != null
-                        ? file.getOriginalFilename() : "archive.zip")
+                        ? XssFilter.sanitize(file.getOriginalFilename()) : "archive.zip")
                 .storageRoot(storagePrefix)  // placeholder, updated below
                 .status(Article.ArticleStatus.UPLOADING)
                 .build();
@@ -226,9 +228,9 @@ public class ArticleServiceImpl implements ArticleService {
         Article article = articleRepository.findByIdWithUserAndGame(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Article", id));
 
-        if (request.getTitle() != null) article.setTitle(request.getTitle());
-        if (request.getVersion() != null) article.setVersion(request.getVersion());
-        if (request.getDescription() != null) article.setDescription(request.getDescription());
+        if (request.getTitle() != null) article.setTitle(XssFilter.sanitize(request.getTitle()));
+        if (request.getVersion() != null) article.setVersion(XssFilter.sanitize(request.getVersion()));
+        if (request.getDescription() != null) article.setDescription(XssFilter.sanitize(request.getDescription()));
 
         // Update tag associations if tagIds is provided
         if (request.getTagIds() != null) {

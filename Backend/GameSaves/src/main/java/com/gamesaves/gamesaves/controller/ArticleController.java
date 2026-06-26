@@ -1,5 +1,6 @@
 package com.gamesaves.gamesaves.controller;
 
+import cn.dev33.satoken.stp.StpUtil;
 import com.gamesaves.gamesaves.dto.PageDTO;
 import com.gamesaves.gamesaves.dto.request.ArticleCreateRequest;
 import com.gamesaves.gamesaves.dto.request.ArticleUpdateRequest;
@@ -29,6 +30,8 @@ public class ArticleController {
             @RequestPart("file") MultipartFile file,
             @RequestPart(value = "readmeFile", required = false) MultipartFile readmeFile,
             @RequestPart(value = "coverFile", required = false) MultipartFile coverFile) {
+        // Override userId from session to prevent impersonation
+        request.setUserId(StpUtil.getLoginIdAsLong());
         ArticleDetailResponse article = articleService.createArticle(request, file, readmeFile, coverFile);
         return ApiResponse.success("Article created, extraction started", article);
     }

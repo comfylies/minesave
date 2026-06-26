@@ -12,8 +12,8 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  *
  * 认证策略：
  * - /api/auth/**     — 公开（登录、注册、验证码、邮箱验证码）
- * - /api/games/**    — 公开（浏览游戏）
- * - /api/articles/** — 公开（浏览存档）
+ * - GET /api/games/**    — 公开（浏览游戏），POST/PUT/DELETE 需登录
+ * - GET /api/articles/** — 公开（浏览存档），POST/PUT/DELETE 需登录
  * - /api/users/register、/api/users/login — 公开
  * - /api/files/**    — 公开（浏览文件）
  * - GET /api/comments/** — 公开（浏览批注），POST/DELETE 需登录
@@ -45,10 +45,10 @@ public class SaTokenConfig implements WebMvcConfigurer {
                     // 公开接口放行前，若已登录则刷新活跃时间，避免前台浏览导致 token 过期
                     SaRouter
                         .match("/api/auth/**").stop()
-                        .match("/api/games/**", r -> refreshIfLogin()).stop()
+                        .matchMethod("GET").match("/api/games/**", r -> refreshIfLogin()).stop()
                         .match("/api/users/register").stop()
                         .match("/api/users/login").stop()
-                        .match("/api/articles/**", r -> refreshIfLogin()).stop()
+                        .matchMethod("GET").match("/api/articles/**", r -> refreshIfLogin()).stop()
                         .match("/api/files/**", r -> refreshIfLogin()).stop()
                         // 批注：GET 公开（stop），POST/DELETE 需登录走下一级 checkLogin
                         .matchMethod("GET").match("/api/comments/**", r -> refreshIfLogin()).stop()

@@ -14,6 +14,7 @@ import com.gamesaves.gamesaves.exception.ResourceNotFoundException;
 import com.gamesaves.gamesaves.repository.LoginFailRepository;
 import com.gamesaves.gamesaves.repository.UserRepository;
 import com.gamesaves.gamesaves.util.CaptchaUtil;
+import com.gamesaves.gamesaves.util.XssFilter;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -181,11 +182,13 @@ public class AuthService {
         // 3. 创建用户
         String encodedPassword = passwordEncoder.encode(request.getPassword());
         User user = User.builder()
-                .username(request.getUsername())
+                .username(XssFilter.sanitize(request.getUsername()))
                 .password(encodedPassword)
-                .nickname(request.getNickname() != null ? request.getNickname() : request.getUsername())
-                .phone(request.getPhone())
-                .email(request.getEmail())
+                .nickname(request.getNickname() != null
+                        ? XssFilter.sanitize(request.getNickname())
+                        : XssFilter.sanitize(request.getUsername()))
+                .phone(request.getPhone() != null ? XssFilter.sanitize(request.getPhone()) : null)
+                .email(request.getEmail() != null ? XssFilter.sanitize(request.getEmail()) : null)
                 .role("user")
                 .isActive(true)
                 .build();

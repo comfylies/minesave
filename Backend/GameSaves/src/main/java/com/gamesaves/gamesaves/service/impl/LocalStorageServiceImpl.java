@@ -58,9 +58,16 @@ public class LocalStorageServiceImpl implements StorageService {
         if (relative.startsWith("articles/")) {
             relative = relative.substring("articles/".length());
         }
-        return basePath.resolve(relative.replace('/', java.io.File.separatorChar))
+        Path resolved = basePath.resolve(relative.replace('/', java.io.File.separatorChar))
                 .toAbsolutePath()
                 .normalize();
+
+        // 包含性校验：防止路径穿越到 basePath 之外
+        Path normalizedBase = basePath.toAbsolutePath().normalize();
+        if (!resolved.startsWith(normalizedBase)) {
+            throw new StorageException("Path traversal blocked: " + key);
+        }
+        return resolved;
     }
 
     // ── StorageService implementation ───────────────────────────────────
