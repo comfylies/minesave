@@ -1,5 +1,6 @@
 package com.gamesaves.gamesaves.controller;
 
+import cn.dev33.satoken.stp.StpUtil;
 import com.gamesaves.gamesaves.dto.request.CommentCreateRequest;
 import com.gamesaves.gamesaves.dto.response.ApiResponse;
 import com.gamesaves.gamesaves.dto.response.CommentResponse;
@@ -27,14 +28,17 @@ public class CommentController {
 
     @PostMapping
     public ApiResponse<CommentResponse> createComment(@Valid @RequestBody CommentCreateRequest request) {
-        CommentResponse comment = commentService.createComment(request);
+        // 使用当前登录用户ID，不信任请求参数
+        Long currentUserId = StpUtil.getLoginIdAsLong();
+        CommentResponse comment = commentService.createComment(request, currentUserId);
         return ApiResponse.success("Comment created", comment);
     }
 
     @DeleteMapping("/{id}")
-    public ApiResponse<Void> deleteComment(@PathVariable Long id,
-                                            @RequestParam Long userId) {
-        commentService.deleteComment(id, userId);
+    public ApiResponse<Void> deleteComment(@PathVariable Long id) {
+        // 使用当前登录用户ID，不信任请求参数
+        Long currentUserId = StpUtil.getLoginIdAsLong();
+        commentService.deleteComment(id, currentUserId);
         return ApiResponse.success("Comment deleted", null);
     }
 }

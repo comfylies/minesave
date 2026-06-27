@@ -63,8 +63,9 @@ public class AuthController {
      */
     @PostMapping("/login/email")
     public ApiResponse<LoginResponse> loginWithEmailCode(
-            @Valid @RequestBody EmailLoginRequest request) {
-        LoginResponse result = authService.loginWithEmailCode(request);
+            @Valid @RequestBody EmailLoginRequest request,
+            HttpServletRequest httpRequest) {
+        LoginResponse result = authService.loginWithEmailCode(request, httpRequest);
         return ApiResponse.success("Login successful", result);
     }
 
@@ -72,13 +73,12 @@ public class AuthController {
 
     /**
      * 发送邮箱验证码（用于登录或注册验证）
-     * 冷却时间：60秒
-     * 有效期：5分钟
+     * 安全：需先通过图形验证码 + 每日每邮箱限5次 + 发送后2分钟冷却 + 有效期5分钟
      */
     @PostMapping("/email-code")
     public ApiResponse<Void> sendEmailCode(@Valid @RequestBody EmailCodeRequest request) {
         authService.sendEmailCode(request);
-        return ApiResponse.success("Verification code sent, valid for 5 minutes", null);
+        return ApiResponse.success("Verification code sent, valid for 5 minutes (usable after 2 minutes)", null);
     }
 
     // ==================== 注册 ====================

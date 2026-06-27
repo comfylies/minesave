@@ -41,7 +41,7 @@ public class CommentServiceImpl implements CommentService {
     }
 
     @Override
-    public CommentResponse createComment(CommentCreateRequest request) {
+    public CommentResponse createComment(CommentCreateRequest request, Long currentUserId) {
         // Validate article
         Article article = articleRepository.findById(request.getArticleId())
                 .orElseThrow(() -> new ResourceNotFoundException("Article", request.getArticleId()));
@@ -50,9 +50,9 @@ public class CommentServiceImpl implements CommentService {
             throw new BadRequestException("Cannot comment on article that is not READY");
         }
 
-        // Validate user
-        User user = userRepository.findById(request.getUserId())
-                .orElseThrow(() -> new ResourceNotFoundException("User", request.getUserId()));
+        // Validate user (使用当前登录用户，不信任请求参数中的userId)
+        User user = userRepository.findById(currentUserId)
+                .orElseThrow(() -> new ResourceNotFoundException("User", currentUserId));
 
         // Validate parent comment (for reply)
         if (request.getParentId() != null) {
@@ -66,7 +66,7 @@ public class CommentServiceImpl implements CommentService {
 
         Comment comment = Comment.builder()
                 .articleId(request.getArticleId())
-                .userId(request.getUserId())
+                .userId(currentUserId)
                 .content(sanitizedContent)
                 .anchor(XssFilter.sanitize(request.getAnchor()))
                 .selectedText(XssFilter.sanitize(request.getSelectedText()))
@@ -108,21 +108,22 @@ public class CommentServiceImpl implements CommentService {
     }
 
     @Override
-    public void deleteComment(Long commentId, Long userId) {
+    public void deleteComment(Long commentId, Long currentUserId) {
         Comment comment = commentRepository.findById(commentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Comment", commentId));
 
-        // Only comment author or admin can delete
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new ResourceNotFoundException("User", userId));
+        // 获取当前登录用户信息进行权限校验
+        User currentUser = userRepository.findById(currentUserId)
+                .orElseThrow(() -> new ResourceNotFoundException("User", currentUserId));
 
-        if (!comment.getUserId().equals(userId) && !"admin".equals(user.getRole())) {
+        // Only comment author or admin can delete
+        if (!comment.getUserId().equals(currentUserId) && !"admin".equals(currentUser.getRole())) {
             throw new BadRequestException("Only the comment author or an admin can delete this comment");
         }
 
         // Cascade delete children
         commentRepository.deleteByParentId(commentId);
         commentRepository.delete(comment);
-        log.info("Comment {} deleted by user {}", commentId, userId);
+        log.info("Comment {} deleted by user {}", commentId, currentUserId);
     }
 }

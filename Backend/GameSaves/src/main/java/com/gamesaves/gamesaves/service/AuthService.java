@@ -56,9 +56,6 @@ public class AuthService {
     @Value("${app.login.lock-minutes:30}")
     private int lockMinutes;
 
-    @Value("${app.login.captcha-enabled:true}")
-    private boolean captchaEnabled;
-
     public AuthService(UserRepository userRepository,
                        LoginFailRepository loginFailRepository,
                        EmailCodeService emailCodeService) {
@@ -85,8 +82,7 @@ public class AuthService {
     }
 
     private void validateCaptcha(String captchaKey, String captchaCode) {
-        if (!captchaEnabled) return; // 开发/测试阶段可关闭
-
+        // 生产环境始终强制验证码校验
         if (captchaKey == null || captchaCode == null || captchaCode.trim().isEmpty()) {
             throw new CaptchaValidationException("Captcha code is required");
         }
@@ -116,7 +112,7 @@ public class AuthService {
 
         if (user == null) {
             log.warn("Login failed: account not found — {}", request.getLogin());
-            throw new BadRequestException("Account not found");
+            throw new BadRequestException("Invalid username or password");
         }
 
         // 3. 检查锁定状态
@@ -131,7 +127,7 @@ public class AuthService {
         // 5. 校验密码
         if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
             recordLoginFail(user.getId(), getClientIp(httpRequest));
-            throw new BadRequestException("Incorrect password");
+            throw new BadRequestException("Invalid username or password");
         }
 
         // 6. 登录成功
@@ -140,25 +136,37 @@ public class AuthService {
 
     // ==================== 邮箱验证码登录 ====================
 
-    public LoginResponse loginWithEmailCode(EmailLoginRequest request) {
-        // 1. 校验验证码
-        if (!emailCodeService.verifyCode(request.getEmail(), request.getCode())) {
+    public LoginResponse loginWithEmailCode(EmailLoginRequest request, HttpServletRequest httpRequest) {
+        // 1. 先按邮箱查找用户（用于检查锁定状态）
+        User user = userRepository.findByEmail(request.getEmail())
+                .orElse(null);
+
+        if (user != null) {
+            // 2. 检查锁定状态（在验证码校验之前，防止绕过锁定）
+            checkLocked(user.getId());
+
+            // 3. 检查账号状态
+            if (!user.getIsActive()) {
+                throw new BadRequestException("Account is disabled");
+            }
+        }
+
+        // 4. 校验验证码
+        boolean codeValid = emailCodeService.verifyCode(request.getEmail(), request.getCode());
+        if (!codeValid) {
+            if (user != null) {
+                // 记录登录失败（反暴力破解）
+                recordLoginFail(user.getId(), getClientIp(httpRequest));
+            }
             throw new BadRequestException("Email verification code is incorrect or expired");
         }
 
-        // 2. 查找用户（按邮箱）
-        User user = userRepository.findByEmail(request.getEmail())
-                .orElseThrow(() -> new ResourceNotFoundException("No account associated with this email"));
-
-        // 3. 检查锁定状态
-        checkLocked(user.getId());
-
-        // 4. 检查账号状态
-        if (!user.getIsActive()) {
-            throw new BadRequestException("Account is disabled");
+        // 5. 验证码正确但用户不存在
+        if (user == null) {
+            throw new BadRequestException("Invalid username or password");
         }
 
-        // 5. 登录成功
+        // 6. 登录成功
         return doLogin(user);
     }
 
@@ -168,15 +176,15 @@ public class AuthService {
         // 1. 校验图形验证码
         validateCaptcha(captchaKey, captchaCode);
 
-        // 2. 唯一性校验
+        // 2. 唯一性校验（统一错误消息，防止用户名枚举）
         if (userRepository.existsByUsername(request.getUsername())) {
-            throw new BadRequestException("Username already exists: " + request.getUsername());
+            throw new BadRequestException("Registration failed, please check your information");
         }
         if (request.getPhone() != null && userRepository.existsByPhone(request.getPhone())) {
-            throw new BadRequestException("Phone already registered: " + request.getPhone());
+            throw new BadRequestException("Registration failed, please check your information");
         }
         if (request.getEmail() != null && userRepository.existsByEmail(request.getEmail())) {
-            throw new BadRequestException("Email already registered: " + request.getEmail());
+            throw new BadRequestException("Registration failed, please check your information");
         }
 
         // 3. 创建用户
@@ -202,7 +210,23 @@ public class AuthService {
 
     // ==================== 发送邮箱验证码 ====================
 
+    /**
+     * 发送邮箱验证码（需先通过图形验证码校验）
+     * 每日每邮箱限5次，发送后2分钟冷却才能使用
+     */
     public void sendEmailCode(EmailCodeRequest request) {
+        // 1. 校验图形验证码（防止自动化批量请求）
+        validateCaptcha(request.getCaptchaKey(), request.getCaptchaCode());
+
+        // 2. 检查每日上限
+        int dailyCount = emailCodeService.getDailyCount(request.getEmail());
+        if (dailyCount >= emailCodeService.getMaxDailySends()) {
+            throw new BadRequestException(
+                    "Daily email code limit reached (" + emailCodeService.getMaxDailySends()
+                            + " per day), please try again tomorrow");
+        }
+
+        // 3. 发送验证码
         emailCodeService.sendCode(request.getEmail());
     }
 
@@ -280,17 +304,34 @@ public class AuthService {
 
     /**
      * 获取客户端真实IP
+     * 取 X-Forwarded-For 最右侧一跳（离服务器最近的代理），防止客户端伪造。
      */
     private String getClientIp(HttpServletRequest request) {
         String xForwardedFor = request.getHeader("X-Forwarded-For");
         if (xForwardedFor != null && !xForwardedFor.isBlank()) {
-            return xForwardedFor.split(",")[0].trim();
+            // 取最右侧非空IP（最近的代理地址，无法被客户端伪造）
+            String[] parts = xForwardedFor.split(",");
+            for (int i = parts.length - 1; i >= 0; i--) {
+                String ip = parts[i].trim();
+                if (!ip.isEmpty()) {
+                    return ip;
+                }
+            }
         }
         String xRealIp = request.getHeader("X-Real-IP");
         if (xRealIp != null && !xRealIp.isBlank()) {
             return xRealIp.trim();
         }
         return request.getRemoteAddr();
+    }
+
+    /**
+     * 获取指定 key 的验证码文本（仅供测试使用）。
+     * 生产代码中验证码是一次性的，调用此方法不会消耗验证码。
+     */
+    String getCaptchaCodeForTest(String captchaKey) {
+        CaptchaCacheEntry entry = captchaCache.get(captchaKey);
+        return entry != null ? entry.code() : null;
     }
 
     private record CaptchaCacheEntry(String code, long expireTime) {

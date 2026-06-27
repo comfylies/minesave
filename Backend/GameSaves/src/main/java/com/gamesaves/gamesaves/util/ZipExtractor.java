@@ -37,6 +37,9 @@ public class ZipExtractor {
     private static final long SUSPICIOUS_COMPRESSED_SIZE = 100;               // 压缩后不足 100B 但解压巨大 → 炸弹特征
     private static final long MIN_BOMB_UNCOMPRESSED_SIZE = 10 * 1024 * 1024;  // 解压后至少 10MB 才考虑炸弹
 
+    // Memory buffer threshold: entries ≤ this size read into memory; larger entries stream to temp file
+    private static final long MEMORY_BUFFER_THRESHOLD = 10 * 1024 * 1024;     // 10 MB
+
     private final Path zipPath;
     private final Path extractRoot;
     private final Long snapshotId;
@@ -207,62 +210,141 @@ public class ZipExtractor {
                     }
                 }
 
-                // Read entry content
-                byte[] entryData;
-                try (InputStream is = zipFile.getInputStream(entry);
-                     ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
-                    byte[] buffer = new byte[BUFFER_SIZE];
-                    int len;
-                    while ((len = is.read(buffer)) != -1) {
-                        baos.write(buffer, 0, len);
+                // ── Read entry content (size-branched: small → memory, large → temp file) ──
+                final byte[] entryData;
+                final String md5Hash;
+                final Path tempFile;
+                final long entrySize;
+
+                if (uncompressedSize > 0 && uncompressedSize <= MEMORY_BUFFER_THRESHOLD) {
+                    // Small file: read into memory (existing fast path)
+                    tempFile = null;
+                    try (InputStream is = zipFile.getInputStream(entry);
+                         ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
+                        byte[] buffer = new byte[BUFFER_SIZE];
+                        int len;
+                        while ((len = is.read(buffer)) != -1) {
+                            baos.write(buffer, 0, len);
+                        }
+                        entryData = baos.toByteArray();
                     }
-                    entryData = baos.toByteArray();
+                    entrySize = entryData.length;
+                    // MD5 hash (in-memory)
+                    try {
+                        MessageDigest md5Digest = MessageDigest.getInstance("MD5");
+                        md5Hash = bytesToHex(md5Digest.digest(entryData));
+                    } catch (java.security.NoSuchAlgorithmException e) {
+                        throw new FileProcessingException("MD5 not available", e);
+                    }
+                } else {
+                    // Large file (or unknown size): stream to temp file, compute MD5 on the fly
+                    entryData = null;
+                    tempFile = Files.createTempFile(extractRoot, "zip-extract-", ".tmp");
+                    MessageDigest md5Digest;
+                    try {
+                        md5Digest = MessageDigest.getInstance("MD5");
+                    } catch (java.security.NoSuchAlgorithmException e) {
+                        Files.deleteIfExists(tempFile);
+                        throw new FileProcessingException("MD5 not available", e);
+                    }
+                    try (InputStream is = zipFile.getInputStream(entry);
+                         OutputStream os = Files.newOutputStream(tempFile)) {
+                        byte[] buffer = new byte[BUFFER_SIZE];
+                        int len;
+                        while ((len = is.read(buffer)) != -1) {
+                            os.write(buffer, 0, len);
+                            md5Digest.update(buffer, 0, len);
+                        }
+                    } catch (IOException e) {
+                        Files.deleteIfExists(tempFile);
+                        throw e;
+                    }
+                    md5Hash = bytesToHex(md5Digest.digest());
+                    entrySize = Files.size(tempFile);
                 }
 
-                // MD5 hash
-                String md5Hash;
-                try {
-                    MessageDigest md5Digest = MessageDigest.getInstance("MD5");
-                    md5Hash = bytesToHex(md5Digest.digest(entryData));
-                } catch (java.security.NoSuchAlgorithmException e) {
-                    throw new FileProcessingException("MD5 not available", e);
+                // ── Magic number validation — detect disguised executables ──
+                String magicViolation;
+                if (entryData != null) {
+                    magicViolation = magicNumberValidator.check(entryData, entryName);
+                } else {
+                    // Read just the first 4 bytes from temp file (all magic signatures fit in 4 bytes)
+                    byte[] header = new byte[4];
+                    try (InputStream is = Files.newInputStream(tempFile)) {
+                        int total = 0;
+                        while (total < header.length) {
+                            int n = is.read(header, total, header.length - total);
+                            if (n < 0) break;
+                            total += n;
+                        }
+                        if (total < 2) header = new byte[0]; // too small to contain magic
+                    }
+                    magicViolation = magicNumberValidator.check(header, entryName);
                 }
-
-                // Magic number validation — detect disguised executables
-                String magicViolation = magicNumberValidator.check(entryData, entryName);
                 if (magicViolation != null) {
                     violations.add(magicViolation);
                     log.warn("Magic number violation: {}", magicViolation);
+                    if (tempFile != null) Files.deleteIfExists(tempFile);
                     continue;   // skip this entry, keep collecting violations
                 }
 
-                // Handle README images: extract images/ folder to readme/images/ later
+                // ── Handle README images (small files only) ──
                 String lowerEntry = entryName.toLowerCase();
-                if (lowerEntry.startsWith("images/") && !entryDataIsLarge(entryData)) {
-                    String relativePath = entryName.substring("images/".length());
-                    if (!relativePath.isEmpty()) {
-                        readmeImages.add(ReadmeImageEntry.builder()
-                                .relativePath(relativePath)
-                                .data(entryData)
-                                .build());
+                if (lowerEntry.startsWith("images/")) {
+                    if (entryData != null && !entryDataIsLarge(entryData)) {
+                        String relativePath = entryName.substring("images/".length());
+                        if (!relativePath.isEmpty()) {
+                            readmeImages.add(ReadmeImageEntry.builder()
+                                    .relativePath(relativePath)
+                                    .data(entryData)
+                                    .build());
+                        }
                     }
+                    if (tempFile != null) Files.deleteIfExists(tempFile);
                     continue; // 图片不存入 saving_items，跳过 content-addressed 存储
                 }
 
-                long entrySize = entryData.length;
                 String fileType = getExtension(entryName);
                 String physicalKey = md5Hash + "." + fileType;
 
-                // Write to content-addressable storage (deduplicate)
+                // ── Write to content-addressable storage (deduplicate) ──
                 Path physicalPath = extractRoot.resolve(physicalKey);
                 if (!Files.exists(physicalPath)) {
-                    Files.write(physicalPath, entryData);
+                    if (entryData != null) {
+                        Files.write(physicalPath, entryData);
+                    } else {
+                        Files.copy(tempFile, physicalPath);
+                    }
                 } else {
                     log.debug("Dedup: file {} already exists as {}", entryName, physicalKey);
                 }
 
-                // Determine if text-previewable
-                boolean isText = isTextFile(entryName, entryData);
+                // ── Determine if text-previewable ──
+                boolean isText;
+                if (entryData != null) {
+                    isText = isTextFile(entryName, entryData);
+                } else {
+                    // For large files, read first 5MB for text detection
+                    long previewLen = Math.min(entrySize, 5 * 1024 * 1024);
+                    byte[] preview = new byte[(int) previewLen];
+                    try (InputStream is = Files.newInputStream(tempFile)) {
+                        int total = 0;
+                        while (total < preview.length) {
+                            int n = is.read(preview, total, preview.length - total);
+                            if (n < 0) break;
+                            total += n;
+                        }
+                        if (total < preview.length) {
+                            preview = java.util.Arrays.copyOf(preview, total);
+                        }
+                    }
+                    isText = isTextFile(entryName, preview);
+                }
+
+                // ── Clean up temp file ──
+                if (tempFile != null) {
+                    try { Files.deleteIfExists(tempFile); } catch (IOException ignored) {}
+                }
 
                 // Auto-create directory nodes for all parent paths
                 String parentPath = PathTraversalValidator.computeParentPath(entryName);

@@ -226,6 +226,28 @@ class ZipExtractorTest {
         assertEquals(100, result.getFileCount());
     }
 
+    // ── Large file streaming to temp file (>10MB threshold) ──
+
+    @Test
+    void extract_entryAbove10MB_streamsToTempFile() throws IOException {
+        // 10 MB + 1 KB → exceeds MEMORY_BUFFER_THRESHOLD, exercises temp file path
+        byte[] data = new byte[10 * 1024 * 1024 + 1024];
+        rng.nextBytes(data);
+        Path zip = createZipWithStoredEntry("large_region_file.mca", data);
+        Path extractRoot = tempDir.resolve("extracted");
+        ZipExtractor extractor = new ZipExtractor(zip, extractRoot, 1L, magicValidator);
+
+        ZipExtractor.ExtractionResult result = extractor.extract();
+        assertEquals(1, result.getFileCount(),
+                "超过 10MB 阈值的条目应走 temp file 路径正常提取");
+        assertEquals(data.length, result.getTotalSize());
+        // Verify no temp files leaked
+        try (var files = java.nio.file.Files.list(extractRoot)) {
+            long tmpCount = files.filter(p -> p.getFileName().toString().startsWith("zip-extract-")).count();
+            assertEquals(0, tmpCount, "临时文件应在提取完成后清理");
+        }
+    }
+
     // ── Constants sanity ──
 
     @Test

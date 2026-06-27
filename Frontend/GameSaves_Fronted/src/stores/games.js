@@ -34,5 +34,12 @@ export const useGameStore = defineStore('games', () => {
     }
   }
 
-  return { games, currentGame, loading, error, fetchGames, fetchGame }
+  function reset() {
+    games.value = []
+    currentGame.value = null
+    loading.value = false
+    error.value = null
+  }
+
+  return { games, currentGame, loading, error, fetchGames, fetchGame, reset }
 })

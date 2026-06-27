@@ -60,7 +60,7 @@ sa-token:
   token-name: Authorization              # token名称（前端请求头携带）
   timeout: 86400                         # token有效期（秒），默认24小时
   active-timeout: 1800                   # 最低活跃频率（秒），30分钟无操作则过期
-  is-concurrent: true                    # 是否允许多地同时登录
+  is-concurrent: false                   # 不允许多地同时登录（新设备登录踢出旧设备）
   is-share: false                        # 多终端登录是否共用token
   token-style: random-64                 # token风格
   is-log: true                           # 是否输出操作日志
@@ -109,6 +109,13 @@ app:
         MZ: exe,dll,sys,ocx,drv,cpl,scr,msi                          # Windows PE 诚实扩展名
         ELF: so,o,ko,elf,bin,out                                      # Linux ELF 诚实扩展名
         SHEBANG: sh,bash,zsh,py,rb,pl,php,js,lua                    # 脚本 shebang 诚实扩展名
+  # CORS 跨域配置
+  cors:
+    allowed-origins: "*"                         # 开发环境用 *；生产部署改为前端域名白名单如 https://gamesaves.example.com
+  # 文件预览安全配置
+  preview:
+    max-size-bytes: 5242880                      # 预览大小上限 5MB（超过拒绝预览）
+    allowed-extensions: txt,md,json,xml,yml,yaml,log,csv,ini,cfg,conf,properties,html,css,js,ts,java,py,sh,bat,sql,nbt,mcmeta,mf,lang,info,lock,ojng    # 白名单扩展名（仅文本类）
   # 失败存档清理
   cleanup:
     interval-ms: 10800000                       # 清理间隔（毫秒），默认 3 小时

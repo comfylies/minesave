@@ -1,13 +1,9 @@
 package com.gamesaves.gamesaves.controller;
 
-import com.gamesaves.gamesaves.dto.request.LoginRequest;
-import com.gamesaves.gamesaves.dto.request.RegisterRequest;
 import com.gamesaves.gamesaves.dto.request.UserUpdateRequest;
 import com.gamesaves.gamesaves.dto.response.ApiResponse;
-import com.gamesaves.gamesaves.dto.response.LoginResponse;
 import com.gamesaves.gamesaves.dto.response.UserResponse;
 import com.gamesaves.gamesaves.service.UserService;
-import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -20,18 +16,6 @@ public class UserController {
 
     public UserController(UserService userService) {
         this.userService = userService;
-    }
-
-    @PostMapping("/register")
-    public ApiResponse<UserResponse> register(@Valid @RequestBody RegisterRequest request) {
-        UserResponse user = userService.register(request);
-        return ApiResponse.success("Registration successful", user);
-    }
-
-    @PostMapping("/login")
-    public ApiResponse<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
-        LoginResponse result = userService.login(request);
-        return ApiResponse.success("Login successful", result);
     }
 
     @GetMapping("/{id}")

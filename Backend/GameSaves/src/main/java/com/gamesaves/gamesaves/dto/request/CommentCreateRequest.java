@@ -14,7 +14,7 @@ public class CommentCreateRequest {
     @NotNull(message = "Article ID is required")
     private Long articleId;
 
-    @NotNull(message = "User ID is required")
+    // userId 不再从请求参数获取，由服务端通过 Sa-Token 获取当前登录用户
     private Long userId;
 
     @NotBlank(message = "Content cannot be empty")

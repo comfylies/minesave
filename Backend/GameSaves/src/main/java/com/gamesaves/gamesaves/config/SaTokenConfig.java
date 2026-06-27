@@ -14,8 +14,7 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  * - /api/auth/**     — 公开（登录、注册、验证码、邮箱验证码）
  * - GET /api/games/**    — 公开（浏览游戏），POST/PUT/DELETE 需登录
  * - GET /api/articles/** — 公开（浏览存档），POST/PUT/DELETE 需登录
- * - /api/users/register、/api/users/login — 公开
- * - /api/files/**    — 公开（浏览文件）
+ * - /api/files/**    — 公开（浏览文件、下载）
  * - GET /api/comments/** — 公开（浏览批注），POST/DELETE 需登录
  * - /api/admin/**    — 需登录 + admin 权限（由 @SaCheckPermission 控制）
  * - 其他 /api/**     — 需登录
@@ -46,10 +45,10 @@ public class SaTokenConfig implements WebMvcConfigurer {
                     SaRouter
                         .match("/api/auth/**").stop()
                         .matchMethod("GET").match("/api/games/**", r -> refreshIfLogin()).stop()
-                        .match("/api/users/register").stop()
-                        .match("/api/users/login").stop()
                         .matchMethod("GET").match("/api/articles/**", r -> refreshIfLogin()).stop()
                         .match("/api/files/**", r -> refreshIfLogin()).stop()
+                        // /api/users/** GET 公开（浏览用户），PUT 需登录
+                        .matchMethod("GET").match("/api/users/**", r -> refreshIfLogin()).stop()
                         // 批注：GET 公开（stop），POST/DELETE 需登录走下一级 checkLogin
                         .matchMethod("GET").match("/api/comments/**", r -> refreshIfLogin()).stop()
                         // 其他 /api/** 需要登录，并刷新活跃时间

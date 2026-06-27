@@ -2,6 +2,9 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { authApi } from '../api/authApi'
 import { userApi } from '../api/userApi'
+import { useArticleStore } from './articles'
+import { useGameStore } from './games'
+import { useFileStore } from './files'
 
 export const useAuthStore = defineStore('auth', () => {
   const currentUser = ref(loadUser())
@@ -60,10 +63,15 @@ export const useAuthStore = defineStore('auth', () => {
     } catch (e) {
       // ignore
     }
+    // 清理认证状态
     currentUser.value = null
     token.value = null
     localStorage.removeItem('currentUser')
     localStorage.removeItem('satoken')
+    // 清理其他 Store，防止切换账号后数据残留
+    useArticleStore().reset()
+    useGameStore().reset()
+    useFileStore().reset()
   }
 
   /** 检查登录状态（从服务器验证） */

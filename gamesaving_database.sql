@@ -39,6 +39,7 @@ CREATE TABLE users (
     email       VARCHAR(100)    DEFAULT NULL             COMMENT '用户邮箱',
     -- 角色分离：admin(管理员，可管理全平台) / user(普通用户，仅管理自己内容)
     role        VARCHAR(20)     NOT NULL DEFAULT 'user'  COMMENT '用户角色: admin=管理员, user=普通用户',
+    CONSTRAINT chk_users_role CHECK (role IN ('admin', 'user')),
     avatar_url  VARCHAR(500)    DEFAULT NULL             COMMENT '用户头像URL',
     bio         VARCHAR(500)    DEFAULT NULL             COMMENT '个人简介/签名',
     -- 登录相关
@@ -100,6 +101,7 @@ CREATE TABLE article (
     -- 状态流转: UPLOADING → EXTRACTING → READY / FAILED
     status          VARCHAR(20)     NOT NULL DEFAULT 'UPLOADING'
                                     COMMENT '处理状态: UPLOADING(上传中), EXTRACTING(解压中), READY(就绪), FAILED(失败)',
+    CONSTRAINT chk_article_status CHECK (status IN ('UPLOADING', 'EXTRACTING', 'READY', 'FAILED')),
     error_message   VARCHAR(1000)   DEFAULT NULL             COMMENT '处理失败时的错误详情',
     cover_image     VARCHAR(500)    DEFAULT NULL             COMMENT '封面图相对路径，如 /storage/1/2/42/cover.png',
     created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '上传/创建时间',
@@ -147,6 +149,7 @@ CREATE TABLE savings (
     created_at          DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '快照创建时间',
     PRIMARY KEY (id),
     INDEX idx_article_id (article_id),                          -- 按存档文章查询快照
+    UNIQUE INDEX uq_savings_article_id (article_id),           -- 1-1 关系：每个 article 最多一个 savings
     INDEX idx_user_game (user_id, game_id),                     -- 按用户+游戏查询快照
     INDEX idx_zip_hash (zip_hash),                              -- 按ZIP哈希查重
     CONSTRAINT fk_savings_article FOREIGN KEY (article_id) REFERENCES article(id)

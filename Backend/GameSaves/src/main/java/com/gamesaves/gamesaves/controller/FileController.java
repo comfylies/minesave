@@ -172,7 +172,14 @@ public class FileController {
     private String getClientIp(HttpServletRequest request) {
         String xForwardedFor = request.getHeader("X-Forwarded-For");
         if (xForwardedFor != null && !xForwardedFor.isBlank()) {
-            return xForwardedFor.split(",")[0].trim();
+            // 取最右侧非空IP（最近的代理地址，无法被客户端伪造）
+            String[] parts = xForwardedFor.split(",");
+            for (int i = parts.length - 1; i >= 0; i--) {
+                String ip = parts[i].trim();
+                if (!ip.isEmpty()) {
+                    return ip;
+                }
+            }
         }
         String xRealIp = request.getHeader("X-Real-IP");
         if (xRealIp != null && !xRealIp.isBlank()) {

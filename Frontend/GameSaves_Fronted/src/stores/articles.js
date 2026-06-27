@@ -65,8 +65,20 @@ export const useArticleStore = defineStore('articles', () => {
     await articleApi.delete(id)
   }
 
+  function reset() {
+    currentArticle.value = null
+    articleList.value = []
+    pagination.page = 0
+    pagination.size = 20
+    pagination.totalElements = 0
+    pagination.totalPages = 0
+    loading.value = false
+    error.value = null
+  }
+
   return {
     currentArticle, articleList, pagination, loading, error,
-    fetchArticle, fetchByGame, fetchByUser, deleteArticle
+    fetchArticle, fetchByGame, fetchByUser, deleteArticle,
+    reset
   }
 })

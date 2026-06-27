@@ -5,6 +5,7 @@ import com.gamesaves.gamesaves.dto.response.FileEntryResponse;
 import com.gamesaves.gamesaves.entity.Article;
 import com.gamesaves.gamesaves.entity.Savings;
 import com.gamesaves.gamesaves.entity.SavingItem;
+import com.gamesaves.gamesaves.exception.BadRequestException;
 import com.gamesaves.gamesaves.exception.ResourceNotFoundException;
 import com.gamesaves.gamesaves.repository.ArticleRepository;
 import com.gamesaves.gamesaves.repository.SafePathRepository;
@@ -12,14 +13,17 @@ import com.gamesaves.gamesaves.repository.SavingItemRepository;
 import com.gamesaves.gamesaves.repository.SavingsRepository;
 import com.gamesaves.gamesaves.service.FileExplorerService;
 import com.gamesaves.gamesaves.service.StorageService;
+import com.gamesaves.gamesaves.util.PathTraversalValidator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -37,6 +41,14 @@ public class FileExplorerServiceImpl implements FileExplorerService {
     private final SafePathRepository safePathRepository;
     private final StorageService storageService;
 
+    @Value("${app.preview.max-size-bytes:5242880}")
+    private long previewMaxSizeBytes;
+
+    @Value("${app.preview.allowed-extensions:txt,md,json,xml,yml,yaml,log,csv,ini,cfg,conf,properties,html,css,js,ts,java,py,sh,bat,sql,nbt,mcmeta,mf,lang,info,lock,ojng}")
+    private String previewAllowedExtensionsRaw;
+
+    private Set<String> previewAllowedExtensions;
+
     public FileExplorerServiceImpl(SavingsRepository savingsRepository,
                                     SavingItemRepository savingItemRepository,
                                     ArticleRepository articleRepository,
@@ -49,8 +61,24 @@ public class FileExplorerServiceImpl implements FileExplorerService {
         this.storageService = storageService;
     }
 
+    /** Load extension whitelist from config. */
+    private Set<String> getPreviewAllowedExtensions() {
+        if (previewAllowedExtensions == null) {
+            previewAllowedExtensions = Arrays.stream(previewAllowedExtensionsRaw.split(","))
+                    .map(String::trim)
+                    .map(String::toLowerCase)
+                    .collect(Collectors.toUnmodifiableSet());
+        }
+        return previewAllowedExtensions;
+    }
+
     @Override
     public DirectoryBrowseResponse browseDirectory(Long articleId, String path) {
+        // 路径穿越校验
+        if (path != null && !path.isEmpty()) {
+            PathTraversalValidator.validate(path);
+        }
+
         Savings savings = savingsRepository.findByArticleId(articleId)
                 .orElseThrow(() -> new ResourceNotFoundException("Savings not found for article", articleId));
 
@@ -102,6 +130,8 @@ public class FileExplorerServiceImpl implements FileExplorerService {
 
     @Override
     public Optional<FileEntryResponse> getFileDetail(Long articleId, String virtualPath) {
+        PathTraversalValidator.validate(virtualPath);
+
         Savings savings = savingsRepository.findByArticleId(articleId)
                 .orElseThrow(() -> new ResourceNotFoundException("Savings not found for article", articleId));
 
@@ -111,6 +141,8 @@ public class FileExplorerServiceImpl implements FileExplorerService {
 
     @Override
     public Resource getFileContent(Long articleId, String virtualPath) {
+        PathTraversalValidator.validate(virtualPath);
+
         Savings savings = savingsRepository.findByArticleId(articleId)
                 .orElseThrow(() -> new ResourceNotFoundException("Savings not found for article", articleId));
 
@@ -119,6 +151,21 @@ public class FileExplorerServiceImpl implements FileExplorerService {
 
         if (item.getIsDirectory()) {
             throw new ResourceNotFoundException("Cannot preview a directory", virtualPath);
+        }
+
+        // ── 扩展名白名单校验 ──
+        String extension = extractExtension(virtualPath);
+        if (extension.isEmpty() || !getPreviewAllowedExtensions().contains(extension.toLowerCase())) {
+            throw new BadRequestException(
+                    "Preview not supported for ." + extension + " files. Supported: "
+                            + String.join(", ", getPreviewAllowedExtensions()));
+        }
+
+        // ── 文件大小校验 ──
+        if (item.getFileSize() != null && item.getFileSize() > previewMaxSizeBytes) {
+            throw new BadRequestException(
+                    "File too large to preview (" + item.getFileSize() / 1024 / 1024 + "MB, max "
+                            + previewMaxSizeBytes / 1024 / 1024 + "MB)");
         }
 
         String fileKey = storageService.articleKey(
@@ -130,7 +177,24 @@ public class FileExplorerServiceImpl implements FileExplorerService {
         }
 
         byte[] data = storageService.read(fileKey);
+
+        // 最后一道防线：实际读取后再次校验大小（防御存储层元数据不一致）
+        if (data.length > previewMaxSizeBytes) {
+            throw new BadRequestException(
+                    "File too large to preview (" + data.length / 1024 / 1024 + "MB, max "
+                            + previewMaxSizeBytes / 1024 / 1024 + "MB)");
+        }
+
         return new ByteArrayResource(data);
+    }
+
+    /** 从路径中提取文件扩展名（小写） */
+    private static String extractExtension(String path) {
+        if (path == null || path.isEmpty()) return "";
+        String name = path.substring(path.lastIndexOf('/') + 1);
+        int dot = name.lastIndexOf('.');
+        if (dot < 0 || dot == name.length() - 1) return "";
+        return name.substring(dot + 1);
     }
 
     @Override
@@ -138,10 +202,8 @@ public class FileExplorerServiceImpl implements FileExplorerService {
         Article article = articleRepository.findById(articleId)
                 .orElseThrow(() -> new ResourceNotFoundException("Article", articleId));
 
-        // Safety check: prevent path traversal
-        if (relativePath.contains("..") || relativePath.contains("\\")) {
-            throw new ResourceNotFoundException("Invalid image path", relativePath);
-        }
+        // 路径穿越校验
+        PathTraversalValidator.validate(relativePath);
 
         String imageKey = storageService.articleKey(
                 article.getUser().getId(), article.getGame().getId(), articleId,
