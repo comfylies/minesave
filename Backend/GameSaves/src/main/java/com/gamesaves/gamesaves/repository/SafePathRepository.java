@@ -2,6 +2,7 @@ package com.gamesaves.gamesaves.repository;
 
 import com.gamesaves.gamesaves.entity.SafePath;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -27,4 +28,9 @@ public interface SafePathRepository extends JpaRepository<SafePath, Long> {
 
     /** 统计某个游戏的标准路径数量 */
     long countByGameId(Long gameId);
+
+    /** Admin merge: bulk-migrate safe paths from one game to another. */
+    @Modifying
+    @Query("UPDATE SafePath sp SET sp.gameId = :targetId WHERE sp.gameId = :sourceId")
+    int updateGameId(@Param("sourceId") Long sourceId, @Param("targetId") Long targetId);
 }

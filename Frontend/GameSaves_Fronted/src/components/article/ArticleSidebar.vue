@@ -79,6 +79,7 @@
 import { ref, computed } from 'vue'
 import { fileApi } from '../../api/fileApi'
 import TagDisplay from '../tag/TagDisplay.vue'
+import { formatSize, formatTime } from '@/utils/format'
 
 const props = defineProps({
   article: { type: Object, required: true }
@@ -105,38 +106,6 @@ const statusText = computed(() => {
   return map[props.article.status] || props.article.status
 })
 
-function formatSize(bytes) {
-  if (bytes == null || bytes === 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB']
-  let i = 0
-  let size = bytes
-  while (size >= 1024 && i < units.length - 1) {
-    size /= 1024
-    i++
-  }
-  return size.toFixed(i === 0 ? 0 : 1) + ' ' + units[i]
-}
-
-function formatTime(dateStr) {
-  if (!dateStr) return ''
-  const date = new Date(dateStr)
-  const now = new Date()
-  const diff = now - date
-  const mins = Math.floor(diff / 60000)
-  const hours = Math.floor(diff / 3600000)
-  const days = Math.floor(diff / 86400000)
-
-  if (mins < 1) return '刚刚'
-  if (mins < 60) return `${mins} 分钟前`
-  if (hours < 24) return `${hours} 小时前`
-  if (days < 30) return `${days} 天前`
-
-  return date.toLocaleDateString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  })
-}
 </script>
 
 <style scoped>

@@ -13,6 +13,9 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.util.UriUtils;
+
+import java.nio.charset.StandardCharsets;
 
 
 @RestController
@@ -123,11 +126,14 @@ public class FileController {
                 .orElseThrow(() -> new com.gamesaves.gamesaves.exception.ResourceNotFoundException(
                         "ZIP not available for download"));
 
+        // URL-encode 非 ASCII 字符，HTTP Location 头只允许 ASCII
+        String safeUrl = encodePathForHeader(downloadUrl);
+
         log.info("Download redirect: article={}, ip={}, url={}", articleId, ip,
-                downloadUrl.substring(0, Math.min(80, downloadUrl.length())) + "...");
+                safeUrl.substring(0, Math.min(80, safeUrl.length())) + "...");
 
         return ResponseEntity.status(org.springframework.http.HttpStatus.FOUND)
-                .header(HttpHeaders.LOCATION, downloadUrl)
+                .header(HttpHeaders.LOCATION, safeUrl)
                 .build();
     }
 
@@ -186,5 +192,29 @@ public class FileController {
             return xRealIp.trim();
         }
         return request.getRemoteAddr();
+    }
+
+    /**
+     * URL-encode the filename segment so the URL is safe for HTTP Location header
+     * (which requires ASCII-only). Handles both /storage/path/file.zip and
+     * https://cos.../path/file.zip?sign=... patterns.
+     */
+    private String encodePathForHeader(String url) {
+        int lastSlash = url.lastIndexOf('/');
+        if (lastSlash < 0) return url;
+
+        String path = url.substring(0, lastSlash + 1);
+        String filename = url.substring(lastSlash + 1);
+
+        // Split off query string if present (COS pre-signed URLs have ?sign=...)
+        String query = "";
+        int queryIdx = filename.indexOf('?');
+        if (queryIdx >= 0) {
+            query = filename.substring(queryIdx);
+            filename = filename.substring(0, queryIdx);
+        }
+
+        String encoded = UriUtils.encodePathSegment(filename, StandardCharsets.UTF_8);
+        return path + encoded + query;
     }
 }

@@ -17,11 +17,16 @@ import java.time.LocalDate;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 邮箱验证码服务
- * - 生成6位数字验证码并通过邮件发送
- * - 使用内存存储（可替换为Redis）
- * - 安全防护：每日上限5次 + 发送后2分钟冷却 + 发送频率限制 + 验证码有效期
- * - 定时清理过期数据
+ * 邮箱验证码服务。
+ *
+ * <p>生成6位数字验证码并通过邮件发送，内存存储，定时清理过期数据。
+ * 安全防护：每日上限5次 + 发送后2分钟冷却 + 发送频率限制 + 验证码有效期。
+ *
+ * <p>引用的开源项目：
+ * <ul>
+ *   <li><b>Spring Boot Mail</b> (Apache-2.0) — {@link org.springframework.mail.javamail.JavaMailSender}，
+ *       底层封装 JavaMail（Eclipse Angus Mail / Jakarta Mail）</li>
+ * </ul>
  */
 @Service
 public class EmailCodeService {

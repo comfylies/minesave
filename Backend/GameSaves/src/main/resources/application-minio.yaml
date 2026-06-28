@@ -1,6 +1,8 @@
 # ============================================================
-# MinIO Profile — 激活方式: --spring.profiles.active=minio
-# 本地模拟 COS，使用局域网 MinIO 服务 (192.168.100.2)
+# Profile: minio — MinIO S3 兼容存储（本地测试 COS，需 MinIO 服务）
+# 启动: ./mvnw spring-boot:run -Dspring-boot.run.profiles=minio
+# IDEA: 选择 "GameSaves [minio]" 运行配置
+# 依赖: MinIO 服务运行在 192.168.100.2:9000
 # ============================================================
 app:
   storage:
@@ -9,7 +11,7 @@ app:
       endpoint: http://192.168.100.2:9000
       region: us-east-1
       access-key: minioadmin
-      secret-key: minioadmin
+      secret-key: minioadmin123
       bucket-name: gamesaving
       path-style-access: true
       presigned-url-expiration-minutes: 5

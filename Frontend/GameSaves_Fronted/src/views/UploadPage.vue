@@ -12,21 +12,32 @@
         size="large"
         :disabled="uploading"
       >
-        <!-- 游戏选择 -->
+        <!-- 游戏搜索/选择 -->
         <el-form-item label="游戏" prop="gameId">
-          <el-select
-            v-model="form.gameId"
-            placeholder="选择游戏"
+          <el-autocomplete
+            v-model="gameSearchText"
+            :fetch-suggestions="searchGames"
+            :trigger-on-focus="false"
+            placeholder="输入游戏名搜索..."
             class="full-width"
-            filterable
+            clearable
+            :debounce="300"
+            @select="handleGameSelect"
+            @clear="handleGameClear"
           >
-            <el-option
-              v-for="g in gameStore.games"
-              :key="g.id"
-              :label="g.name"
-              :value="g.id"
-            />
-          </el-select>
+            <template #default="{ item }">
+              <div class="game-option" :class="{ 'is-create': item.isCreate }">
+                <template v-if="item.isCreate">
+                  <el-icon><Plus /></el-icon>
+                  <span>创建新游戏 "<em>{{ item.value }}</em>"</span>
+                </template>
+                <template v-else>
+                  <span class="game-name">{{ item.value }}</span>
+                  <span class="game-count">{{ item.articleCount || 0 }} 个存档</span>
+                </template>
+              </div>
+            </template>
+          </el-autocomplete>
         </el-form-item>
 
         <!-- 标题和版本 -->
@@ -190,9 +201,11 @@
 import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { Plus } from '@element-plus/icons-vue'
 import { useGameStore } from '../stores/games'
 import { useAuthStore } from '../stores/auth'
 import { articleApi } from '../api/articleApi'
+import { gameApi } from '../api/gameApi'
 import TagSelector from '../components/tag/TagSelector.vue'
 
 const router = useRouter()
@@ -232,8 +245,82 @@ const form = reactive({
   tagIds: []
 })
 
+// ── 游戏搜索 + 自动创建 ──
+const gameSearchText = ref('')
+let allGamesCache = []   // 完整游戏列表（冷数据）
+let cachedGameMap = {}   // gameId → game name
+
+/** 联想搜索（el-autocomplete callback） */
+async function searchGames(queryString, cb) {
+  const q = (queryString || '').trim()
+  if (!q || q.length < 1) {
+    // 显示所有游戏
+    if (allGamesCache.length === 0) {
+      try { allGamesCache = await gameApi.getAll() } catch { allGamesCache = [] }
+    }
+    const suggestions = allGamesCache.map(g => ({ value: g.name, id: g.id, articleCount: g.articleCount }))
+    cb(suggestions)
+    return
+  }
+
+  // 远程搜索（含别名）
+  try {
+    const results = await gameApi.search(q)
+    const suggestions = results.map(g => ({ value: g.name, id: g.id, articleCount: g.articleCount }))
+
+    // 如果没有精确匹配 → 允许创建新游戏
+    const exactMatch = results.some(g => g.name.toLowerCase() === q.toLowerCase())
+    if (!exactMatch && q.length >= 2) {
+      suggestions.push({ value: q, id: -1, isCreate: true, articleCount: 0 })
+    }
+
+    cb(suggestions)
+  } catch {
+    // 降级：本地过滤
+    if (allGamesCache.length === 0) {
+      try { allGamesCache = await gameApi.getAll() } catch { allGamesCache = [] }
+    }
+    const lower = q.toLowerCase()
+    const filtered = allGamesCache
+      .filter(g => g.name.toLowerCase().includes(lower))
+      .map(g => ({ value: g.name, id: g.id, articleCount: g.articleCount }))
+    if (!filtered.some(g => g.value.toLowerCase() === lower) && q.length >= 2) {
+      filtered.push({ value: q, id: -1, isCreate: true, articleCount: 0 })
+    }
+    cb(filtered)
+  }
+}
+
+/** 用户选中建议项 */
+async function handleGameSelect(item) {
+  if (item.isCreate) {
+    // 创建新游戏
+    try {
+      const newGame = await gameApi.create({ name: item.value })
+      form.gameId = newGame.id
+      gameSearchText.value = newGame.name
+      cachedGameMap[newGame.id] = newGame.name
+      allGamesCache.push(newGame)
+      ElMessage.success(`已创建游戏 "${newGame.name}"`)
+    } catch (e) {
+      ElMessage.error(e.message || '创建游戏失败')
+      gameSearchText.value = ''
+      form.gameId = null
+    }
+  } else {
+    form.gameId = item.id
+    gameSearchText.value = item.value
+    cachedGameMap[item.id] = item.value
+  }
+}
+
+function handleGameClear() {
+  form.gameId = null
+  gameSearchText.value = ''
+}
+
 const rules = {
-  gameId: [{ required: true, message: '请选择游戏', trigger: 'change' }],
+  gameId: [{ required: true, message: '请搜索并选择游戏', trigger: 'change' }],
   title: [{ required: true, message: '请输入存档标题', trigger: 'blur' }],
   version: [{ required: true, message: '请输入游戏版本', trigger: 'blur' }]
 }
@@ -447,6 +534,35 @@ onUnmounted(() => {
 
 .full-width {
   width: 100%;
+}
+
+/* ---- 游戏搜索建议 ---- */
+.game-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.game-option .game-name {
+  font-weight: 500;
+}
+
+.game-option .game-count {
+  font-size: var(--font-size-small);
+  color: var(--color-secondary-text);
+  flex-shrink: 0;
+}
+
+.game-option.is-create {
+  color: var(--color-link);
+  font-weight: 500;
+}
+
+.game-option.is-create em {
+  font-style: normal;
+  font-weight: 700;
 }
 
 /* ---- 上传区域 ---- */

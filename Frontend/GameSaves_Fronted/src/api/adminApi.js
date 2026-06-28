@@ -42,6 +42,32 @@ export const adminApi = {
     return client.get(`/admin/games/${gameId}/safe-structure`)
   },
 
+  // ==================== 游戏合并 ====================
+
+  /** 获取游戏管理列表（含封面、存档数、别名数、冲突） */
+  getGames() {
+    return client.get('/admin/games')
+  },
+
+  /** 合并两个游戏（source 合并到 target，source 被删除） */
+  mergeGames(sourceId, targetId) {
+    return client.post('/admin/games/merge', null, { params: { sourceId, targetId } })
+  },
+
+  // ==================== 失败存档清理 ====================
+
+  // ==================== 幽灵文章诊断 ====================
+
+  /** 扫描幽灵文章（数据库有记录但文件缺失） */
+  scanGhostArticles() {
+    return client.get('/admin/articles/ghosts')
+  },
+
+  /** 批量删除幽灵文章 */
+  deleteGhostArticles(ids) {
+    return client.delete('/admin/articles/ghosts', { data: ids })
+  },
+
   // ==================== 失败存档清理 ====================
 
   /** 手动触发清理 */

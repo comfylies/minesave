@@ -182,9 +182,9 @@ public class CleanupScheduler {
             for (Article article : batch) {
                 // 1. Delete physical files via storage service
                 if (deletePhysicalFiles) {
-                    String prefix = storageService.articleKey(
-                            article.getUser().getId(), article.getGame().getId(),
-                            article.getId(), "");
+                    // 使用 storageRoot 而非 article.game.id — 合并游戏后 gameId 会变但文件在原路径
+                    String prefix = storageService.articleKeyFromRoot(
+                            article.getStorageRoot(), "");
                     storageService.deleteDirectory(prefix);
                 }
 

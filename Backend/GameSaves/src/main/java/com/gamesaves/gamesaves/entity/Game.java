@@ -23,11 +23,17 @@ public class Game {
     @Column(nullable = false, length = 100, unique = true)
     private String name;
 
+    @Column(name = "normalized_name", nullable = false, length = 100, unique = true)
+    private String normalizedName;
+
     @Column(name = "cover_url", length = 500)
     private String coverUrl;
 
     @Column(columnDefinition = "TEXT")
     private String description;
+
+    @Column(name = "search_text", length = 1000)
+    private String searchText;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;

@@ -80,6 +80,7 @@ import { computed } from 'vue'
 import FileIcon from './FileIcon.vue'
 import BreadcrumbNav from './BreadcrumbNav.vue'
 import LoadingSkeleton from '../common/LoadingSkeleton.vue'
+import { formatSize } from '@/utils/format'
 
 const props = defineProps({
   directories: { type: Array, default: () => [] },
@@ -104,18 +105,6 @@ const sortedFiles = computed(() =>
 const hasSecurityMarkedFiles = computed(() =>
   props.files.some(f => f.securityLevel === 'danger' || f.securityLevel === 'warning')
 )
-
-function formatSize(bytes) {
-  if (bytes == null || bytes === 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB']
-  let i = 0
-  let size = bytes
-  while (size >= 1024 && i < units.length - 1) {
-    size /= 1024
-    i++
-  }
-  return size.toFixed(i === 0 ? 0 : 1) + ' ' + units[i]
-}
 
 function securityRowClass(level) {
   if (level === 'danger') return 'file-row--danger'

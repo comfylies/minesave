@@ -1,0 +1,11 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="GameSaves [minio]" type="SpringBootApplicationConfigurationType" factoryName="Spring Boot">
+    <module name="GameSaves" />
+    <option name="SPRING_BOOT_MAIN_CLASS" value="com.gamesaves.gamesaves.GameSavesApplication" />
+    <option name="ACTIVE_PROFILES" value="minio" />
+    <option name="SHORTEN_COMMAND_LINE" value="MANIFEST" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>

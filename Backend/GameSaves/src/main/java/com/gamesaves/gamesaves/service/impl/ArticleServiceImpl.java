@@ -180,6 +180,16 @@ public class ArticleServiceImpl implements ArticleService {
                         } finally {
                             deleteRecursively(thumbDir);
                         }
+                        // 生成 360h 缩略图（按比例，高 360px），用于管理后台游戏列表
+                        Path thumb360h = ImageThumbnailService.generateThumbnail360h(tempCover);
+                        if (thumb360h != null && Files.exists(thumb360h)) {
+                            try {
+                                String thumb360hKey = cosPrefix + "cover_thumb_360.jpg";
+                                storageService.storeFromPath(thumb360hKey, thumb360h);
+                            } finally {
+                                Files.deleteIfExists(thumb360h);
+                            }
+                        }
                         log.info("Cover image & thumbnails uploaded for article {}: {}", article.getId(), coverFilename);
                     } finally {
                         Files.deleteIfExists(tempCover);
@@ -247,9 +257,8 @@ public class ArticleServiceImpl implements ArticleService {
         Article article = articleRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Article", id));
 
-        // Delete physical files via storage service
-        String prefix = storageService.articleKey(
-                article.getUser().getId(), article.getGame().getId(), article.getId(), "");
+        // 使用 storageRoot 而非 article.game.id — 合并游戏后 gameId 会变但文件在原路径
+        String prefix = storageService.articleKeyFromRoot(article.getStorageRoot(), "");
         storageService.deleteDirectory(prefix);
 
         // Remove from search index

@@ -61,6 +61,7 @@ import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { EditPen, User } from '@element-plus/icons-vue'
 import { useAuthStore } from '../../stores/auth'
+import { truncate } from '@/utils/format'
 
 const props = defineProps({
   annotator: { type: Object, default: null },
@@ -79,11 +80,6 @@ const inputRef = ref(null)
 const popupStyle = ref({})
 const showLoginDialog = ref(false)
 const submitting = ref(false)
-
-function truncate(text, maxLen) {
-  if (!text) return ''
-  return text.length > maxLen ? text.slice(0, maxLen) + '…' : text
-}
 
 function updatePosition() {
   const selection = window.getSelection()

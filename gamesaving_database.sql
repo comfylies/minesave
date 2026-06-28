@@ -59,15 +59,38 @@ CREATE TABLE users (
 -- 一款游戏可以有多个用户上传的多个存档
 -- ============================================================
 CREATE TABLE games (
-    id          BIGINT          NOT NULL AUTO_INCREMENT  COMMENT '游戏唯一标识ID',
-    name        VARCHAR(100)    NOT NULL                 COMMENT '游戏名称（如：艾尔登法环、Minecraft）',
-    cover_url   VARCHAR(500)    DEFAULT NULL             COMMENT '游戏封面图片URL',
-    description TEXT            DEFAULT NULL             COMMENT '游戏简介描述',
-    created_at  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '记录创建时间',
-    updated_at  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '记录最后更新时间',
+    id              BIGINT          NOT NULL AUTO_INCREMENT  COMMENT '游戏唯一标识ID',
+    name            VARCHAR(100)    NOT NULL                 COMMENT '游戏名称（如：艾尔登法环、Minecraft）',
+    normalized_name VARCHAR(100)    NOT NULL DEFAULT ''      COMMENT '规范化名称（小写+去空格），用于去重检查',
+    cover_url       VARCHAR(500)    DEFAULT NULL             COMMENT '游戏封面图片URL',
+    description     TEXT            DEFAULT NULL             COMMENT '游戏简介描述',
+    search_text     VARCHAR(1000)   NOT NULL DEFAULT ''      COMMENT '搜索文本（原名+别名拼接），供 Meilisearch 索引',
+    created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '记录创建时间',
+    updated_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '记录最后更新时间',
     PRIMARY KEY (id),
-    UNIQUE KEY uk_game_name (name)                       -- 游戏名唯一
+    UNIQUE KEY uk_game_name (name),                          -- 游戏名唯一
+    UNIQUE KEY uk_normalized_name (normalized_name)          -- 规范化名称唯一
 ) ENGINE=InnoDB COMMENT='游戏主数据表 - 平台支持的游戏列表';
+
+-- ============================================================
+-- 2.5 游戏别名表 (game_aliases)
+-- 支持缩写/翻译/同义词 → 规范游戏名映射
+-- 搜索时别名折叠进索引，用户输 MC / Elden Ring 都能找到对应游戏
+-- ============================================================
+CREATE TABLE game_aliases (
+    id               BIGINT       NOT NULL AUTO_INCREMENT  COMMENT '别名记录唯一标识ID',
+    game_id          BIGINT       NOT NULL                 COMMENT '关联游戏ID → games.id',
+    alias_name       VARCHAR(100) NOT NULL                 COMMENT '别名原文（用户输入）',
+    alias_normalized VARCHAR(100) NOT NULL                 COMMENT '规范化别名（小写+去空格，唯一约束防重复）',
+    source           VARCHAR(20)  NOT NULL DEFAULT 'user'  COMMENT '来源: user=用户输入, admin=管理员添加, auto=合并产生',
+    status           VARCHAR(20)  NOT NULL DEFAULT 'confirmed' COMMENT '状态: confirmed=已确认, pending=待审核',
+    created_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_alias_normalized (alias_normalized),
+    INDEX idx_game_id (game_id),
+    CONSTRAINT fk_alias_game FOREIGN KEY (game_id) REFERENCES games(id)
+        ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB COMMENT='游戏别名表 - 支持缩写/翻译/同义词 → 规范游戏名映射';
 
 -- ============================================================
 -- 3. 存档文章表 (article) - 核心业务实体
@@ -331,13 +354,37 @@ CREATE TABLE safe_paths (
 -- 方便前后端联调和功能验证
 -- ============================================================
 
--- 12.1 示例游戏
-INSERT INTO games (name, description) VALUES
-('艾尔登法环', 'FromSoftware开发的动作角色扮演游戏，开放世界魂系巅峰之作'),
-('Minecraft', 'Mojang Studios开发的沙盒建造游戏，无限创造可能'),
-('塞尔达传说：王国之泪', '任天堂开发的动作冒险游戏，海拉鲁大陆的新篇章'),
-('星露谷物语', 'ConcernedApe开发的农场模拟经营游戏'),
-('博德之门3', 'Larian Studios开发的CRPG，基于D&D第五版规则');
+-- 12.1 示例游戏（normalized_name = 小写+去空格，search_text 初始 = name）
+INSERT INTO games (name, normalized_name, description, search_text) VALUES
+('艾尔登法环',           '艾尔登法环',           'FromSoftware开发的动作角色扮演游戏，开放世界魂系巅峰之作', '艾尔登法环'),
+('Minecraft',            'minecraft',            'Mojang Studios开发的沙盒建造游戏，无限创造可能',          'Minecraft'),
+('塞尔达传说：王国之泪', '塞尔达传说：王国之泪', '任天堂开发的动作冒险游戏，海拉鲁大陆的新篇章',            '塞尔达传说：王国之泪'),
+('星露谷物语',           '星露谷物语',           'ConcernedApe开发的农场模拟经营游戏',                      '星露谷物语'),
+('博德之门3',            '博德之门3',            'Larian Studios开发的CRPG，基于D&D第五版规则',             '博德之门3');
+
+-- 12.1.5 游戏别名（缩写/翻译/同义词，搜索时折叠进索引）
+INSERT INTO game_aliases (game_id, alias_name, alias_normalized, source)
+SELECT id, 'MC', 'mc', 'admin'              FROM games WHERE name = 'Minecraft';
+INSERT INTO game_aliases (game_id, alias_name, alias_normalized, source)
+SELECT id, '我的世界', '我的世界', 'admin'  FROM games WHERE name = 'Minecraft';
+INSERT INTO game_aliases (game_id, alias_name, alias_normalized, source)
+SELECT id, 'Elden Ring', 'elden ring', 'admin' FROM games WHERE name = '艾尔登法环';
+INSERT INTO game_aliases (game_id, alias_name, alias_normalized, source)
+SELECT id, 'Zelda TotK', 'zelda totk', 'admin' FROM games WHERE name = '塞尔达传说：王国之泪';
+INSERT INTO game_aliases (game_id, alias_name, alias_normalized, source)
+SELECT id, '塞尔达王国之泪', '塞尔达王国之泪', 'admin' FROM games WHERE name = '塞尔达传说：王国之泪';
+
+-- 更新 search_text = 原名 + 所有别名拼接（供 Meilisearch 索引）
+UPDATE games g
+SET g.search_text = CONCAT(
+    g.name, ' ',
+    COALESCE(
+        (SELECT GROUP_CONCAT(ga.alias_name SEPARATOR ' ')
+         FROM game_aliases ga
+         WHERE ga.game_id = g.id AND ga.status = 'confirmed'),
+        ''
+    )
+);
 
 -- 12.2 示例用户（区分 admin 管理员 与 user 普通用户）
 -- 密码均为 "password123" 的BCrypt哈希值（开发测试用，生产环境需更换）

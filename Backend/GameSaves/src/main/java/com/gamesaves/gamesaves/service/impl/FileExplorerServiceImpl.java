@@ -168,9 +168,11 @@ public class FileExplorerServiceImpl implements FileExplorerService {
                             + previewMaxSizeBytes / 1024 / 1024 + "MB)");
         }
 
-        String fileKey = storageService.articleKey(
-                savings.getUserId(), savings.getGameId(), savings.getArticleId(),
-                "extracted/" + item.getPhysicalKey());
+        // 使用 storageRoot 而非 savings.gameId — 合并游戏后 gameId 会变但文件在原路径
+        Article article = articleRepository.findById(articleId)
+                .orElseThrow(() -> new ResourceNotFoundException("Article", articleId));
+        String fileKey = storageService.articleKeyFromRoot(
+                article.getStorageRoot(), "extracted/" + item.getPhysicalKey());
 
         if (!storageService.exists(fileKey)) {
             throw new ResourceNotFoundException("File not found in storage", fileKey);
@@ -205,9 +207,9 @@ public class FileExplorerServiceImpl implements FileExplorerService {
         // 路径穿越校验
         PathTraversalValidator.validate(relativePath);
 
-        String imageKey = storageService.articleKey(
-                article.getUser().getId(), article.getGame().getId(), articleId,
-                "readme/images/" + relativePath);
+        // 使用 storageRoot 而非 article.game.id，合并游戏后路径不变
+        String imageKey = storageService.articleKeyFromRoot(
+                article.getStorageRoot(), "readme/images/" + relativePath);
 
         if (!storageService.exists(imageKey)) {
             throw new ResourceNotFoundException("Readme image not found", relativePath);
@@ -224,9 +226,9 @@ public class FileExplorerServiceImpl implements FileExplorerService {
         Article article = articleRepository.findById(articleId)
                 .orElseThrow(() -> new ResourceNotFoundException("Article", articleId));
 
-        String zipKey = storageService.articleKey(
-                article.getUser().getId(), article.getGame().getId(), articleId,
-                article.getZipFilename());
+        // 使用 storageRoot 而非 article.game.id，合并游戏后路径不变
+        String zipKey = storageService.articleKeyFromRoot(
+                article.getStorageRoot(), article.getZipFilename());
 
         if (!storageService.exists(zipKey)) {
             throw new ResourceNotFoundException("ZIP file not found in storage", zipKey);
@@ -240,11 +242,16 @@ public class FileExplorerServiceImpl implements FileExplorerService {
         Article article = articleRepository.findById(articleId)
                 .orElseThrow(() -> new ResourceNotFoundException("Article", articleId));
 
-        String zipKey = storageService.articleKey(
-                article.getUser().getId(), article.getGame().getId(), articleId,
-                article.getZipFilename());
+        // 使用 storageRoot 而非 article.game.id，合并游戏后路径不变
+        String zipKey = storageService.articleKeyFromRoot(
+                article.getStorageRoot(), article.getZipFilename());
+
+        log.debug("ZIP download check: articleId={}, storageRoot={}, zipFilename={}, resolvedKey={}",
+                articleId, article.getStorageRoot(), article.getZipFilename(), zipKey);
 
         if (!storageService.exists(zipKey)) {
+            log.warn("ZIP not found in storage: key={}, storageRoot={}, gameId={}",
+                    zipKey, article.getStorageRoot(), article.getGame().getId());
             return Optional.empty();
         }
 

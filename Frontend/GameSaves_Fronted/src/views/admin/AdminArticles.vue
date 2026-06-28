@@ -103,6 +103,7 @@ import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { adminApi } from '../../api/adminApi'
 import { Search } from '@element-plus/icons-vue'
+import { statusType, statusText } from '@/utils/format'
 
 const articles = ref([])
 const loading = ref(false)
@@ -111,16 +112,6 @@ const statusFilter = ref('')
 const page = ref(0)
 const size = ref(20)
 const total = ref(0)
-
-function statusType(status) {
-  const map = { READY: 'success', UPLOADING: 'info', EXTRACTING: 'warning', FAILED: 'danger' }
-  return map[status] || 'info'
-}
-
-function statusText(status) {
-  const map = { READY: '就绪', UPLOADING: '上传中', EXTRACTING: '解压中', FAILED: '失败' }
-  return map[status] || status
-}
 
 async function fetchArticles() {
   loading.value = true

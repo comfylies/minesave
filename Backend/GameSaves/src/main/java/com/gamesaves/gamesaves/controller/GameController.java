@@ -1,5 +1,6 @@
 package com.gamesaves.gamesaves.controller;
 
+import cn.dev33.satoken.annotation.SaCheckLogin;
 import com.gamesaves.gamesaves.dto.request.GameCreateRequest;
 import com.gamesaves.gamesaves.dto.request.GameUpdateRequest;
 import com.gamesaves.gamesaves.dto.response.ApiResponse;
@@ -26,6 +27,16 @@ public class GameController {
         return ApiResponse.success(games);
     }
 
+    /** 游戏名搜索（含别名）— 上传页 autocomplete */
+    @GetMapping("/search")
+    public ApiResponse<List<GameResponse>> searchGames(@RequestParam String q) {
+        if (q == null || q.isBlank()) {
+            return ApiResponse.success(List.of());
+        }
+        List<GameResponse> games = gameService.searchGames(q.trim());
+        return ApiResponse.success(games);
+    }
+
     @GetMapping("/{id}")
     public ApiResponse<GameResponse> getGame(@PathVariable Long id) {
         GameResponse game = gameService.getGameById(id);
@@ -33,6 +44,7 @@ public class GameController {
     }
 
     @PostMapping
+    @SaCheckLogin
     public ApiResponse<GameResponse> createGame(@Valid @RequestBody GameCreateRequest request) {
         GameResponse game = gameService.createGame(request);
         return ApiResponse.success("Game created", game);

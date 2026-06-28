@@ -10,7 +10,6 @@ import com.gamesaves.gamesaves.entity.User;
 import com.gamesaves.gamesaves.exception.AccountLockedException;
 import com.gamesaves.gamesaves.exception.BadRequestException;
 import com.gamesaves.gamesaves.exception.CaptchaValidationException;
-import com.gamesaves.gamesaves.exception.ResourceNotFoundException;
 import com.gamesaves.gamesaves.repository.LoginFailRepository;
 import com.gamesaves.gamesaves.repository.UserRepository;
 import com.gamesaves.gamesaves.util.CaptchaUtil;
@@ -29,12 +28,14 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 认证服务
- * - 账号密码 + 图形验证码登录
- * - 邮箱验证码登录
- * - 用户注册
- * - 登录失败计数 & 账号锁定
- * - 图形验证码生成 & 校验
+ * 认证服务 — 账号密码/邮箱验证码登录、注册、图形验证码、登录锁定。
+ *
+ * <p>引用的开源项目：
+ * <ul>
+ *   <li><b>Sa-Token</b> (Apache-2.0) — 轻量级权限认证框架，处理登录会话、token 签发与鉴权</li>
+ *   <li><b>Spring Security Crypto</b> (Apache-2.0) — BCryptPasswordEncoder 密码哈希</li>
+ *   <li><b>CaptchaUtil</b> — 自研，纯 JDK {@link java.awt} 实现，无第三方验证码库依赖</li>
+ * </ul>
  */
 @Service
 @Transactional

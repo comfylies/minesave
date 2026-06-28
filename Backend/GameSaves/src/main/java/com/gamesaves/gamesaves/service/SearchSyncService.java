@@ -3,8 +3,10 @@ package com.gamesaves.gamesaves.service;
 import com.gamesaves.gamesaves.dto.response.SearchHitResponse;
 import com.gamesaves.gamesaves.entity.Article;
 import com.gamesaves.gamesaves.entity.Game;
+import com.gamesaves.gamesaves.entity.GameAlias;
 import com.gamesaves.gamesaves.entity.Tag;
 import com.gamesaves.gamesaves.repository.ArticleRepository;
+import com.gamesaves.gamesaves.repository.GameAliasRepository;
 import com.gamesaves.gamesaves.repository.GameRepository;
 import com.meilisearch.sdk.Client;
 import com.meilisearch.sdk.Index;
@@ -29,12 +31,14 @@ public class SearchSyncService {
     private final Client client;
     private final ArticleRepository articleRepository;
     private final GameRepository gameRepository;
+    private final GameAliasRepository aliasRepository;
 
     public SearchSyncService(Client client, ArticleRepository articleRepository,
-                              GameRepository gameRepository) {
+                              GameRepository gameRepository, GameAliasRepository aliasRepository) {
         this.client = client;
         this.articleRepository = articleRepository;
         this.gameRepository = gameRepository;
+        this.aliasRepository = aliasRepository;
     }
 
     /** 索引单个游戏 */
@@ -131,6 +135,8 @@ public class SearchSyncService {
         doc.put("type", "game");
         doc.put("name", game.getName() != null ? game.getName() : "");
         doc.put("description", game.getDescription() != null ? game.getDescription() : "");
+        // searchText = name + aliases（让 Meilisearch 搜别名也能命中）
+        doc.put("searchText", game.getSearchText() != null ? game.getSearchText() : game.getName());
         doc.put("articleCount", articleCount);
         doc.put("downloadCount", 0);
         doc.put("createdAt", game.getCreatedAt() != null ? DTF.format(game.getCreatedAt()) : "");
@@ -149,9 +155,33 @@ public class SearchSyncService {
                 ? article.getTags().stream().map(Tag::getName).collect(Collectors.toList())
                 : Collections.emptyList();
         doc.put("tags", tagNames);
+        // searchText = title + description + game name + game aliases（搜别名也能命中存档）
+        String searchText = buildArticleSearchText(article);
+        doc.put("searchText", searchText);
         doc.put("downloadCount", article.getDownloadCount() != null ? article.getDownloadCount() : 0);
         doc.put("createdAt", article.getCreatedAt() != null ? DTF.format(article.getCreatedAt()) : "");
         return doc;
+    }
+
+    private String buildArticleSearchText(Article article) {
+        StringBuilder sb = new StringBuilder();
+        if (article.getTitle() != null) sb.append(article.getTitle()).append(' ');
+        if (article.getDescription() != null) sb.append(article.getDescription()).append(' ');
+        Game game = article.getGame();
+        if (game != null) {
+            sb.append(game.getName()).append(' ');
+            // 拼接游戏别名
+            String gameSearchText = game.getSearchText();
+            if (gameSearchText != null && !gameSearchText.isEmpty()) {
+                sb.append(gameSearchText).append(' ');
+            }
+        }
+        if (article.getTags() != null) {
+            for (Tag tag : article.getTags()) {
+                sb.append(tag.getName()).append(' ');
+            }
+        }
+        return sb.toString().trim();
     }
 
     private String toJson(Map<String, Object> doc) {

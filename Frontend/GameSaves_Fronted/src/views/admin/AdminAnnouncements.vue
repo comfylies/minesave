@@ -139,6 +139,7 @@ import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus, Edit, Delete, Switch, Picture, Upload } from '@element-plus/icons-vue'
 import { announcementApi } from '../../api/announcementApi'
+import { formatDateTime as formatTime } from '@/utils/format'
 
 const announcements = ref([])
 const loading = ref(false)
@@ -166,11 +167,6 @@ const rules = {
   contentRaw: [
     { required: true, message: '请输入内容', trigger: 'blur' }
   ]
-}
-
-function formatTime(time) {
-  if (!time) return '-'
-  return new Date(time).toLocaleString('zh-CN')
 }
 
 async function fetchAnnouncements() {

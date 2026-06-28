@@ -9,6 +9,11 @@ import java.util.Base64;
 import java.util.Random;
 
 /**
+ * 图形验证码生成工具 — 纯自研，仅依赖 JDK {@link java.awt} / {@link javax.imageio}。
+ * 无第三方验证码库（非 Kaptcha / EasyCaptcha / Patchca）。
+ */
+
+/**
  * 图形验证码生成工具
  * 生成包含扭曲文字+干扰线+噪点的图片验证码，返回base64图片和验证码文本
  * 用于登录接口防机器人/暴力破解

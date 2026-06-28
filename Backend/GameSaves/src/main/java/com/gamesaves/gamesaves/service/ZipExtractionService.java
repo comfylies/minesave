@@ -112,6 +112,11 @@ public class ZipExtractionService {
             ZipExtractor extractor = new ZipExtractor(zipPath, extractRoot, savings.getId(), magicNumberValidator);
             ZipExtractor.ExtractionResult result = extractor.extract();
 
+            // Pre-create extracted/ directory (single-thread) to avoid NTFS race
+            // when parallel threads call storeFromPath concurrently on Windows.
+            // Linux is not affected, but the one-time cost is zero.
+            storageService.store(cosPrefix + "extracted/.placeholder", new byte[0]);
+
             // Upload extracted files to storage in parallel (COS: N concurrent uploads vs sequential)
             List<SavingItem> items = result.getItems();
             items.parallelStream().forEach(item -> {

@@ -89,8 +89,18 @@ public class LocalStorageServiceImpl implements StorageService {
     public String storeFromPath(String key, Path localPath) {
         Path target = resolvePath(key);
         try {
-            Files.createDirectories(target.getParent());
-            Files.copy(localPath, target, StandardCopyOption.REPLACE_EXISTING);
+            Path parent = target.getParent();
+            if (!Files.isDirectory(parent)) {
+                Files.createDirectories(parent);
+            }
+            try {
+                Files.copy(localPath, target, StandardCopyOption.REPLACE_EXISTING);
+            } catch (java.nio.file.NoSuchFileException e) {
+                // Windows NTFS race: concurrent createDirectories may briefly hide
+                // an already-existing parent directory. Retry once after re-creating.
+                Files.createDirectories(parent);
+                Files.copy(localPath, target, StandardCopyOption.REPLACE_EXISTING);
+            }
             log.debug("Copied {} → {}", localPath, key);
         } catch (IOException e) {
             throw new StorageException("Failed to store " + key + " from " + localPath, e);

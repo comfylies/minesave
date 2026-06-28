@@ -57,6 +57,21 @@ public interface ArticleRepository extends JpaRepository<Article, Long> {
     @Query("SELECT a FROM Article a JOIN FETCH a.user JOIN FETCH a.game")
     Page<Article> findAllWithDetails(Pageable pageable);
 
+    // ── Admin: game listing ────────────────────────────────────────────
+
+    /** Find the earliest READY article with a cover image for a game (for thumbnail URL). */
+    @Query("SELECT a FROM Article a WHERE a.game.id = :gameId AND a.status = :status AND a.coverImage IS NOT NULL ORDER BY a.createdAt ASC")
+    List<Article> findEarliestReadyWithCover(@Param("gameId") Long gameId,
+                                             @Param("status") Article.ArticleStatus status,
+                                             Pageable pageable);
+
+    // ── Admin: game merge ──────────────────────────────────────────────
+
+    /** Bulk-migrate articles from one game to another (admin merge). */
+    @Modifying
+    @Query("UPDATE Article a SET a.game.id = :targetId WHERE a.game.id = :sourceId")
+    int updateGameId(@Param("sourceId") Long sourceId, @Param("targetId") Long targetId);
+
     // ── Utility (testing / admin) ─────────────────────────────────────
 
     /** Directly update updatedAt timestamp, bypassing @PreUpdate. */

@@ -2,279 +2,160 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview
+## Project
 
-Game Save Sharing Platform (游戏存档分享平台) — GitHub-style file browsing + Zhihu-style Markdown rendering + Word-style collaborative annotations for game save files. Personal project.
-
-## Repository Structure
-
-```
-GameSaving/
-├── 任务书.md                    # Task spec (authoritative requirements doc)
-├── gamesaving_database.sql     # Full schema: 8 tables + test data
-├── test_data_insert.sql        # Additional Minecraft save test data + login_fails table
-├── Database/                   # Physical file storage (mixed storage)
-│   └── {userId}/{gameId}/{articleId}/
-│       ├── archive.zip
-│       ├── extracted/{md5}.{ext}  (游戏存档, content-addressed)
-│       └── readme/               (README文档)
-│           ├── README.md
-│           └── images/           (README引用图片)
-├── Backend/GameSaves/          # Spring Boot 3.5.15 + Java 17 + Maven
-└── Frontend/GameSaves_Fronted/ # Vue 3 + Vite (fully implemented)
-```
+Game Save Sharing Platform (游戏存档分享平台) — GitHub-style file browsing + Markdown README + text annotation on game save files. Personal project.
 
 ## Common Commands
 
-### Backend (from `Backend/GameSaves/`)
+### Backend (`Backend/GameSaves/`)
 
 ```bash
-# Build
-./mvnw clean compile
+./mvnw clean compile          # Build
+./mvnw test                   # All tests (needs MySQL + Meilisearch)
+./mvnw test -Dtest=ClassName  # Single test class
+./mvnw spring-boot:run        # Start :8080 (profile: local, default)
+./mvnw spring-boot:run -Dspring-boot.run.profiles=minio  # MinIO storage
+./mvnw spring-boot:run -Dspring-boot.run.profiles=cos    # COS production storage
+```
 
-# Run all tests (requires MySQL running)
-./mvnw test
+### Frontend (`Frontend/GameSaves_Fronted/`)
 
-# Run a single test class
-./mvnw test -Dtest=GameSavesApplicationTests
+```bash
+npm run dev      # :3000, proxies /api and /storage → localhost:8080
+npm run build    # Production build
+```
 
-# Start server (port 8080, local storage)
-./mvnw spring-boot:run
+### Database
 
-# Start with MinIO storage (simulates COS locally, requires MinIO on 192.168.100.2)
-./mvnw spring-boot:run -Dspring-boot.run.profiles=minio
-
-# Start with COS storage (production)
-./mvnw spring-boot:run -Dspring-boot.run.profiles=cos
-
-# Kill process on port 8080
-cmd //c "taskkill /PID $(netstat -ano | grep ':8080.*LISTENING' | awk '{print $NF}') /F"
-
-# Initialize database (run once, from project root)
+```bash
+# First time only, from project root:
 mysql -u root -p3256 gamesaving < gamesaving_database.sql
 mysql -u root -p3256 gamesaving < test_data_insert.sql
 ```
 
-### Frontend (from `Frontend/GameSaves_Fronted/`)
-
-```bash
-npm run dev       # Start dev server (port 3000, proxies /api and /storage to localhost:8080)
-npm run build     # Production build
-npm run preview   # Preview production build
-```
-
-## Database
-
-- **MySQL 8.0**, database `gamesaving`, user `root`, password `3256`
-- **Initialize**: Execute `gamesaving_database.sql` then `test_data_insert.sql` from project root
-- **JPA**: `ddl-auto: validate` — entities MUST match existing table schema exactly
-- **8 tables**: `users`, `games`, `article`, `savings`, `saving_items`, `comments`, `download_logs`, `login_fails`
-- Test users: `admin` / `player_one` / `speedrunner`, all password `password123`
+MySQL 8.0, database `gamesaving`, user `root`, password `3256`. JPA `ddl-auto: validate` — entities MUST match table schema; all tables created manually via SQL scripts. Test users: `admin` / `player_one` / `speedrunner`, password `password123`.
 
 ## Backend Architecture
 
-**Package**: `com.gamesaves.gamesaves`
+**Spring Boot 3.5.15 + Java 17 + Maven**. Package: `com.gamesaves.gamesaves`.
 
-### Authentication (Sa-Token)
+### Storage Abstraction (CRITICAL)
 
-The project uses **Sa-Token 1.44.0** for token-based authentication (NOT session-less as previously documented). Key details:
+All file I/O goes through `StorageService` — never touch the filesystem directly. Two implementations, selected by `app.storage.type`:
 
-- **Token name**: `Authorization` (frontend sends in request header)
-- **Timeout**: 24h (86400s), active timeout 30min (1800s)
-- **Token style**: `random-64`
-- **Login flow**: `AuthController` (`/api/auth`) handles login with password+captcha, email code login, registration, logout, and session check
-- **Permission annotations**: `@SaCheckLogin` on controllers, `@SaCheckPermission("user:manage")` / `@SaCheckPermission("article:manage")` on admin endpoints
-- **Permission loading**: `StpInterfaceImpl` loads role-based permissions (`admin` → `user:manage` + `article:manage`)
-- **Login security**: 5 max failed attempts → 30min account lock (`login_fails` table); captcha gate on password login; email verification code cooldown (60s) and TTL (5min)
-- **Email codes**: QQ SMTP via `EmailCodeService` (Spring Mail)
+| Value | Class | Use case |
+|-------|-------|----------|
+| `local` (default) | `LocalStorageServiceImpl` | Local filesystem, maps keys → `Database/{userId}/{gameId}/{articleId}/` with path traversal guard |
+| `s3` | `S3StorageServiceImpl` | AWS S3-compatible (MinIO for test, Tencent COS for production). Uses AWS SDK v2. |
 
-### Entity Design Pattern
+Key semantics:
+- All keys use forward-slash format: `articles/{userId}/{gameId}/{articleId}/{filename}`
+- `getLocalPath(key)` downloads remote files to temp when needed (e.g. ZIP extraction, ImageIO) — local mode returns the direct path
+- `generatePresignedUrl(key, minutes)` for secure downloads; local mode falls back to `/storage/` paths
+- Profile configs (`application-{local,minio,cos}.yaml`) wire the right implementation
 
-- **Mixed FK approach**: Article uses writable `@ManyToOne` to Game and User (they're looked up during creation and stay loaded). All other entities use plain `Long` FK columns (e.g., `Savings.articleId`, `Comment.articleId`/`Comment.userId`, `SavingItem.snapshotId`) — these avoid N+1 queries and support the index-based query patterns from the task spec.
-- **Read-only back-references**: `@ManyToOne(insertable=false, updatable=false)` on Comment→User (for nickname joins), Savings→Article, SavingItem→Savings. These are traversal convenience only — never use them as the FK source in queries.
-- All timestamps use `@PrePersist`/`@PreUpdate` (DB defaults are for fallback only)
+### Auth (Sa-Token 1.44.0)
 
-### Core Data Flow: Article Upload
+Token-based auth via Sa-Token (NOT Spring Security). Token name: `Authorization` header. Timeout 24h, active timeout 30min. `StpInterfaceImpl` loads role→permission mapping (admin → `user:manage` + `article:manage`).
+
+**Route-level auth** (`SaTokenConfig`):
+- `/api/auth/**` — public
+- `GET /api/games/**`, `GET /api/articles/**`, `/api/files/**`, `GET /api/users/**`, `GET /api/comments/**` — public (but refresh token active time if logged in)
+- `POST/PUT/DELETE` on games/articles — requires login
+- `/api/admin/**` — login + admin permission (`@SaCheckPermission`)
+- All other `/api/**` — requires login
+
+**Login security**: 5 max failed attempts → 30min account lock (`login_fails` table), captcha gate on password login, email code cooldown 60s / TTL 5min.
+
+### Entity Design — CRITICAL
+
+- **Mixed FK strategy**: Article uses writable `@ManyToOne` to Game/User. ALL other entities use plain `Long` FK columns (e.g. `Savings.articleId`, `Comment.articleId`/`Comment.userId`) — avoids N+1 queries.
+- **Read-only back-refs**: `@ManyToOne(insertable=false, updatable=false)` on Comment→User, Savings→Article, SavingItem→Savings — traversal convenience only, never the FK source.
+- Timestamps via `@PrePersist`/`@PreUpdate`, not DB defaults.
+
+### Game & Alias System
+
+`Game` has `name` (display) + `normalizedName` (lowercase-trimmed, for exact matching) + `searchText` (name + all aliases concatenated, for Meilisearch). `GameAlias` stores alternative names (e.g. "Minecraft" ↔ "MC") with `source` (user/admin) and `status` (confirmed/pending/rejected). When searching, game aliases are folded into the index so users find the game regardless of which name they type.
+
+### Article Upload Flow (key data flow)
+
 ```
-POST /api/articles (MultipartFile + metadata)
-  → ArticleServiceImpl saves ZIP to disk, creates Article (UPLOADING)
-  → ZipExtractionService.extractAsync() (async, 30s timeout)
+POST /api/articles (multipart: metadata JSON + ZIP file + optional README .md)
+  → ArticleServiceImpl saves ZIP to storage, creates Article (status=UPLOADING)
+  → TransactionSynchronization.afterCommit() → triggers async extraction
+  → ZipExtractionService.extractAsync() (@Async, 30s timeout)
+    → Downloads ZIP from storage to temp (COS mode) or reads directly (local mode)
     → ZipExtractor: stream extraction, MD5 content-addressing, auto dir nodes
-    → SavingItemRepository.saveAll() — batch insert
-    → completeArticle() — saves readmeRaw + readmeContent + READY status
+    → MagicNumberValidator checks file headers (reject dangerous types)
+    → SavingItemRepository.saveAll()
+    → Parallel upload of extracted files back to storage (COS: N concurrent)
+    → ImageThumbnailService: generate 270p/360p/720p cover thumbnails, README image thumbnails
+    → Article status → READY (or FAILED)
+    → SearchSyncService indexes in Meilisearch
   → Frontend polls GET /api/articles/{id}/status
 ```
 
-### Key Index (for file browsing performance)
-`saving_items` table has `idx_snapshot_parent_dir (snapshot_id, parent_path, is_directory)` — all directory browsing queries hit this index with `type=ref`, not full scan.
+**Why `afterCommit()`**: the async extractor runs in a separate thread pool — if it starts before the main transaction commits, it won't see the new Article row (DB isolation level).
 
-### ZIP Extraction Security
-- Magic number validation (`PK\x03\x04`, `PK\x05\x06`, `PK\x07\x08`)
-- Path traversal prevention (rejects `../`, absolute paths, drive letters)
-- 30s timeout via `CompletableFuture.orTimeout()`, marks FAILED on timeout
-- Content dedup: same MD5 → skip disk write
+### Meilisearch Search
 
-### Rate Limiting (dual-layer)
-1. Memory: `RateLimiter` (ConcurrentHashMap, `@Scheduled` eviction every 60s)
-2. Database: `download_logs` table query on IP + time window
-Memory cap: 3 downloads/minute per IP; DB hard cap: 5 downloads/minute per IP (configurable via `app.rate-limit.*`)
+Search engine for game + article discovery. Single index `saves` with two doc types: `game-{id}` and `article-{id}`.
 
-### API Response Format
+- `SearchService.search()` — query parsing, result ranking (games before articles, then by download count desc)
+- `SearchSyncService` — CRUD operations on the search index: `indexGame`, `indexArticle`, `deleteGame`, `deleteArticle`, `rebuildAll`
+- Config at `meilisearch.host` (default `http://localhost:7700`), API key `meilisearch.api-key`
+- `rebuildAll()` does full reindex: all games (including those with 0 articles) + all READY articles, paginated
 
-All endpoints return `ApiResponse<T>`:
-```json
-// Success:
-{ "code": 200, "message": "success description", "data": { ... } }
-// Error:
-{ "code": 400, "message": "error description", "data": null }
-```
-Pagination uses `PageDTO<T>`: `{ "content": [...], "page": 0, "size": 20, "total": 100 }`.
+### ZIP Extraction Gotchas
 
-### Controller & Service Summary
+- **Charset fallback**: UTF-8 → GBK → system default (Chinese Windows ZIPs often use GBK). Uses Apache Commons Compress `ZipFile`, not JDK `ZipInputStream`.
+- **Path traversal defense**: `PathTraversalValidator` rejects `../`, absolute paths, drive letters; `LocalStorageServiceImpl.resolvePath()` has containment guard.
+- **Content dedup**: same MD5 → same `{md5}.{ext}` physical file → write once.
+- **Magic number validation**: `MagicNumberValidator` checks file headers before extraction — blocks executables, DLLs, and other dangerous types. `SafePath` entity stores whitelisted paths per game for security color marking (files inside known safe paths get downgraded warnings).
+- **Parallel extraction**: extracted files uploaded to storage in parallel via `parallelStream()` — critical for COS where each upload is a network round-trip.
 
-| Controller | Route prefix | Auth required | Service(s) |
-|---|---|---|---|
-| `AuthController` | `/api/auth` | Public | `AuthService` + `EmailCodeService` |
-| `UserController` | `/api/users` | Mixed | `UserService` |
-| `ArticleController` | `/api/articles` | Mixed | `ArticleService` |
-| `FileController` | `/api/files` | Public | `FileExplorerService` + `DownloadService` |
-| `CommentController` | `/api/comments` | Mixed | `CommentService` |
-| `GameController` | `/api/games` | Mixed | `GameService` |
-| `AdminController` | `/api/admin` | Login + Permission | `AdminService` |
+### Image Thumbnails
 
-Additional service classes (no interface): `AuthService`, `EmailCodeService`, `ZipExtractionService`, `S3StorageServiceImpl`
+`ImageThumbnailService` (pure JDK `BufferedImage`, no external imaging library):
+- **Cover thumbnails**: center-crop to 16:9 → resize to 270p/360p/720p (short edge), JPEG quality 0.85
+- **README image thumbnails**: proportional resize, 720px short edge, if original exceeds it
+- **360h thumbnails**: proportional resize to 360px height
+- Uses TwelveMonkeys ImageIO for WebP/JPEG format support (JDK doesn't decode WebP natively; if decode fails, thumbnails are skipped gracefully)
 
-Key endpoints:
-- `POST /api/auth/login` — password login with captcha, returns Sa-Token token
-- `POST /api/auth/login/email` — email verification code login
-- `POST /api/auth/register` — user registration
-- `POST /api/auth/email-code` — send email verification code (60s cooldown, 5min TTL)
-- `GET /api/auth/captcha` — get graphical captcha (base64 image + key)
-- `GET /api/auth/check` — check current login session
-- `POST /api/articles` — multipart upload (metadata JSON part + file part + readmeFile part), triggers async extraction
-- `GET /api/articles/{id}/status` — poll for extraction progress (UPLOADING→EXTRACTING→READY/FAILED)
-- `GET /api/articles/{id}/readme` — get rendered README HTML
-- `GET /api/files/{articleId}/browse?path=` — GitHub-style directory listing
-- `GET /api/files/{articleId}/preview?path=` — text/binary file preview
-- `GET /api/files/{articleId}/download` — rate-limited ZIP download
-- `GET /api/comments/article/{articleId}` — Word-style annotations with nickname join
-- `GET /api/admin/dashboard` — admin dashboard stats (requires `user:manage` permission)
-- `PUT /api/admin/users/{id}/ban` — toggle user ban status
+### API Convention
 
-### Global Exception Handling
+All responses: `{ "code": 200, "message": "...", "data": {...} }`. Pagination: `PageDTO<T>` with `content/page/size/total`. Exceptions → `GlobalExceptionHandler` maps to HTTP status codes (see `exception/` package).
 
-`GlobalExceptionHandler` (`@RestControllerAdvice`) maps domain exceptions to HTTP status codes:
-- `ResourceNotFoundException` → 404
-- `BadRequestException` → 400
-- `CaptchaValidationException` → 400 (extends BadRequestException)
-- `AccountLockedException` → 429
-- `RateLimitException` → 429 (Too Many Requests)
-- `ExtractionTimeoutException` → 408 (Request Timeout)
-- `PathTraversalException` → 400
-- `FileProcessingException` → 500
-- `MaxUploadSizeExceededException` → 413 (Payload Too Large)
-- `DataIntegrityViolationException` → 409 (Conflict)
-- `MethodArgumentNotValidException` → 400 (with field error mapping)
-- `Exception` (catch-all) → 500
+### Download Path Resolution (3-layer fallback)
 
-### Config Classes (7)
+`FileExplorerServiceImpl.getZipForDownload()` tries: 1) dynamic path from config `storageBasePath` + userId/gameId/articleId, 2) `article.storageRoot` (legacy), 3) `savings.zipPath` (very old data). Paths resolved to absolute via `@PostConstruct` to avoid Tomcat temp dir drift.
 
-| Class | Purpose |
-|---|---|
-| `AsyncConfig` | `extractionExecutor` thread pool: core=2, max=4, queue=10, CallerRunsPolicy |
-| `SaTokenConfig` | Route interceptors: `/api/admin/**` requires login, static resources excluded |
-| `StpInterfaceImpl` | Permission/role loading for Sa-Token (admin → `user:manage`, `article:manage`) |
-| `CorsConfig` | CORS allow-all for dev |
-| `S3Config` | AWS S3-compatible client config (MinIO local / COS production) |
-| `WebMvcConfig` | Static resource handlers for `/storage/**` |
-| `DataInitializer` | `@Profile("!prod")` — resets test user passwords on startup |
+### Key Dependencies
 
-### Utility Classes (7)
-
-| Class | Purpose |
-|---|---|
-| `ZipExtractor` | Stream-based ZIP extraction with MD5 content-addressing |
-| `ZipValidator` | Magic number validation for ZIP files |
-| `PathTraversalValidator` | Path sanitization (rejects `../`, absolute paths, drive letters) |
-| `MarkdownRenderer` | Regex-based Markdown→HTML (consider replacing with commonmark) |
-| `FileHasher` | MD5/SHA file hashing utilities |
-| `RateLimiter` | In-memory per-IP rate limiter with scheduled eviction |
-| `CaptchaUtil` | Graphical captcha generation |
-| `XssFilter` | XSS input sanitization |
-
-### Custom Application Properties (application.yaml)
-
-```yaml
-app:
-  storage:
-    type: local                               # local | s3 — 存储后端
-    database-path: ../../Database            # local 模式：混合存储根目录
-    s3:                                      # S3 模式：MinIO（本地测试）或 COS（生产）
-      endpoint: http://192.168.100.2:9000
-      region: us-east-1
-      access-key: minioadmin
-      secret-key: minioadmin123
-      bucket-name: gamesaving
-      path-style-access: true               # MinIO=true, COS=false
-  rate-limit:
-    max-downloads-per-ip: 3                  # Memory layer cap
-    window-seconds: 60                       # Rate limit window
-  extraction:
-    timeout-seconds: 30                      # ZIP extraction async timeout
-    max-file-size: 209715200                 # 200MB max upload
-  login:
-    max-fail-count: 5                        # Account lock after N failures
-    lock-minutes: 30                         # Lock duration
-    captcha-enabled: true                    # Require captcha on login
-    email-code-cooldown: 60                  # Resend cooldown (seconds)
-    email-code-ttl: 300                      # Code validity (seconds)
-```
+Apache Commons Compress 1.26 (ZIP), CommonMark 0.22 + GFM extensions (Markdown → HTML), BCrypt (password only, no full Spring Security), HikariCP (connection pool), Meilisearch Java SDK 0.14.4, AWS S3 SDK v2 2.29.52, TwelveMonkeys ImageIO 3.12 (WebP/JPEG thumbnails).
 
 ## Frontend Architecture
 
-The frontend is a **fully implemented** Vue 3 + Vite SPA at `Frontend/GameSaves_Fronted/`.
+**Vue 3.5 + Vite + Element Plus + Pinia**. Composition API (`<script setup>`).
 
-### Stack
-- **Vue 3.5** (Composition API) + **Vite 8**
-- **Pinia 3.0** (state management)
-- **Vue Router 4.6** (routing with navigation guards)
-- **Element Plus 2.14** (UI component library)
-- **Axios 1.18** (HTTP client)
-- **Marked 18.0** + **Highlight.js** (Markdown rendering)
-- **@recogito/text-annotator 4.2** (text selection annotations — Word-style commenting)
+### API Client (`api/client.js`) — CRITICAL
 
-### Dev Setup
-- Dev server runs on **port 3000**
-- Vite proxy: `/api` → `localhost:8080`, `/storage` → `localhost:8080`
-- Run with `npm run dev` from `Frontend/GameSaves_Fronted/`
+Axios response interceptor has dual-mode handling:
+- **JSON** (`application/json`) → auto-unwraps `ApiResponse`, extracts `data.data`, callers get business objects directly
+- **Binary/text** (`blob`, `text/plain`, `zip`) → returns full `response` object (with `headers`), caller handles `Content-Disposition` for filenames
 
-### Directory Structure
-```
-Frontend/GameSaves_Fronted/src/
-├── api/               # 8 API modules (client, authApi, articleApi, commentApi, fileApi, gameApi, userApi, adminApi)
-├── components/        # Reusable components (AppNavbar, AppFooter, GameCard, FileBrowser, AnnotationPanel, ReadmeRenderer, etc.)
-├── composables/       # useTextAnnotator.js (text annotation composable)
-├── layouts/           # DefaultLayout, AdminLayout
-├── router/            # Vue Router with auth guards (requiresAuth, requiresAdmin)
-├── stores/            # 4 Pinia stores (auth, articles, games, files)
-└── views/             # Page components
-    ├── HomePage, GamePage, ArticlePage, LoginPage, RegisterPage
-    ├── UploadPage, MySavesPage, UserProfilePage, NotFoundPage
-    └── admin/         # AdminDashboard, AdminUsers, AdminArticles
-```
+### Auth Persistence
 
-### Auth Flow (Frontend)
-- Login/register via `AuthController` endpoints — receives Sa-Token in response
-- Token stored via `authStore`, sent in `Authorization` header on subsequent requests
-- Router guards: `requiresAuth` redirects to login, `requiresAdmin` checks role
-- Auth check on app mount via `GET /api/auth/check`
+Login stores full `UserResponse` in `localStorage`. Router guard reads `localStorage` directly (not Pinia) to avoid flicker on refresh. No JWT — entire user object persisted.
 
-### Key Components
-- **FileBrowser** — GitHub-style tree browsing, calls `/api/files/{articleId}/browse`
-- **AnnotationPanel** — Word-style text annotations on README, uses `@recogito/text-annotator`
-- **ReadmeRenderer** — Renders Markdown with syntax highlighting
+### Key Views
+
+- **ArticlePage**: 3-column layout — FileBrowser + ReadmeRenderer + AnnotationPanel
+- **UploadPage**: ZIP upload + README dual-mode (hand-written Markdown OR upload .md file)
 
 ## Known Limitations
-- Markdown rendering uses simple regex-based `MarkdownRenderer`. Add `commonmark` dependency for production quality (frontend uses `marked` library and is fine).
-- Tests are minimal (single `contextLoads` smoke test). Add unit/integration tests before production.
-- No database migration tool (Liquibase/Flyway). Schema changes require manual SQL execution.
+
+- No DB migration tool (manual SQL for schema changes). Migration SQL files live in project root when needed (e.g. `migration_game_aliases.sql`).
+- No full Spring Security — only Sa-Token for auth.
+- Meilisearch must be running separately for search to work (install + run `meilisearch` on port 7700 with master key matching config).

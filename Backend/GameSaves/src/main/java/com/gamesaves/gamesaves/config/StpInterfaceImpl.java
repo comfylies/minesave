@@ -10,8 +10,13 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * Sa-Token 权限与角色加载实现
- * 每次鉴权时从数据库加载用户的角色和权限列表
+ * Sa-Token 权限与角色加载实现（{@link cn.dev33.satoken.stp.StpInterface}）。
+ * 每次鉴权时从数据库加载用户的角色和权限列表。
+ *
+ * <p>引用的开源项目：
+ * <ul>
+ *   <li><b>Sa-Token</b> (Apache-2.0) — GitHub: <a href="https://github.com/dromara/Sa-Token">dromara/Sa-Token</a></li>
+ * </ul>
  */
 @Component
 public class StpInterfaceImpl implements StpInterface {

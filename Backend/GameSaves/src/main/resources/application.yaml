@@ -1,10 +1,13 @@
+# ============================================================
+# GameSaving — 公共配置（所有模式共享）
+# ============================================================
 spring:
   application:
     name: GameSaves
+  profiles:
+    active: local    # 默认本地存储；minio / cos 通过 VM option 覆盖
 
-  # ============================================================
-  # MySQL 8.0 数据库配置 (游戏存档分享平台)
-  # ============================================================
+  # ── MySQL 8.0 数据库 ──
   datasource:
     url: jdbc:mysql://localhost:3306/gamesaving?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai
     username: root
@@ -17,7 +20,7 @@ spring:
       max-lifetime: 1200000
       connection-timeout: 30000
 
-  # JPA 配置
+  # ── JPA ──
   jpa:
     hibernate:
       ddl-auto: validate
@@ -27,13 +30,13 @@ spring:
         dialect: org.hibernate.dialect.MySQLDialect
         format_sql: true
 
-  # 文件上传大小限制
+  # ── 文件上传 ──
   servlet:
     multipart:
       max-file-size: 200MB
       max-request-size: 200MB
 
-  # Spring Mail 邮箱配置 (QQ邮箱)
+  # ── QQ 邮箱 ──
   mail:
     host: smtp.qq.com
     port: 587
@@ -49,77 +52,56 @@ spring:
           ssl:
             enable: false
 
-# 服务器端口
+# ── 服务器端口 ──
 server:
   port: 8080
 
-# ============================================================
-# Sa-Token 权限认证配置
-# ============================================================
+# ── Sa-Token 权限认证（JWT 模式）──
+# JWT 模式：token 自包含登录信息，服务端无状态，重启不丢会话。
+# timeout 控制 JWT 过期时间（exp），无 active-timeout（JWT 签发后无法服务端刷新）。
 sa-token:
-  token-name: Authorization              # token名称（前端请求头携带）
-  timeout: 86400                         # token有效期（秒），默认24小时
-  active-timeout: 1800                   # 最低活跃频率（秒），30分钟无操作则过期
-  is-concurrent: false                   # 不允许多地同时登录（新设备登录踢出旧设备）
-  is-share: false                        # 多终端登录是否共用token
-  token-style: random-64                 # token风格
-  is-log: true                           # 是否输出操作日志
-  is-print: false                        # 是否打印Sa-Token日志
+  token-name: Authorization
+  timeout: 604800           # 7 天 JWT 过期（无 idle timeout，用更长硬过期补偿）
+  is-jwt: true              # 显式开启 JWT 模式（配合 sa-token-jwt 插件）
+  is-concurrent: false
+  is-share: false
+  is-log: true
+  is-print: false
+  jwt-secret-key: gs_jwt_hs256_key_2026_do_not_leak_change_in_production
 
-# ============================================================
-# Meilisearch 搜索引擎配置
-# ============================================================
+# ── Meilisearch 搜索引擎 ──
 meilisearch:
   host: http://localhost:7700
   api-key: gamesaving-master-key-2026
 
-# ============================================================
-# 应用自定义配置
-# ============================================================
+# ── 应用自定义配置（公共部分）──
 app:
-  storage:
-    type: local                                   # local | s3 — 存储后端切换
-    database-path: ../../Database                # 混合存储根目录（local 模式使用）
-    s3:
-      endpoint: http://192.168.100.2:9000        # S3 endpoint（MinIO 或 COS）
-      region: us-east-1                          # MinIO 默认 region
-      access-key: minioadmin                     # S3 Access Key（MinIO 默认）
-      secret-key: minioadmin123                  # S3 Secret Key（MinIO 默认）
-      bucket-name: gamesaving                    # 桶名
-      path-style-access: true                    # MinIO 需要 path-style；COS 设为 false
-      presigned-url-expiration-minutes: 5        # 预签名 URL 有效期（分钟）
   rate-limit:
-    max-downloads-per-ip: 3                    # 每个IP每分钟最大下载次数
-    window-seconds: 60                         # 限流时间窗口（秒）
+    max-downloads-per-ip: 3
+    window-seconds: 60
   extraction:
-    timeout-seconds: 30                        # ZIP解压超时时间
-    max-file-size: 209715200                   # 最大文件大小 200MB
-  # 登录安全配置
+    timeout-seconds: 30
+    max-file-size: 209715200                 # 200 MB
   login:
-    max-fail-count: 5                          # 最大登录失败次数
-    lock-minutes: 30                           # 锁定时间（分钟）
-    captcha-enabled: true                      # 是否启用图形验证码
-    email-code-cooldown: 60                    # 邮箱验证码发送冷却时间（秒）
-    email-code-ttl: 300                        # 邮箱验证码有效期（秒）
-  # 魔数校验 — 检测伪装可执行文件
+    max-fail-count: 5
+    lock-minutes: 30
+    email-code-cooldown: 60
+    email-code-ttl: 300
   security:
     magic-number:
-      enabled: true                            # 是否启用魔数校验
+      enabled: true
       rules:
-        MZ: exe,dll,sys,ocx,drv,cpl,scr,msi                          # Windows PE 诚实扩展名
-        ELF: so,o,ko,elf,bin,out                                      # Linux ELF 诚实扩展名
-        SHEBANG: sh,bash,zsh,py,rb,pl,php,js,lua                    # 脚本 shebang 诚实扩展名
-  # CORS 跨域配置
+        MZ: exe,dll,sys,ocx,drv,cpl,scr,msi
+        ELF: so,o,ko,elf,bin,out
+        SHEBANG: sh,bash,zsh,py,rb,pl,php,js,lua
   cors:
-    allowed-origins: "*"                         # 开发环境用 *；生产部署改为前端域名白名单如 https://gamesaves.example.com
-  # 文件预览安全配置
+    allowed-origins: "*"
   preview:
-    max-size-bytes: 5242880                      # 预览大小上限 5MB（超过拒绝预览）
-    allowed-extensions: txt,md,json,xml,yml,yaml,log,csv,ini,cfg,conf,properties,html,css,js,ts,java,py,sh,bat,sql,nbt,mcmeta,mf,lang,info,lock,ojng    # 白名单扩展名（仅文本类）
-  # 失败存档清理
+    max-size-bytes: 5242880                  # 5 MB
+    allowed-extensions: txt,md,json,xml,yml,yaml,log,csv,ini,cfg,conf,properties,html,css,js,ts,java,py,sh,bat,sql,nbt,mcmeta,mf,lang,info,lock,ojng
   cleanup:
-    interval-ms: 10800000                       # 清理间隔（毫秒），默认 3 小时
-    retention-hours: 3                          # FAILED/过期 UPLOADING 保留时长（小时）
-    batch-size: 50                              # 每批清理数量
-    batch-delay-ms: 2000                        # 批次间休眠时间（毫秒）
-    delete-physical-files: true                 # 是否删除磁盘文件（false 则仅清 DB 记录）
+    interval-ms: 10800000                    # 3 小时
+    retention-hours: 3
+    batch-size: 50
+    batch-delay-ms: 2000
+    delete-physical-files: true

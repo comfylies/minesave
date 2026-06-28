@@ -123,6 +123,7 @@ import { Delete } from '@element-plus/icons-vue'
 import { commentApi } from '../../api/commentApi'
 import { useAuthStore } from '../../stores/auth'
 import { useArticleStore } from '../../stores/articles'
+import { formatTime, truncate } from '@/utils/format'
 
 const props = defineProps({
   articleId: { type: Number, required: true },
@@ -160,11 +161,6 @@ function roleLabel(comment) {
   if (r === 'admin') return '管理员'
   if (r === 'uploader') return '上传者'
   return ''
-}
-
-function truncate(text, maxLen) {
-  if (!text) return ''
-  return text.length > maxLen ? text.slice(0, maxLen) + '…' : text
 }
 
 // bodyOffsetTop > 0 在页面滚动后会变成负数（元素在viewport上方），
@@ -213,17 +209,6 @@ function measureBodyOffset() {
 function canDelete(comment) {
   if (!auth.currentUser) return false
   return auth.isAdmin || auth.userId === comment.userId
-}
-
-function formatTime(dateStr) {
-  if (!dateStr) return ''
-  const d = new Date(dateStr)
-  const now = new Date()
-  const diff = now - d
-  if (diff < 60000) return '刚刚'
-  if (diff < 3600000) return `${Math.floor(diff / 60000)} 分钟前`
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)} 小时前`
-  return d.toLocaleDateString('zh-CN')
 }
 
 function toggleExpand(commentId) {

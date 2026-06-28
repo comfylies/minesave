@@ -21,6 +21,20 @@ client.interceptors.request.use(
   error => Promise.reject(error)
 )
 
+/**
+ * 清除本地认证状态并跳转到登录页。
+ * 后端重启后 Sa-Token 内存会话丢失，localStorage 里的旧 token 失效，
+ * 401 响应触发此清理逻辑。
+ */
+function clearAuthAndRedirect() {
+  localStorage.removeItem('satoken')
+  localStorage.removeItem('currentUser')
+  // 避免在登录页重复跳转
+  if (window.location.pathname !== '/login') {
+    window.location.href = '/login?redirect=' + encodeURIComponent(window.location.pathname)
+  }
+}
+
 // 响应拦截器：解包 ApiResponse<T>，处理错误
 client.interceptors.response.use(
   response => {
@@ -39,6 +53,11 @@ client.interceptors.response.use(
       if (data.code === 200) {
         return data.data
       }
+      // 后端返回 401 → 登录已过期
+      if (data.code === 401) {
+        clearAuthAndRedirect()
+        return Promise.reject(new Error(data.message || '登录已过期'))
+      }
       ElMessage.error(data.message || '请求失败')
       return Promise.reject(new Error(data.message || '请求失败'))
     }
@@ -46,6 +65,11 @@ client.interceptors.response.use(
     return data
   },
   error => {
+    // HTTP 401 → 登录已过期（后端重启导致 Sa-Token 内存会话丢失）
+    if (error.response?.status === 401) {
+      clearAuthAndRedirect()
+      return Promise.reject(error)
+    }
     const msg = error.response?.data?.message || error.message || '网络错误'
     ElMessage.error(msg)
     return Promise.reject(error)

@@ -63,4 +63,21 @@ public interface StorageService {
     default String articleKey(Long userId, Long gameId, Long articleId, String suffix) {
         return "articles/" + userId + "/" + gameId + "/" + articleId + "/" + suffix;
     }
+
+    /**
+     * Build a storage key from an article's {@code storageRoot}.
+     * Normalizes the root (strips legacy {@code Database/} and {@code articles/} prefixes)
+     * so the key is always {@code articles/{uid}/{gid}/{aid}/suffix}.
+     * Safe for use after game merges — storageRoot is immutable once set at creation.
+     */
+    default String articleKeyFromRoot(String storageRoot, String suffix) {
+        String root = storageRoot != null ? storageRoot : "";
+        // Strip any known prefix that shouldn't be part of the key
+        if (root.startsWith("articles/")) {
+            root = root.substring("articles/".length());
+        } else if (root.startsWith("Database/")) {
+            root = root.substring("Database/".length());
+        }
+        return "articles/" + root + (suffix != null ? suffix : "");
+    }
 }

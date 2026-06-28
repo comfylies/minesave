@@ -38,6 +38,10 @@
           <el-icon><Delete /></el-icon>
           <span>存档清理</span>
         </el-menu-item>
+        <el-menu-item index="/admin/ghosts">
+          <el-icon><Warning /></el-icon>
+          <span>幽灵文章</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
 

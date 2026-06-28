@@ -174,6 +174,7 @@ import EmptyState from '../components/common/EmptyState.vue'
 import LoadingSkeleton from '../components/common/LoadingSkeleton.vue'
 import ArticleCard from '../components/article/ArticleCard.vue'
 import { thumbUrl } from '../utils/imageUrl'
+import { formatSize, formatTime, statusType, statusText } from '@/utils/format'
 
 const articleStore = useArticleStore()
 const auth = useAuthStore()
@@ -184,38 +185,6 @@ const showEditDialog = ref(false)
 const saving = ref(false)
 const editForm = ref({ title: '', version: '', description: '' })
 const editingId = ref(null)
-
-function formatSize(bytes) {
-  if (bytes == null || bytes === 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB']
-  let i = 0; let size = bytes
-  while (size >= 1024 && i < units.length - 1) { size /= 1024; i++ }
-  return size.toFixed(i === 0 ? 0 : 1) + ' ' + units[i]
-}
-
-function formatTime(dateStr) {
-  if (!dateStr) return ''
-  const date = new Date(dateStr); const now = new Date()
-  const diff = now - date
-  const mins = Math.floor(diff / 60000)
-  const hours = Math.floor(diff / 3600000)
-  const days = Math.floor(diff / 86400000)
-  if (mins < 1) return '刚刚'
-  if (mins < 60) return `${mins} 分钟前`
-  if (hours < 24) return `${hours} 小时前`
-  if (days < 30) return `${days} 天前`
-  return date.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
-}
-
-function statusType(status) {
-  const map = { READY: 'success', FAILED: 'danger', EXTRACTING: 'warning', UPLOADING: 'info' }
-  return map[status] || 'info'
-}
-
-function statusText(status) {
-  const map = { READY: '就绪', FAILED: '失败', EXTRACTING: '解压中', UPLOADING: '上传中' }
-  return map[status] || status
-}
 
 function handlePageChange(page) {
   currentPage.value = page

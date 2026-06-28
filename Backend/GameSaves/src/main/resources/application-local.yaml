@@ -1,0 +1,9 @@
+# ============================================================
+# Profile: local — 本地文件系统存储（默认）
+# 启动: ./mvnw spring-boot:run
+# IDEA: 选择 "GameSaves [local]" 运行配置
+# ============================================================
+app:
+  storage:
+    type: local
+    database-path: ../../Database

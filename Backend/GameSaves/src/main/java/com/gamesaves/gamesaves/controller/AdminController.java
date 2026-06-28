@@ -10,6 +10,7 @@ import com.gamesaves.gamesaves.exception.BadRequestException;
 import com.gamesaves.gamesaves.service.AdminService;
 import com.gamesaves.gamesaves.service.AnnouncementService;
 import com.gamesaves.gamesaves.service.CleanupScheduler;
+import com.gamesaves.gamesaves.service.GameService;
 import com.gamesaves.gamesaves.service.SafePathService;
 import com.gamesaves.gamesaves.service.SearchSyncService;
 import com.gamesaves.gamesaves.service.StorageService;
@@ -40,12 +41,14 @@ public class AdminController {
     private final SafePathService safePathService;
     private final CleanupScheduler cleanupScheduler;
     private final StorageService storageService;
+    private final GameService gameService;
 
     public AdminController(AdminService adminService, AnnouncementService announcementService,
                            TagService tagService, SearchSyncService searchSyncService,
                            SafePathService safePathService,
                            CleanupScheduler cleanupScheduler,
-                           StorageService storageService) {
+                           StorageService storageService,
+                           GameService gameService) {
         this.adminService = adminService;
         this.announcementService = announcementService;
         this.tagService = tagService;
@@ -53,6 +56,7 @@ public class AdminController {
         this.safePathService = safePathService;
         this.cleanupScheduler = cleanupScheduler;
         this.storageService = storageService;
+        this.gameService = gameService;
     }
 
     @GetMapping("/dashboard")
@@ -97,6 +101,30 @@ public class AdminController {
     public ApiResponse<String> deleteArticle(@PathVariable Long id) {
         adminService.deleteArticle(id);
         return ApiResponse.success("Article deleted", "ok");
+    }
+
+    // ==================== 幽灵文章诊断 ====================
+
+    /** 扫描幽灵文章：数据库有记录但存储中找不到文件 */
+    @GetMapping("/articles/ghosts")
+    @SaCheckPermission("article:manage")
+    public ApiResponse<List<GhostArticleResponse>> scanGhostArticles() {
+        List<GhostArticleResponse> ghosts = adminService.scanGhostArticles();
+        return ApiResponse.success(ghosts);
+    }
+
+    /** 批量删除幽灵文章 */
+    @DeleteMapping("/articles/ghosts")
+    @SaCheckPermission("article:manage")
+    public ApiResponse<Map<String, Object>> deleteGhostArticles(@RequestBody List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            throw new BadRequestException("请提供要删除的文章 ID 列表");
+        }
+        int deleted = adminService.deleteGhostArticles(ids);
+        return ApiResponse.success(Map.of(
+                "deleted", deleted,
+                "requested", ids.size()
+        ));
     }
 
     // ==================== 搜索索引管理 ====================
@@ -300,6 +328,26 @@ public class AdminController {
         } catch (IOException e) {
             throw new BadRequestException("文件上传失败: " + e.getMessage());
         }
+    }
+
+    // ==================== 游戏合并（去重） ====================
+
+    /** 获取游戏管理列表（含封面缩略图、存档数、别名数、冲突检测） */
+    @GetMapping("/games")
+    @SaCheckPermission("user:manage")
+    public ApiResponse<List<AdminGameResponse>> listGames() {
+        List<AdminGameResponse> games = adminService.listGamesForAdmin();
+        return ApiResponse.success(games);
+    }
+
+    /** 合并重复游戏：将 source 的所有存档迁移到 target，source 名变为 target 的别名 */
+    @PostMapping("/games/merge")
+    @SaCheckPermission("user:manage")
+    public ApiResponse<Map<String, Object>> mergeGames(
+            @RequestParam Long sourceId,
+            @RequestParam Long targetId) {
+        Map<String, Object> result = gameService.mergeGames(sourceId, targetId);
+        return ApiResponse.success("Games merged", result);
     }
 
     // ==================== 失败存档清理 ====================
