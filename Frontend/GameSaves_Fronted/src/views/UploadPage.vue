@@ -9,7 +9,7 @@
         :model="form"
         :rules="rules"
         label-position="top"
-        size="large"
+        size="default"
         :disabled="uploading"
       >
         <!-- 游戏搜索/选择 -->
@@ -61,11 +61,11 @@
         </el-row>
 
         <!-- 描述 -->
-        <el-form-item label="存档描述" prop="description">
+        <el-form-item label="存档描述">
           <el-input
             v-model="form.description"
             type="textarea"
-            :rows="3"
+            :rows="2"
             placeholder="简单描述存档内容（可选）"
           />
         </el-form-item>
@@ -77,49 +77,80 @@
         </el-form-item>
 
         <!-- 封面图 -->
-        <el-form-item label="封面图（可选）">
-          <el-upload
-            ref="coverUploadRef"
-            :auto-upload="false"
-            :limit="1"
-            accept="image/png,image/jpeg,image/gif,image/webp"
-            :on-change="handleCoverChange"
-            :on-remove="handleCoverRemove"
-            :file-list="coverFileList"
-            list-type="picture"
-          >
-            <el-button type="default" :disabled="uploading">
-              <el-icon><Picture /></el-icon>
-              选择封面图
-            </el-button>
-            <template #tip>
-              <div class="el-upload__tip">
-                支持 PNG/JPG/GIF/WebP，建议 16:9。不上传则显示默认占位图。
-              </div>
-            </template>
-          </el-upload>
+        <el-form-item>
+          <template #label>
+            <span class="form-label-row">
+              封面图（可选）
+              <el-button type="primary" link size="small" @click="openDetail('cover')">
+                <el-icon><InfoFilled /></el-icon>详情
+              </el-button>
+            </span>
+          </template>
+          <div class="cover-wrapper">
+            <el-tooltip content="支持 PNG/JPG/GIF/WebP，建议 16:9。不上传则显示默认占位图。" placement="top">
+              <el-upload
+                ref="coverUploadRef"
+                :auto-upload="false"
+                :limit="1"
+                accept="image/png,image/jpeg,image/gif,image/webp"
+                :on-change="handleCoverChange"
+                :on-remove="handleCoverRemove"
+                :file-list="coverFileList"
+                :show-file-list="false"
+              >
+                <el-button type="default" :disabled="uploading">
+                  <el-icon><Picture /></el-icon>
+                  选择封面图
+                </el-button>
+              </el-upload>
+            </el-tooltip>
+            <!-- 封面图本地文件信息 + 删除 -->
+            <div v-if="selectedCoverFile" class="cover-file-info">
+              <span class="cover-file-name" :title="selectedCoverFile.name">{{ selectedCoverFile.name }}</span>
+              <span class="cover-file-size">{{ formatFileSize(selectedCoverFile.size) }}</span>
+              <el-button type="danger" link size="small" @click="handleCoverRemove">删除封面</el-button>
+            </div>
+            <!-- 封面图本地预览 -->
+            <div v-if="coverPreviewUrl" class="cover-preview">
+              <img :src="coverPreviewUrl" alt="封面预览" />
+            </div>
+          </div>
         </el-form-item>
 
         <!-- README（Markdown） -->
-        <el-form-item label="README（Markdown）">
+        <el-form-item>
+          <template #label>
+            <span class="form-label-row">
+              README（Markdown）
+              <el-button type="primary" link size="small" @click="openDetail('readme')">
+                <el-icon><InfoFilled /></el-icon>详情
+              </el-button>
+            </span>
+          </template>
           <div class="readme-inputs">
             <div class="readme-tabs">
               <el-radio-group v-model="readmeMode" size="small">
-                <el-radio-button value="write">手写 Markdown</el-radio-button>
-                <el-radio-button value="upload">上传 .md 文件</el-radio-button>
+                <el-radio-button value="write">手写</el-radio-button>
+                <el-radio-button value="upload">上传文件</el-radio-button>
+                <el-radio-button value="auto">自动识别</el-radio-button>
               </el-radio-group>
+            </div>
+
+            <div v-if="readmeMode === 'auto'" class="readme-auto-hint">
+              <el-icon><MagicStick /></el-icon>
+              <span>ZIP 包根目录下自动识别 README.md、readme.md、README.txt、readme.txt、README.markdown、readme.markdown 文件</span>
             </div>
 
             <el-input
               v-if="readmeMode === 'write'"
               v-model="form.readmeRaw"
               type="textarea"
-              :rows="6"
-              placeholder="使用 Markdown 格式详细介绍存档内容（可选）&#10;&#10;## 版本信息&#10;- 游戏版本：1.21.10&#10;- Mod加载器：Fabric 0.18.0&#10;&#10;## 存档介绍&#10;...&#10;&#10;## 使用方法&#10;...&#10;&#10;## 注意事项&#10;..."
+              :rows="5"
+              placeholder="使用 Markdown 格式详细介绍存档内容（可选）&#10;## 版本信息&#10;- 游戏版本：1.21.10&#10;- Mod加载器：Fabric 0.18.0&#10;## 存档介绍&#10;...&#10;## 使用方法&#10;...&#10;## 注意事项&#10;..."
             />
 
             <el-upload
-              v-else
+              v-if="readmeMode === 'upload'"
               ref="readmeUploadRef"
               :auto-upload="false"
               :limit="1"
@@ -171,7 +202,7 @@
             class="submit-btn"
             @click="handleUpload"
           >
-            {{ uploading ? '上传中...' : '提交存档' }}
+            {{ uploading ? '上传中...' : '上传存档' }}
           </el-button>
         </el-form-item>
       </el-form>
@@ -194,6 +225,48 @@
         />
       </div>
     </div>
+
+    <!-- 详情抽屉 -->
+    <el-drawer
+      v-model="drawerVisible"
+      :title="drawerTitle"
+      direction="rtl"
+      size="420px"
+    >
+      <template v-if="drawerType === 'cover'">
+        <h4>封面图要求</h4>
+        <ul class="detail-list">
+          <li><strong>支持格式：</strong>PNG、JPG/JPEG、GIF、WebP</li>
+          <li><strong>建议宽高比：</strong>16:9（如 1920×1080），上传后自动裁剪</li>
+          <li><strong>文件大小：</strong>不限（后端生成缩略图）</li>
+          <li><strong>缩略图规格：</strong>自动生成 270p、360p、720p 三档</li>
+          <li><strong>默认行为：</strong>不上传封面则显示游戏默认占位图</li>
+          <li><strong>建议内容：</strong>游戏截图、标题画面或代表性场景</li>
+        </ul>
+      </template>
+      <template v-else>
+        <h4>README 文档要求</h4>
+        <ul class="detail-list">
+          <li><strong>支持格式：</strong>Markdown（.md）、纯文本（.txt / .markdown）</li>
+          <li><strong>三种提供方式：</strong>
+            <ul>
+              <li><strong>手写：</strong>在上方文本框直接编写 Markdown</li>
+              <li><strong>上传文件：</strong>上传本地 .md / .txt 文件</li>
+              <li><strong>自动识别：</strong>ZIP 包根目录下的 README 文件会被自动提取</li>
+            </ul>
+          </li>
+          <li><strong>自动识别文件名：</strong><br/>
+            <code>README.md</code>、<code>readme.md</code>、<code>README.txt</code>、<code>readme.txt</code>、<code>README.markdown</code>、<code>readme.markdown</code>
+          </li>
+          <li><strong>文档中的图片：</strong>使用相对路径引用 ZIP 包内图片<br/>
+            <code>![描述](./images/screenshot.png)</code> 或 <code>![描述](screenshot.jpg)</code>
+          </li>
+          <li><strong>图片格式支持：</strong>PNG、JPG、GIF、WebP</li>
+          <li><strong>优先级：</strong>手写/上传 &gt; 自动识别（手动提供的内容优先）</li>
+          <li><strong>建议内容：</strong>版本信息、Mod 列表、存档介绍、使用方法、注意事项</li>
+        </ul>
+      </template>
+    </el-drawer>
   </div>
 </template>
 
@@ -201,7 +274,7 @@
 import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, InfoFilled, MagicStick } from '@element-plus/icons-vue'
 import { useGameStore } from '../stores/games'
 import { useAuthStore } from '../stores/auth'
 import { articleApi } from '../api/articleApi'
@@ -218,7 +291,7 @@ const uploading = ref(false)
 const selectedFile = ref(null)
 const fileList = ref([])
 
-// README 模式: 'write' 手写 或 'upload' 上传文件
+// README 模式: 'write' 手写 / 'upload' 上传文件 / 'auto' 自动识别
 const readmeMode = ref('write')
 const readmeUploadRef = ref(null)
 const selectedReadmeFile = ref(null)
@@ -228,6 +301,12 @@ const readmeFileList = ref([])
 const coverUploadRef = ref(null)
 const selectedCoverFile = ref(null)
 const coverFileList = ref([])
+const coverPreviewUrl = ref(null)
+
+// 详情抽屉
+const drawerVisible = ref(false)
+const drawerType = ref('readme')
+const drawerTitle = ref('')
 
 // 处理状态
 const processingStatus = ref('')
@@ -247,6 +326,7 @@ const form = reactive({
 
 // ── 游戏搜索 + 自动创建 ──
 const gameSearchText = ref('')
+const newGameName = ref('')   // 待创建的游戏名（选中"创建新游戏"时暂存）
 let allGamesCache = []   // 完整游戏列表（冷数据）
 let cachedGameMap = {}   // gameId → game name
 
@@ -254,7 +334,6 @@ let cachedGameMap = {}   // gameId → game name
 async function searchGames(queryString, cb) {
   const q = (queryString || '').trim()
   if (!q || q.length < 1) {
-    // 显示所有游戏
     if (allGamesCache.length === 0) {
       try { allGamesCache = await gameApi.getAll() } catch { allGamesCache = [] }
     }
@@ -263,20 +342,15 @@ async function searchGames(queryString, cb) {
     return
   }
 
-  // 远程搜索（含别名）
   try {
     const results = await gameApi.search(q)
     const suggestions = results.map(g => ({ value: g.name, id: g.id, articleCount: g.articleCount }))
-
-    // 如果没有精确匹配 → 允许创建新游戏
     const exactMatch = results.some(g => g.name.toLowerCase() === q.toLowerCase())
     if (!exactMatch && q.length >= 2) {
       suggestions.push({ value: q, id: -1, isCreate: true, articleCount: 0 })
     }
-
     cb(suggestions)
   } catch {
-    // 降级：本地过滤
     if (allGamesCache.length === 0) {
       try { allGamesCache = await gameApi.getAll() } catch { allGamesCache = [] }
     }
@@ -291,32 +365,25 @@ async function searchGames(queryString, cb) {
   }
 }
 
-/** 用户选中建议项 */
-async function handleGameSelect(item) {
+function handleGameSelect(item) {
   if (item.isCreate) {
-    // 创建新游戏
-    try {
-      const newGame = await gameApi.create({ name: item.value })
-      form.gameId = newGame.id
-      gameSearchText.value = newGame.name
-      cachedGameMap[newGame.id] = newGame.name
-      allGamesCache.push(newGame)
-      ElMessage.success(`已创建游戏 "${newGame.name}"`)
-    } catch (e) {
-      ElMessage.error(e.message || '创建游戏失败')
-      gameSearchText.value = ''
-      form.gameId = null
-    }
+    newGameName.value = item.value
+    form.gameId = -1
+    gameSearchText.value = item.value
+    formRef.value?.validateField('gameId')
   } else {
+    newGameName.value = ''
     form.gameId = item.id
     gameSearchText.value = item.value
     cachedGameMap[item.id] = item.value
+    formRef.value?.validateField('gameId')
   }
 }
 
 function handleGameClear() {
   form.gameId = null
   gameSearchText.value = ''
+  newGameName.value = ''
 }
 
 const rules = {
@@ -326,10 +393,8 @@ const rules = {
 }
 
 function handleFileChange(file) {
-  // Element Plus upload 组件返回的文件对象
   const rawFile = file.raw
   if (rawFile) {
-    // 前端大小检查
     if (rawFile.size > 200 * 1024 * 1024) {
       ElMessage.error('文件大小不能超过 200 MB')
       fileList.value = []
@@ -348,7 +413,6 @@ function handleFileRemove() {
 function handleReadmeFileChange(file) {
   const rawFile = file.raw
   if (rawFile) {
-    // 前端大小检查（MD 文件不超过 1MB）
     if (rawFile.size > 1 * 1024 * 1024) {
       ElMessage.error('README 文件大小不能超过 1 MB')
       readmeFileList.value = []
@@ -368,12 +432,34 @@ function handleCoverChange(file) {
   const rawFile = file.raw
   if (rawFile) {
     selectedCoverFile.value = rawFile
+    // 生成本地预览 URL
+    if (coverPreviewUrl.value) {
+      URL.revokeObjectURL(coverPreviewUrl.value)
+    }
+    coverPreviewUrl.value = URL.createObjectURL(rawFile)
   }
 }
 
 function handleCoverRemove() {
   selectedCoverFile.value = null
   coverFileList.value = []
+  if (coverPreviewUrl.value) {
+    URL.revokeObjectURL(coverPreviewUrl.value)
+    coverPreviewUrl.value = null
+  }
+}
+
+function formatFileSize(bytes) {
+  if (!bytes) return ''
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+}
+
+function openDetail(type) {
+  drawerType.value = type
+  drawerTitle.value = type === 'cover' ? '封面图要求' : 'README 文档要求'
+  drawerVisible.value = true
 }
 
 function updateProcessing(status, errorMessage) {
@@ -401,13 +487,13 @@ function clearPolling() {
 
 async function pollStatus(articleId) {
   const startTime = Date.now()
-  const timeout = 30 * 1000 // 30 秒超时
+  const timeout = 30 * 1000
 
   clearPolling()
   pollingTimer = setInterval(async () => {
     try {
       const statusData = await articleApi.getStatus(articleId)
-      const status = statusData.status || statusData // 可能是 {status: "READY"} 或直接字符串
+      const status = statusData.status || statusData
 
       updateProcessing(status, statusData.errorMessage)
 
@@ -422,7 +508,6 @@ async function pollStatus(articleId) {
         uploading.value = false
       }
 
-      // 超时检查
       if (Date.now() - startTime > timeout && status !== 'READY' && status !== 'FAILED') {
         clearPolling()
         updateProcessing('FAILED', '处理超时，请稍后在「我的存档」中查看状态')
@@ -437,7 +522,6 @@ async function pollStatus(articleId) {
 }
 
 async function handleUpload() {
-  // 表单验证
   const valid = await formRef.value.validate().catch(() => false)
   if (!valid) return
 
@@ -450,13 +534,25 @@ async function handleUpload() {
   updateProcessing('UPLOADING')
 
   try {
-    // 组装 FormData
-    // README: 手写文本优先于上传的 .md 文件
+    if (form.gameId === -1 && newGameName.value) {
+      try {
+        const newGame = await gameApi.create({ name: newGameName.value })
+        form.gameId = newGame.id
+        cachedGameMap[newGame.id] = newGame.name
+        allGamesCache.push(newGame)
+        ElMessage.success(`已创建游戏 "${newGame.name}"`)
+      } catch (e) {
+        ElMessage.error(e.message || '创建游戏失败，请重新选择游戏')
+        uploading.value = false
+        return
+      }
+    }
+
+    // README: 自动识别模式下不发送任何 README 内容
     const readmeRawValue = readmeMode.value === 'write'
       ? (form.readmeRaw || undefined)
       : undefined
 
-    // 确保 userId 有效
     const uid = auth.userId
     if (uid == null || isNaN(uid) || uid <= 0) {
       ElMessage.error('登录状态异常，请重新登录')
@@ -475,17 +571,14 @@ async function handleUpload() {
     }
 
     const formData = new FormData()
-    // 用 File 代替 Blob，确保浏览器正确设置 Content-Type 为 application/json
     const jsonStr = JSON.stringify(metadata)
     formData.append('metadata', new File([jsonStr], 'metadata.json', { type: 'application/json' }))
     formData.append('file', selectedFile.value)
 
-    // 上传 .md 文件模式 → 附加 readmeFile
     if (readmeMode.value === 'upload' && selectedReadmeFile.value) {
       formData.append('readmeFile', selectedReadmeFile.value)
     }
 
-    // 附加封面图
     if (selectedCoverFile.value) {
       formData.append('coverFile', selectedCoverFile.value)
     }
@@ -493,7 +586,6 @@ async function handleUpload() {
     const article = await articleApi.create(formData)
     updateProcessing('EXTRACTING')
 
-    // 开始轮询状态
     pollStatus(article.id)
   } catch (e) {
     updateProcessing('FAILED', e.message || '上传失败')
@@ -525,15 +617,31 @@ onUnmounted(() => {
 .page-subtitle {
   font-size: var(--font-size-normal);
   color: var(--color-secondary-text);
-  margin-bottom: var(--spacing-lg);
+  margin-bottom: var(--spacing-md);
 }
 
 .upload-card {
-  padding: var(--spacing-xl);
+  padding: var(--spacing-lg);
 }
 
 .full-width {
   width: 100%;
+}
+
+/* ---- 表单紧凑化 ---- */
+.upload-card :deep(.el-form-item) {
+  margin-bottom: 16px;
+}
+
+.upload-card :deep(.el-form-item__label) {
+  margin-bottom: 4px;
+}
+
+/* ---- 表单标签行（标签 + 详情按钮） ---- */
+.form-label-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 /* ---- 游戏搜索建议 ---- */
@@ -558,6 +666,8 @@ onUnmounted(() => {
 .game-option.is-create {
   color: var(--color-link);
   font-weight: 500;
+  justify-content: flex-start;
+  gap: 6px;
 }
 
 .game-option.is-create em {
@@ -565,14 +675,67 @@ onUnmounted(() => {
   font-weight: 700;
 }
 
+/* ---- 封面图 ---- */
+.cover-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+}
+
+.cover-file-info {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--color-secondary-text, #666);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 480px;
+}
+
+.cover-file-name {
+  color: var(--color-body-text, #333);
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.cover-file-size {
+  color: var(--color-secondary-text, #999);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.cover-file-info .el-button {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.cover-preview {
+  margin-top: 10px;
+  max-width: 480px;
+  border: 1px solid var(--el-border-color-light, #e4e7ed);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.cover-preview img {
+  width: 100%;
+  height: auto;
+  display: block;
+  object-fit: cover;
+}
+
 /* ---- 上传区域 ---- */
 .upload-area {
   text-align: center;
-  padding: var(--spacing-lg) 0;
+  padding: var(--spacing-md) 0;
 }
 
 .upload-icon {
-  font-size: 48px;
+  font-size: 40px;
   color: var(--color-secondary-text);
 }
 
@@ -593,7 +756,7 @@ onUnmounted(() => {
   color: var(--color-secondary-text) !important;
 }
 
-/* ---- README 双模式切换 ---- */
+/* ---- README ---- */
 .readme-inputs {
   width: 100%;
 }
@@ -607,21 +770,77 @@ onUnmounted(() => {
 }
 
 .readme-area {
-  padding: var(--spacing-md) 0;
+  padding: var(--spacing-sm) 0;
 }
 
+.readme-auto-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--el-color-info-light-9, #f4f4f5);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--color-secondary-text, #666);
+  line-height: 1.6;
+}
+
+.readme-auto-hint .el-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--el-color-info, #909399);
+}
+
+/* ---- 标签 ---- */
 .tag-hint {
   font-size: var(--font-size-small, 12px);
   color: var(--color-secondary-text, #999);
   margin-top: 4px;
 }
 
+/* ---- Textarea 统一内边距 ---- */
+.upload-card :deep(.el-textarea__inner) {
+  line-height: 1.6;
+  padding: 8px 12px;
+}
+
+/* ---- 提交按钮 ---- */
 .submit-btn {
   width: 100%;
+  padding: 14px 0;
+  font-size: 16px;
+  margin-top: 4px;
 }
 
 /* ---- 处理进度 ---- */
 .processing-status {
   margin-top: var(--spacing-md);
+}
+
+/* ---- 详情抽屉 ---- */
+.detail-list {
+  padding-left: 18px;
+  line-height: 2;
+  color: var(--color-body-text, #333);
+}
+
+.detail-list li {
+  margin-bottom: 4px;
+}
+
+.detail-list ul {
+  padding-left: 16px;
+  margin-top: 4px;
+}
+
+.detail-list code {
+  background: var(--el-color-info-light-9, #f4f4f5);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 90%;
+}
+
+.detail-list h4 {
+  margin: 12px 0 8px;
 }
 </style>
