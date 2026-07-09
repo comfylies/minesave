@@ -53,7 +53,7 @@ public class ZipExtractor {
         this.magicNumberValidator = magicNumberValidator;
     }
 
-    public ExtractionResult extract() throws IOException {
+    public ArchiveExtractionResult.ExtractionResult extract() throws IOException {
         // Ensure extract directory exists
         Files.createDirectories(extractRoot);
 
@@ -82,7 +82,7 @@ public class ZipExtractor {
         int fileCount = 0;
         long totalSize = 0;
         List<String> readmeContents = new ArrayList<>();
-        List<ReadmeImageEntry> readmeImages = new ArrayList<>();
+        List<ArchiveExtractionResult.ReadmeImageEntry> readmeImages = new ArrayList<>();
 
         String[] charsets = {"UTF-8", "GBK", Charset.defaultCharset().name()};
         boolean extracted = false;
@@ -129,7 +129,7 @@ public class ZipExtractor {
         // Compute file manifest hash
         String fileManifestHash = computeManifestHash(items);
 
-        return ExtractionResult.builder()
+        return ArchiveExtractionResult.ExtractionResult.builder()
                 .items(items)
                 .fileCount(fileCount)
                 .totalSize(totalSize)
@@ -147,7 +147,7 @@ public class ZipExtractor {
      */
     private void processZipEntries(Path zipPath, List<SavingItem> items,
                                     Set<String> createdDirs, List<String> readmeContents,
-                                    List<ReadmeImageEntry> readmeImages,
+                                    List<ArchiveExtractionResult.ReadmeImageEntry> readmeImages,
                                     String charsetName) throws IOException {
         try (ZipFile zipFile = ZipFile.builder()
                 .setFile(zipPath.toFile())
@@ -294,7 +294,7 @@ public class ZipExtractor {
                     if (entryData != null && !entryDataIsLarge(entryData)) {
                         String relativePath = entryName.substring("images/".length());
                         if (!relativePath.isEmpty()) {
-                            readmeImages.add(ReadmeImageEntry.builder()
+                            readmeImages.add(ArchiveExtractionResult.ReadmeImageEntry.builder()
                                     .relativePath(relativePath)
                                     .data(entryData)
                                     .build());
@@ -481,25 +481,4 @@ public class ZipExtractor {
         return sb.toString();
     }
 
-    @Data
-    @Builder
-    public static class ExtractionResult {
-        private List<SavingItem> items;
-        private int fileCount;
-        private long totalSize;
-        private String zipHash;              // SHA-256
-        private String fileManifestHash;     // Merkle-like root
-        private List<String> readmeContents; // extracted README file contents
-        private List<ReadmeImageEntry> readmeImages; // images for readme/images/
-    }
-
-    /**
-     * README 图片条目 — 从 ZIP 的 images/ 目录提取，存入 readme/images/
-     */
-    @Data
-    @Builder
-    public static class ReadmeImageEntry {
-        private String relativePath;  // e.g. "screenshot_game.png" or "ui/button.png"
-        private byte[] data;
-    }
 }

@@ -2,7 +2,7 @@
   <div class="auth-page">
     <div class="auth-card">
       <div class="auth-header">
-        <router-link to="/" class="auth-logo">💾 GameSaves</router-link>
+        <router-link to="/" class="auth-logo">💾 MineSave</router-link>
         <h1 class="auth-title">注册账号</h1>
       </div>
 
@@ -34,23 +34,26 @@
         <el-form-item prop="nickname">
           <el-input
             v-model="form.nickname"
-            placeholder="昵称（可选，默认使用用户名）"
+            placeholder="昵称（1-24个字符，支持中文、字母、数字、空格、_、-、·）"
             :prefix-icon="Avatar"
+            maxlength="24"
+            show-word-limit
           />
         </el-form-item>
 
         <el-form-item prop="phone">
           <el-input
             v-model="form.phone"
-            placeholder="手机号（可选）"
+            placeholder="手机号（可选，11位中国大陆手机号）"
             :prefix-icon="Phone"
+            maxlength="11"
           />
         </el-form-item>
 
         <el-form-item prop="email">
           <el-input
             v-model="form.email"
-            placeholder="邮箱（可选，可用于验证码登录）"
+            placeholder="邮箱（必填，可用于验证码登录）"
             :prefix-icon="Message"
           />
         </el-form-item>
@@ -144,6 +147,17 @@ const rules = {
     { required: true, message: '请输入密码', trigger: 'blur' },
     { min: 6, max: 100, message: '密码长度 6-100 个字符', trigger: 'blur' }
   ],
+  nickname: [
+    { min: 1, max: 24, message: '昵称长度 1-24 个字符', trigger: 'blur' },
+    { pattern: /^[一-龥a-zA-Z0-9_\-\s·]+$/, message: '昵称只能包含中文、字母、数字、空格、_、-、·', trigger: 'blur' }
+  ],
+  phone: [
+    { pattern: /^1[3-9]\d{9}$/, message: '请输入正确的11位手机号', trigger: 'blur' }
+  ],
+  email: [
+    { required: true, message: '请输入邮箱', trigger: 'blur' },
+    { type: 'email', message: '邮箱格式不正确', trigger: 'blur' }
+  ],
   captchaCode: [{ required: true, message: '请输入验证码', trigger: 'blur' }]
 }
 
@@ -159,7 +173,7 @@ async function handleRegister() {
         password: form.password,
         nickname: form.nickname || undefined,
         phone: form.phone || undefined,
-        email: form.email || undefined
+        email: form.email
       },
       captchaKey.value,
       form.captchaCode

@@ -196,17 +196,27 @@ public class FileController {
 
     /**
      * URL-encode the filename segment so the URL is safe for HTTP Location header
-     * (which requires ASCII-only). Handles both /storage/path/file.zip and
-     * https://cos.../path/file.zip?sign=... patterns.
+     * (which requires ASCII-only).
+     *
+     * <p>For external HTTP URLs (COS pre-signed URLs), the SDK has already
+     * URL-encoded non-ASCII characters — skip re-encoding to avoid double-encoding
+     * (which breaks the signature). For local /storage/ paths, encode the filename
+     * segment so Chinese characters are safe in the Location header.
      */
     private String encodePathForHeader(String url) {
+        // COS pre-signed URLs are already properly encoded by the AWS SDK.
+        // Re-encoding would turn %E8 → %25E8, breaking the signature.
+        if (url.startsWith("http://") || url.startsWith("https://")) {
+            return url;
+        }
+
         int lastSlash = url.lastIndexOf('/');
         if (lastSlash < 0) return url;
 
         String path = url.substring(0, lastSlash + 1);
         String filename = url.substring(lastSlash + 1);
 
-        // Split off query string if present (COS pre-signed URLs have ?sign=...)
+        // Split off query string if present
         String query = "";
         int queryIdx = filename.indexOf('?');
         if (queryIdx >= 0) {

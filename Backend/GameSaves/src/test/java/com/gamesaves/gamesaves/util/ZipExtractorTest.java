@@ -94,7 +94,7 @@ class ZipExtractorTest {
         Path extractRoot = tempDir.resolve("extracted");
         ZipExtractor extractor = new ZipExtractor(zip, extractRoot, 1L, magicValidator);
 
-        ZipExtractor.ExtractionResult result = extractor.extract();
+        ArchiveExtractionResult.ExtractionResult result = extractor.extract();
         assertNotNull(result);
         assertEquals(10, result.getFileCount());
         assertTrue(result.getTotalSize() > 0);
@@ -109,7 +109,7 @@ class ZipExtractorTest {
         Path extractRoot = tempDir.resolve("extracted");
         ZipExtractor extractor = new ZipExtractor(zipPath, extractRoot, 1L, magicValidator);
 
-        ZipExtractor.ExtractionResult result = extractor.extract();
+        ArchiveExtractionResult.ExtractionResult result = extractor.extract();
         assertEquals(0, result.getFileCount());
     }
 
@@ -121,7 +121,7 @@ class ZipExtractorTest {
         Path extractRoot = tempDir.resolve("extracted");
         ZipExtractor extractor = new ZipExtractor(zip, extractRoot, 1L, magicValidator);
 
-        ZipExtractor.ExtractionResult result = extractor.extract();
+        ArchiveExtractionResult.ExtractionResult result = extractor.extract();
         assertEquals(50, result.getFileCount());
     }
 
@@ -148,7 +148,7 @@ class ZipExtractorTest {
         Path extractRoot = tempDir.resolve("extracted");
         ZipExtractor extractor = new ZipExtractor(zipPath, extractRoot, 1L, magicValidator);
 
-        ZipExtractor.ExtractionResult result = extractor.extract();
+        ArchiveExtractionResult.ExtractionResult result = extractor.extract();
         assertTrue(result.getFileCount() >= 1, "目录条目应被跳过，文件条目保留");
     }
 
@@ -160,7 +160,7 @@ class ZipExtractorTest {
         Path extractRoot = tempDir.resolve("extracted");
         ZipExtractor extractor = new ZipExtractor(zip, extractRoot, 1L, magicValidator);
 
-        ZipExtractor.ExtractionResult result = extractor.extract();
+        ArchiveExtractionResult.ExtractionResult result = extractor.extract();
         assertEquals(0, result.getFileCount(),
                 "路径穿越条目应被 PathTraversalValidator 拦截");
     }
@@ -171,7 +171,7 @@ class ZipExtractorTest {
         Path extractRoot = tempDir.resolve("extracted");
         ZipExtractor extractor = new ZipExtractor(zip, extractRoot, 1L, magicValidator);
 
-        ZipExtractor.ExtractionResult result = extractor.extract();
+        ArchiveExtractionResult.ExtractionResult result = extractor.extract();
         assertEquals(0, result.getFileCount(),
                 "绝对路径条目应被 PathTraversalValidator 拦截");
     }
@@ -188,7 +188,7 @@ class ZipExtractorTest {
         Path extractRoot = tempDir.resolve("extracted");
         ZipExtractor extractor = new ZipExtractor(zip, extractRoot, 1L, magicValidator);
 
-        ZipExtractor.ExtractionResult result = extractor.extract();
+        ArchiveExtractionResult.ExtractionResult result = extractor.extract();
         assertEquals(1, result.getFileCount(),
                 "STORED 方法创建的条目应被正确读取大小并通过检查");
         assertEquals(smallData.length, result.getTotalSize());
@@ -206,7 +206,7 @@ class ZipExtractorTest {
         ZipExtractor extractor = new ZipExtractor(zip, extractRoot, 1L, magicValidator);
 
         // 不应抛异常 — 50KB 在 10MB 阈值以下
-        ZipExtractor.ExtractionResult result = extractor.extract();
+        ArchiveExtractionResult.ExtractionResult result = extractor.extract();
         assertEquals(1, result.getFileCount(),
                 "高压缩率但解压后 <10MB 的合法文件不应被拒绝");
     }
@@ -220,7 +220,7 @@ class ZipExtractorTest {
         Path extractRoot = tempDir.resolve("extracted");
         ZipExtractor extractor = new ZipExtractor(zip, extractRoot, 1L, magicValidator);
 
-        ZipExtractor.ExtractionResult result = extractor.extract();
+        ArchiveExtractionResult.ExtractionResult result = extractor.extract();
         assertNotNull(result.getZipHash());
         assertEquals(64, result.getZipHash().length(), "SHA-256 应为 64 位十六进制");
         assertEquals(100, result.getFileCount());
@@ -237,7 +237,7 @@ class ZipExtractorTest {
         Path extractRoot = tempDir.resolve("extracted");
         ZipExtractor extractor = new ZipExtractor(zip, extractRoot, 1L, magicValidator);
 
-        ZipExtractor.ExtractionResult result = extractor.extract();
+        ArchiveExtractionResult.ExtractionResult result = extractor.extract();
         assertEquals(1, result.getFileCount(),
                 "超过 10MB 阈值的条目应走 temp file 路径正常提取");
         assertEquals(data.length, result.getTotalSize());

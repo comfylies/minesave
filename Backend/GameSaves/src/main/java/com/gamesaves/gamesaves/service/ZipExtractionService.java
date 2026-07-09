@@ -7,8 +7,12 @@ import com.gamesaves.gamesaves.exception.ExtractionTimeoutException;
 import com.gamesaves.gamesaves.repository.ArticleRepository;
 import com.gamesaves.gamesaves.repository.SavingItemRepository;
 import com.gamesaves.gamesaves.repository.SavingsRepository;
+import com.gamesaves.gamesaves.util.ArchiveExtractionResult;
+import com.gamesaves.gamesaves.util.ArchiveFormat;
 import com.gamesaves.gamesaves.util.ImageThumbnailService;
 import com.gamesaves.gamesaves.util.MagicNumberValidator;
+import com.gamesaves.gamesaves.util.SevenZExtractor;
+import com.gamesaves.gamesaves.util.TarArchiveExtractor;
 import com.gamesaves.gamesaves.util.ZipExtractor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -108,9 +112,34 @@ public class ZipExtractionService {
                     .build();
             savings = savingsRepository.save(savings);
 
-            // Run extraction to temp directory
-            ZipExtractor extractor = new ZipExtractor(zipPath, extractRoot, savings.getId(), magicNumberValidator);
-            ZipExtractor.ExtractionResult result = extractor.extract();
+            // Detect archive format and dispatch to correct extractor
+            ArchiveFormat fmt = ArchiveFormat.detect(zipPath)
+                    .orElseGet(() -> ArchiveFormat.detectByExtension(zipFilename)
+                            .orElseThrow(() -> new RuntimeException(
+                                    "Unrecognized archive format: " + zipFilename)));
+
+            if (!fmt.isExtractionSupported()) {
+                throw new RuntimeException(
+                        fmt.name() + " format is not yet supported for extraction. "
+                                + "Please convert to ZIP, 7z, or tar.gz.");
+            }
+
+            ArchiveExtractionResult.ExtractionResult result;
+            switch (fmt) {
+                case ZIP -> {
+                    ZipExtractor extractor = new ZipExtractor(zipPath, extractRoot, savings.getId(), magicNumberValidator);
+                    result = extractor.extract();
+                }
+                case SEVEN_Z -> {
+                    SevenZExtractor extractor = new SevenZExtractor(zipPath, extractRoot, savings.getId(), magicNumberValidator);
+                    result = extractor.extract();
+                }
+                case TAR_GZ, TAR -> {
+                    TarArchiveExtractor extractor = new TarArchiveExtractor(zipPath, extractRoot, savings.getId(), fmt, magicNumberValidator);
+                    result = extractor.extract();
+                }
+                default -> throw new RuntimeException("Unexpected archive format: " + fmt);
+            }
 
             // Pre-create extracted/ directory (single-thread) to avoid NTFS race
             // when parallel threads call storeFromPath concurrently on Windows.
@@ -150,7 +179,7 @@ public class ZipExtractionService {
             if (result.getReadmeImages() != null) {
                 Path imagesDir = tempDir.resolve("images");
                 Files.createDirectories(imagesDir);
-                for (ZipExtractor.ReadmeImageEntry img : result.getReadmeImages()) {
+                for (ArchiveExtractionResult.ReadmeImageEntry img : result.getReadmeImages()) {
                     Path imgPath = imagesDir.resolve(img.getRelativePath());
                     Files.createDirectories(imgPath.getParent());
                     Files.write(imgPath, img.getData());

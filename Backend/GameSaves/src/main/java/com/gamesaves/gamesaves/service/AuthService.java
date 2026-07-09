@@ -184,20 +184,23 @@ public class AuthService {
         if (request.getPhone() != null && userRepository.existsByPhone(request.getPhone())) {
             throw new BadRequestException("Registration failed, please check your information");
         }
-        if (request.getEmail() != null && userRepository.existsByEmail(request.getEmail())) {
+        if (userRepository.existsByEmail(request.getEmail())) {
             throw new BadRequestException("Registration failed, please check your information");
         }
 
-        // 3. 创建用户
+        // 3. 校验昵称（若前端未传，使用用户名作为默认昵称）
+        String nickname = request.getNickname() != null && !request.getNickname().isBlank()
+                ? XssFilter.sanitize(request.getNickname().trim())
+                : XssFilter.sanitize(request.getUsername());
+
+        // 4. 创建用户
         String encodedPassword = passwordEncoder.encode(request.getPassword());
         User user = User.builder()
                 .username(XssFilter.sanitize(request.getUsername()))
                 .password(encodedPassword)
-                .nickname(request.getNickname() != null
-                        ? XssFilter.sanitize(request.getNickname())
-                        : XssFilter.sanitize(request.getUsername()))
+                .nickname(nickname)
                 .phone(request.getPhone() != null ? XssFilter.sanitize(request.getPhone()) : null)
-                .email(request.getEmail() != null ? XssFilter.sanitize(request.getEmail()) : null)
+                .email(XssFilter.sanitize(request.getEmail()))
                 .role("user")
                 .isActive(true)
                 .build();

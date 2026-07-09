@@ -178,7 +178,7 @@
             ref="uploadRef"
             :auto-upload="false"
             :limit="1"
-            accept=".zip"
+            accept=".zip,.7z,.rar,.tar,.tgz,.gz"
             :on-change="handleFileChange"
             :on-remove="handleFileRemove"
             :file-list="fileList"
@@ -187,8 +187,8 @@
             <div class="upload-area">
               <el-icon class="upload-icon"><UploadFilled /></el-icon>
               <div class="upload-text">
-                <p>将 ZIP 文件拖到此处，或 <em>点击选择</em></p>
-                <p class="upload-hint">仅支持 .zip 文件，最大 200 MB</p>
+                <p>将压缩包拖到此处，或 <em>点击选择</em></p>
+                <p class="upload-hint">支持 ZIP / 7z / tar.gz / tar / RAR 格式，最大 200 MB</p>
               </div>
             </div>
           </el-upload>
@@ -392,9 +392,20 @@ const rules = {
   version: [{ required: true, message: '请输入游戏版本', trigger: 'blur' }]
 }
 
+const ALLOWED_ARCHIVE_EXTS = ['.zip', '.7z', '.rar', '.tar', '.tgz', '.tar.gz', '.gz']
+
 function handleFileChange(file) {
   const rawFile = file.raw
   if (rawFile) {
+    // 扩展名白名单检查
+    const name = (rawFile.name || '').toLowerCase()
+    const allowed = ALLOWED_ARCHIVE_EXTS.some(ext => name.endsWith(ext))
+    if (!allowed) {
+      ElMessage.error('不支持的压缩格式，请上传 ZIP / 7z / tar.gz / tar / RAR 文件')
+      fileList.value = []
+      selectedFile.value = null
+      return
+    }
     if (rawFile.size > 200 * 1024 * 1024) {
       ElMessage.error('文件大小不能超过 200 MB')
       fileList.value = []

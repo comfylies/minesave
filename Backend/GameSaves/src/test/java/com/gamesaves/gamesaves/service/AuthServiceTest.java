@@ -186,6 +186,7 @@ class AuthServiceTest {
         req.setUsername("admin");
         req.setPassword("password123");
         req.setNickname("Test");
+        req.setEmail("test@example.com");
 
         BadRequestException ex = assertThrows(BadRequestException.class,
                 () -> authService.register(req, captcha.key(), captcha.code()));
@@ -197,6 +198,7 @@ class AuthServiceTest {
         RegisterRequest req = new RegisterRequest();
         req.setUsername(TEST_USER_PREFIX + "nocaptcha");
         req.setPassword("password123");
+        req.setEmail("nocaptcha@example.com");
 
         assertThrows(CaptchaValidationException.class,
                 () -> authService.register(req, null, null));
