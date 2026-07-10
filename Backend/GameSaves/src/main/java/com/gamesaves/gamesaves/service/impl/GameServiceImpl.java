@@ -229,6 +229,32 @@ public class GameServiceImpl implements GameService {
     }
 
     // ──────────────────────────────────────────────
+    //  Top-N（首页热门/最新区块）
+    // ──────────────────────────────────────────────
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<GameResponse> getTopGames(String sort, int limit) {
+        return gameRepository.findAllByOrderByCreatedAtDesc().stream()
+                .map(game -> {
+                    long count = articleRepository.countByGameIdAndStatus(game.getId(), Article.ArticleStatus.READY);
+                    return GameResponse.fromEntity(game, count);
+                })
+                .sorted((a, b) -> {
+                    if ("hot".equalsIgnoreCase(sort)) {
+                        // 热门：按 articleCount 降序
+                        long aCount = a.getArticleCount() != null ? a.getArticleCount() : 0L;
+                        long bCount = b.getArticleCount() != null ? b.getArticleCount() : 0L;
+                        return Long.compare(bCount, aCount);
+                    }
+                    // newest：按 createdAt 降序（默认）
+                    return b.getCreatedAt().compareTo(a.getCreatedAt());
+                })
+                .limit(Math.min(limit, 100))
+                .collect(Collectors.toList());
+    }
+
+    // ──────────────────────────────────────────────
     //  管理员合并（方案 A 后审）
     // ──────────────────────────────────────────────
 

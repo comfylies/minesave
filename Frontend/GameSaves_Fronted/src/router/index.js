@@ -5,7 +5,8 @@ const routes = [
     path: '/',
     component: () => import('../layouts/DefaultLayout.vue'),
     children: [
-      { path: '', name: 'Home', component: () => import('../views/HomePage.vue') },
+      { path: '', name: 'Home', component: () => import('../views/HomePage.vue'), meta: { noHeaderOffset: true } },
+      { path: 'browse', name: 'Browse', component: () => import('../views/BrowsePage.vue'), meta: { wide: true } },
       { path: 'games/:gameId', name: 'Game', component: () => import('../views/GamePage.vue'), meta: { wide: true } },
       { path: 'articles/:articleId', name: 'Article', component: () => import('../views/ArticlePage.vue') },
       { path: 'my-saves', name: 'MySaves', component: () => import('../views/MySavesPage.vue'), meta: { requiresAuth: true } },
@@ -43,7 +44,8 @@ const routes = [
       { path: 'announcements', name: 'AdminAnnouncements', component: () => import('../views/admin/AdminAnnouncements.vue'), meta: { title: '公告管理' } },
       { path: 'games', name: 'AdminGames', component: () => import('../views/admin/AdminGames.vue'), meta: { title: '游戏管理' } },
       { path: 'cleanup', name: 'AdminCleanup', component: () => import('../views/admin/AdminCleanup.vue'), meta: { title: '存档清理' } },
-      { path: 'ghosts', name: 'AdminGhosts', component: () => import('../views/admin/AdminGhosts.vue'), meta: { title: '幽灵文章' } }
+      { path: 'ghosts', name: 'AdminGhosts', component: () => import('../views/admin/AdminGhosts.vue'), meta: { title: '幽灵文章' } },
+      { path: 'site-settings', name: 'AdminSiteSettings', component: () => import('../views/admin/AdminSiteSettings.vue'), meta: { title: '站点设置' } }
     ]
   },
   {

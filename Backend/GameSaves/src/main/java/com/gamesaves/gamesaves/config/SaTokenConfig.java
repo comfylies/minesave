@@ -16,6 +16,7 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  * - GET /api/articles/** — 公开（浏览存档），POST/PUT/DELETE 需登录
  * - /api/files/**    — 公开（浏览文件、下载）
  * - GET /api/comments/** — 公开（浏览批注），POST/DELETE 需登录
+ * - /api/site-settings/** — 公开（站点设置，如首页背景图）
  * - /api/admin/**    — 需登录 + admin 权限（由 @SaCheckPermission 控制）
  * - 其他 /api/**     — 需登录
  */
@@ -51,6 +52,8 @@ public class SaTokenConfig implements WebMvcConfigurer {
                         .matchMethod("GET").match("/api/users/**", r -> refreshIfLogin()).stop()
                         // 批注：GET 公开（stop），POST/DELETE 需登录走下一级 checkLogin
                         .matchMethod("GET").match("/api/comments/**", r -> refreshIfLogin()).stop()
+                        // 站点设置：全部公开
+                        .match("/api/site-settings/**", r -> refreshIfLogin()).stop()
                         // 其他 /api/** 需要登录，并刷新活跃时间
                         .match("/api/**", r -> {
                             refreshIfLogin();

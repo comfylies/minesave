@@ -13,6 +13,7 @@ import com.gamesaves.gamesaves.service.CleanupScheduler;
 import com.gamesaves.gamesaves.service.GameService;
 import com.gamesaves.gamesaves.service.SafePathService;
 import com.gamesaves.gamesaves.service.SearchSyncService;
+import com.gamesaves.gamesaves.service.SiteSettingService;
 import com.gamesaves.gamesaves.service.StorageService;
 import com.gamesaves.gamesaves.service.TagService;
 import jakarta.validation.Valid;
@@ -42,13 +43,15 @@ public class AdminController {
     private final CleanupScheduler cleanupScheduler;
     private final StorageService storageService;
     private final GameService gameService;
+    private final SiteSettingService siteSettingService;
 
     public AdminController(AdminService adminService, AnnouncementService announcementService,
                            TagService tagService, SearchSyncService searchSyncService,
                            SafePathService safePathService,
                            CleanupScheduler cleanupScheduler,
                            StorageService storageService,
-                           GameService gameService) {
+                           GameService gameService,
+                           SiteSettingService siteSettingService) {
         this.adminService = adminService;
         this.announcementService = announcementService;
         this.tagService = tagService;
@@ -57,6 +60,7 @@ public class AdminController {
         this.cleanupScheduler = cleanupScheduler;
         this.storageService = storageService;
         this.gameService = gameService;
+        this.siteSettingService = siteSettingService;
     }
 
     @GetMapping("/dashboard")
@@ -327,6 +331,65 @@ public class AdminController {
             ));
         } catch (IOException e) {
             throw new BadRequestException("文件上传失败: " + e.getMessage());
+        }
+    }
+
+    // ==================== 站点设置管理 ====================
+
+    /** 获取所有站点设置 */
+    @GetMapping("/site-settings")
+    @SaCheckPermission("user:manage")
+    public ApiResponse<Map<String, String>> getSiteSettings() {
+        return ApiResponse.success(siteSettingService.getPublicSettings());
+    }
+
+    /** 批量更新站点设置 */
+    @PutMapping("/site-settings")
+    @SaCheckPermission("user:manage")
+    public ApiResponse<Map<String, String>> updateSiteSettings(@RequestBody Map<String, String> settings) {
+        siteSettingService.updateSettings(settings);
+        return ApiResponse.success("Settings updated", siteSettingService.getPublicSettings());
+    }
+
+    /** 上传首页背景图片 */
+    @PostMapping("/site-settings/upload-background")
+    @SaCheckPermission("user:manage")
+    public ApiResponse<Map<String, String>> uploadBackgroundImage(@RequestParam("file") MultipartFile file) {
+        // 校验文件类型
+        String contentType = file.getContentType();
+        if (contentType == null || !contentType.startsWith("image/")) {
+            throw new BadRequestException("只支持图片文件 (JPG/PNG/WebP)");
+        }
+
+        // 校验文件大小（最大 10MB）
+        if (file.getSize() > 10 * 1024 * 1024) {
+            throw new BadRequestException("图片大小不能超过 10MB");
+        }
+
+        try {
+            // 提取扩展名，生成唯一文件名
+            String originalName = file.getOriginalFilename();
+            String ext = "jpg";
+            if (originalName != null && originalName.contains(".")) {
+                ext = originalName.substring(originalName.lastIndexOf('.') + 1).toLowerCase();
+                // 安全性：只允许常见图片扩展名
+                if (!ext.matches("^(jpg|jpeg|png|webp|gif)$")) {
+                    ext = "jpg";
+                }
+            }
+
+            String key = "site/background_" + UUID.randomUUID().toString().substring(0, 8) + "." + ext;
+            storageService.store(key, file.getBytes());
+
+            String publicUrl = storageService.getPublicUrl(key);
+            siteSettingService.updateSettings(Map.of("background_image_url", publicUrl));
+
+            return ApiResponse.success("Background uploaded", Map.of(
+                    "url", publicUrl,
+                    "filename", key
+            ));
+        } catch (IOException e) {
+            throw new BadRequestException("图片上传失败: " + e.getMessage());
         }
     }
 

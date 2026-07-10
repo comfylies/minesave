@@ -1,174 +1,309 @@
 <template>
   <div class="home-page">
+    <!-- ====== Hero 全屏搜索区 ====== -->
+    <section class="hero" :style="heroStyle">
+      <div v-if="backgroundImage" class="hero-overlay"></div>
+      <div class="hero-body">
+        <h1 class="hero-title">MineSave</h1>
 
-    <!-- 排序栏 -->
-    <div class="home-toolbar">
-      <el-select
-        v-model="sortBy"
-        size="large"
-        class="sort-select"
-      >
-        <el-option label="📋 按名称 A-Z" value="name-asc" />
-        <el-option label="📋 按名称 Z-A" value="name-desc" />
-        <el-option label="🕐 最近更新" value="updated" />
-        <el-option label="📦 存档最多" value="articles" />
-      </el-select>
-    </div>
+        <!-- 搜索框 -->
+        <div class="hero-search">
+          <el-icon class="hero-search-icon"><Search /></el-icon>
+          <input
+            v-model="searchQuery"
+            class="hero-search-input"
+            placeholder="搜索游戏、存档..."
+            @keyup.enter="doSearch"
+            autocomplete="off"
+          />
+        </div>
 
-    <!-- 加载状态 -->
-    <LoadingSkeleton v-if="gameStore.loading" :rows="6" />
+        <!-- 向下滚动提示 -->
+        <div class="hero-scroll-hint" @click="scrollToContent">
+          <el-icon :size="28"><ArrowDown /></el-icon>
+        </div>
+      </div>
+    </section>
 
-    <!-- 错误状态 -->
-    <div v-else-if="gameStore.error" class="home-error">
-      <el-empty description="加载游戏列表失败">
-        <el-button type="primary" @click="gameStore.fetchGames()">重试</el-button>
-      </el-empty>
-    </div>
+    <!-- ====== 内容区 ====== -->
+    <section ref="contentSection" class="home-content container">
+      <!-- 热门游戏 -->
+      <div class="section-block">
+        <div class="section-header">
+          <h2 class="section-title">🔥 热门游戏</h2>
+          <router-link to="/browse?sort=hot" class="view-more">
+            查看更多 <el-icon><ArrowRight /></el-icon>
+          </router-link>
+        </div>
+        <LoadingSkeleton v-if="loading" :rows="1" />
+        <div v-else-if="hotGames.length > 0" class="game-row">
+          <GameCard v-for="game in hotGames" :key="game.id" :game="game" />
+        </div>
+        <EmptyState v-else description="暂无热门游戏" />
+      </div>
 
-    <!-- 游戏卡片网格 -->
-    <div v-else-if="sortedGames.length > 0" class="game-grid">
-      <GameCard
-        v-for="game in sortedGames"
-        :key="game.id"
-        :game="game"
-      />
-    </div>
-
-    <!-- 空状态 -->
-    <EmptyState v-else description="暂无游戏" />
-
-    <!-- 站内公告弹窗（仅外部访问显示） -->
-    <AnnouncementModal v-model="showAnnouncement" />
+      <!-- 最新上传 -->
+      <div class="section-block">
+        <div class="section-header">
+          <h2 class="section-title">🕐 最新上传</h2>
+          <router-link to="/browse?sort=newest" class="view-more">
+            查看更多 <el-icon><ArrowRight /></el-icon>
+          </router-link>
+        </div>
+        <LoadingSkeleton v-if="loading" :rows="1" />
+        <div v-else-if="newestGames.length > 0" class="game-row">
+          <GameCard v-for="game in newestGames" :key="game.id" :game="game" />
+        </div>
+        <EmptyState v-else description="暂无最新游戏" />
+      </div>
+    </section>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
-import { useGameStore } from '../stores/games'
+import { ref, computed, onMounted, provide } from 'vue'
+import { useRouter } from 'vue-router'
+import { gameApi } from '../api/gameApi'
+import { siteSettingsApi } from '../api/siteSettingsApi'
 import GameCard from '../components/game/GameCard.vue'
 import EmptyState from '../components/common/EmptyState.vue'
 import LoadingSkeleton from '../components/common/LoadingSkeleton.vue'
-import AnnouncementModal from '../components/announcement/AnnouncementModal.vue'
 
-const gameStore = useGameStore()
-const sortBy = ref('name-asc')
+const router = useRouter()
 
-// ---- 公告弹窗（仅外部访问显示） ----
-const showAnnouncement = ref(false)
+const searchQuery = ref('')
+const hotGames = ref([])
+const newestGames = ref([])
+const loading = ref(false)
+const backgroundImage = ref('')
+const contentSection = ref(null)
 
-function getTodayKey() {
-  const now = new Date()
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
-}
+/** 是否有背景图（provide 给 AppNavbar 控制文字颜色） */
+const hasHeroBg = computed(() => !!backgroundImage.value)
+provide('hasHeroBg', hasHeroBg)
 
-function shouldShowAnnouncement() {
-  // 今日已点过"今日不再提示"
-  if (localStorage.getItem('announcement_dismissed_date') === getTodayKey()) {
-    return false
-  }
-  // 已在本 session 中显示过（回首页时不重复弹）
-  if (sessionStorage.getItem('announcement_shown_session') === 'true') {
-    return false
-  }
-  // 检查 referrer：空 = 直接输入网址/书签（视为外部访问）
-  // 有 referrer 但来自本站 = 内部导航，不弹
-  try {
-    const referrer = document.referrer
-    if (referrer) {
-      const referrerHost = new URL(referrer).host
-      const currentHost = window.location.host
-      if (referrerHost === currentHost) {
-        return false // 内部导航
-      }
+/** Hero 区域行内样式：有背景图时用 url，无背景图时纯色 */
+const heroStyle = computed(() => {
+  if (backgroundImage.value) {
+    return {
+      backgroundImage: `url(${backgroundImage.value})`,
+      backgroundSize: 'cover',
+      backgroundPosition: 'center',
+      backgroundRepeat: 'no-repeat'
     }
-  } catch {
-    // referrer 解析失败，保守处理：不弹
-    return false
   }
-  return true
-}
-
-// 排序（搜索已迁移到导航栏统一搜索框 → /search?q=）
-const sortedGames = computed(() => {
-  let list = [...gameStore.games]
-
-  // 排序
-  switch (sortBy.value) {
-    case 'name-asc':
-      list.sort((a, b) => a.name.localeCompare(b.name))
-      break
-    case 'name-desc':
-      list.sort((a, b) => b.name.localeCompare(a.name))
-      break
-    case 'updated':
-      list.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt))
-      break
-    case 'articles':
-      list.sort((a, b) => (b.articleCount || 0) - (a.articleCount || 0))
-      break
-  }
-
-  return list
+  return {}
 })
 
-onMounted(() => {
-  gameStore.fetchGames()
-  // 外部访问时弹出公告
-  if (shouldShowAnnouncement()) {
-    sessionStorage.setItem('announcement_shown_session', 'true')
-    // 延迟弹出，让页面先渲染
-    setTimeout(() => {
-      showAnnouncement.value = true
-    }, 300)
+function doSearch() {
+  const q = searchQuery.value.trim()
+  if (q) {
+    router.push({ path: '/search', query: { q } })
+  }
+}
+
+function scrollToContent() {
+  contentSection.value?.scrollIntoView({ behavior: 'smooth' })
+}
+
+onMounted(async () => {
+  loading.value = true
+  try {
+    const [hotRes, newestRes, settingsRes] = await Promise.all([
+      gameApi.getTop('hot', 4),
+      gameApi.getTop('newest', 4),
+      siteSettingsApi.get().catch(() => ({ background_image_url: '' }))
+    ])
+    hotGames.value = hotRes
+    newestGames.value = newestRes
+    backgroundImage.value = settingsRes?.background_image_url || ''
+  } catch {
+    // 静默降级：首页游戏区块显示空状态
+  } finally {
+    loading.value = false
   }
 })
 </script>
 
 <style scoped>
-.home-page {
-  padding: var(--spacing-lg) 0;
+/* ---- Hero 全屏区 ---- */
+.hero {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  background-color: var(--color-bg-secondary);
+  overflow: hidden;
 }
 
-.home-header {
+/* 有背景图时叠加半透明遮罩以提升文字可读性 */
+.hero-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.38);
+  z-index: 1;
+}
+
+.hero-body {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 18vh var(--spacing-xl) var(--spacing-xl);
+}
+
+.hero-title {
+  font-size: 52px;
+  font-weight: 800;
+  margin: 0 0 var(--spacing-sm) 0;
+  color: var(--color-header-logo);
+  transition: color 0.3s ease;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* 有背景图时文字变白 */
+.hero-overlay ~ .hero-body .hero-title {
+  color: #fff;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+/* ---- 搜索框 ---- */
+.hero-search {
+  position: relative;
+  width: 640px;
+  max-width: 90vw;
+  margin-top: var(--spacing-sm);
+}
+
+.hero-search-icon {
+  position: absolute;
+  left: 20px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 22px;
+  color: var(--color-secondary-text);
+  z-index: 1;
+}
+
+.hero-search-input {
+  width: 100%;
+  height: 56px;
+  padding: 0 20px 0 54px;
+  font-size: 18px;
+  color: var(--color-body-text);
+  background: var(--color-bg-canvas);
+  border: 1px solid var(--color-border-primary);
+  border-radius: 28px;
+  outline: none;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  box-shadow: var(--shadow-md);
+  box-sizing: border-box;
+}
+
+.hero-search-input:focus {
+  border-color: var(--color-link);
+  box-shadow: 0 1px 6px rgba(9, 105, 218, 0.15), var(--shadow-md);
+}
+
+.hero-search-input::placeholder {
+  color: var(--color-secondary-text);
+}
+
+/* ---- 向下滚动提示 ---- */
+.hero-scroll-hint {
+  position: absolute;
+  bottom: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  cursor: pointer;
+  color: var(--color-secondary-text);
+  opacity: 0.6;
+  transition: opacity var(--transition-fast), transform var(--transition-fast);
+  animation: bounce 2s infinite;
+}
+
+.hero-overlay ~ .hero-scroll-hint,
+.hero-overlay + .hero-body .hero-scroll-hint {
+  color: #fff;
+}
+
+.hero-scroll-hint:hover {
+  opacity: 1;
+  transform: translateX(-50%) translateY(4px);
+}
+
+@keyframes bounce {
+  0%, 100% { transform: translateX(-50%) translateY(0); }
+  50% { transform: translateX(-50%) translateY(6px); }
+}
+
+/* ---- 内容区 ---- */
+.home-content {
+  padding: var(--spacing-xxl) 0;
+}
+
+.section-block {
+  margin-bottom: var(--spacing-xxl);
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin-bottom: var(--spacing-lg);
 }
 
-.page-title {
-  font-size: var(--font-size-title);
+.section-title {
+  font-size: var(--font-size-xlarge);
   font-weight: 600;
   color: var(--color-body-text);
+  margin: 0;
 }
 
-.page-subtitle {
-  font-size: var(--font-size-normal);
-  color: var(--color-secondary-text);
-  margin-top: var(--spacing-xs);
-}
-
-/* ---- 搜索排序栏 ---- */
-.home-toolbar {
+.view-more {
   display: flex;
-  gap: var(--spacing-md);
-  margin-bottom: var(--spacing-lg);
-  padding: var(--spacing-md) 0;
-  border-bottom: 1px solid var(--color-border-secondary);
+  align-items: center;
+  gap: 4px;
+  font-size: var(--font-size-normal);
+  font-weight: 500;
+  color: var(--color-link);
+  text-decoration: none;
+  transition: color var(--transition-fast);
 }
 
-.sort-select {
-  width: 180px;
-  flex-shrink: 0;
+.view-more:hover {
+  color: var(--color-link-hover);
+  text-decoration: none;
 }
 
-/* ---- 错误 ---- */
-.home-error {
-  padding: var(--spacing-xxl) 0;
-  text-align: center;
-}
-
-/* ---- 卡片网格 ---- */
-.game-grid {
+/* ---- 游戏卡片行（4 列 → 响应式） ---- */
+.game-row {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  grid-template-columns: repeat(4, 1fr);
   gap: var(--spacing-md);
+}
+
+@media (max-width: 1024px) {
+  .game-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .hero-title {
+    font-size: 36px;
+  }
+  .hero-search-input {
+    height: 48px;
+    font-size: 16px;
+  }
+  .game-row {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

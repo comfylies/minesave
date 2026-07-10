@@ -42,6 +42,10 @@
           <el-icon><Warning /></el-icon>
           <span>幽灵文章</span>
         </el-menu-item>
+        <el-menu-item index="/admin/site-settings">
+          <el-icon><PictureFilled /></el-icon>
+          <span>站点设置</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
 

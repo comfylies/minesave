@@ -1,8 +1,11 @@
 <template>
   <div class="default-layout">
     <AppNavbar />
-    <main class="page-content">
-      <div :class="isWide ? 'container-wide' : 'container'">
+    <main class="page-content" :class="{ 'page-content--full': noHeaderOffset }">
+      <template v-if="noHeaderOffset">
+        <router-view />
+      </template>
+      <div v-else :class="isWide ? 'container-wide' : 'container'">
         <router-view />
       </div>
     </main>
@@ -28,6 +31,7 @@ import AppFooter from '../components/common/AppFooter.vue'
 
 const route = useRoute()
 const isWide = computed(() => route.meta?.wide === true)
+const noHeaderOffset = computed(() => route.meta?.noHeaderOffset === true)
 
 // 回到顶部按钮
 const showBackToTop = ref(false)
@@ -56,7 +60,12 @@ function scrollToTop() {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
-  padding-top: var(--header-height);
+  padding-top: v-bind('noHeaderOffset ? "0" : "var(--header-height)"');
+}
+
+/* 首页全宽：移除 page-content 的默认 padding */
+.page-content--full {
+  padding: 0 !important;
 }
 
 .back-to-top {

@@ -42,6 +42,15 @@ public class GameController {
         return ApiResponse.success(games);
     }
 
+    /** 首页 Top-N：热门游戏（按 articleCount 降序）或最新上传（按 createdAt 降序） */
+    @GetMapping("/top")
+    public ApiResponse<List<GameResponse>> getTopGames(
+            @RequestParam(defaultValue = "newest") String sort,
+            @RequestParam(defaultValue = "4") int limit) {
+        List<GameResponse> games = gameService.getTopGames(sort, limit);
+        return ApiResponse.success(games);
+    }
+
     @GetMapping("/{id}")
     public ApiResponse<GameResponse> getGame(@PathVariable Long id) {
         GameResponse game = gameService.getGameById(id);

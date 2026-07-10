@@ -1,5 +1,5 @@
 <template>
-  <header class="navbar" :class="{ 'navbar--hidden': hidden }">
+  <header class="navbar" :class="navbarClass">
     <div class="navbar-inner container">
       <!-- 左侧：Logo + 导航链接 -->
       <div class="navbar-left">
@@ -8,23 +8,10 @@
           <span class="logo-text">MineSave</span>
         </router-link>
         <nav class="navbar-nav">
-          <router-link to="/" class="nav-link" active-class="nav-link--active">首页</router-link>
-          <router-link to="/" class="nav-link">浏览</router-link>
+          <router-link to="/" class="nav-link" active-class="nav-link--active" exact-active-class="nav-link--active">首页</router-link>
+          <router-link to="/browse" class="nav-link" active-class="nav-link--active">浏览</router-link>
           <router-link v-if="auth.isLoggedIn" to="/upload" class="nav-link" active-class="nav-link--active">上传存档</router-link>
         </nav>
-      </div>
-
-      <!-- 中间：搜索框 -->
-      <div class="navbar-center">
-        <div class="search-box">
-          <el-icon class="search-icon"><Search /></el-icon>
-          <input
-            v-model="searchQuery"
-            class="search-input"
-            placeholder="搜索游戏、存档..."
-            @keyup.enter="doSearch"
-          />
-        </div>
       </div>
 
       <!-- 右侧：用户菜单 -->
@@ -65,22 +52,32 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, inject, onMounted, onUnmounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
 import { ElMessage } from 'element-plus'
 
+const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
-const searchQuery = ref('')
 const hidden = ref(false)
+const isAtTop = ref(true)
 
-// Smart Header: 下滑隐藏，上滑出现
+// 从 HomePage provide 注入是否有 Hero 背景图（决定透明导航栏文字颜色）
+const hasHeroBg = inject('hasHeroBg', ref(false))
+
+/** 是否在首页 */
+const isHome = computed(() => route.path === '/')
+
+// Smart Header: 下滑隐藏，上滑出现 + 首页透明/毛玻璃切换
 let lastScrollY = 0
 const SCROLL_THRESHOLD = 60
+const HERO_THRESHOLD = 100
 
 function onScroll() {
   const currentY = window.scrollY
+  isAtTop.value = currentY < HERO_THRESHOLD
+
   if (currentY < SCROLL_THRESHOLD) {
     hidden.value = false
   } else if (currentY > lastScrollY) {
@@ -94,12 +91,13 @@ function onScroll() {
 onMounted(() => window.addEventListener('scroll', onScroll, { passive: true }))
 onUnmounted(() => window.removeEventListener('scroll', onScroll))
 
-function doSearch() {
-  const q = searchQuery.value.trim()
-  if (q) {
-    router.push({ path: '/search', query: { q } })
-  }
-}
+/** 动态 navbar class */
+const navbarClass = computed(() => ({
+  'navbar--hidden': hidden.value,
+  'navbar--hero': isHome.value && isAtTop.value,
+  'navbar--glass': isHome.value && !isAtTop.value,
+  'navbar--has-bg': hasHeroBg.value
+}))
 
 function handleLogout() {
   auth.logout()
@@ -119,11 +117,62 @@ function handleLogout() {
   right: 0;
   z-index: 100;
   transform: translateY(0);
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              background 0.3s ease,
+              border-color 0.3s ease;
 }
 
 .navbar--hidden {
   transform: translateY(-100%);
+}
+
+/* 首页顶部 — 完全透明，白色文字 */
+.navbar--hero {
+  background: transparent;
+  border-bottom-color: transparent;
+}
+
+/* 有背景图时白色文字 + 阴影 */
+.navbar--hero.navbar--has-bg .navbar-logo,
+.navbar--hero.navbar--has-bg .nav-link,
+.navbar--hero.navbar--has-bg .user-name,
+.navbar--hero.navbar--has-bg .dropdown-arrow {
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+
+.navbar--hero.navbar--has-bg .nav-link:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+}
+
+.navbar--hero.navbar--has-bg .btn-outline {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.5);
+  background: transparent;
+}
+
+.navbar--hero.navbar--has-bg .btn-outline:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* 首页滚动后 — 毛玻璃半透明 */
+.navbar--glass {
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+/* 首页两种状态下，按钮 hover 改为半透明 */
+.navbar--hero .nav-link:hover,
+.navbar--glass .nav-link:hover {
+  background: rgba(128, 128, 128, 0.25);
+}
+
+.navbar--hero .user-trigger:hover,
+.navbar--glass .user-trigger:hover {
+  background: rgba(128, 128, 128, 0.20);
 }
 
 .navbar-inner {
@@ -149,6 +198,7 @@ function handleLogout() {
   font-weight: 700;
   color: var(--color-header-logo);
   text-decoration: none;
+  transition: color 0.3s ease;
 }
 
 .navbar-logo:hover {
@@ -185,50 +235,6 @@ function handleLogout() {
   color: var(--color-link);
 }
 
-/* ---- 中间搜索 ---- */
-.navbar-center {
-  display: flex;
-  justify-content: center;
-  padding: 0 16px;
-  flex-shrink: 0;
-}
-
-.search-box {
-  position: relative;
-  width: 400px;
-}
-
-.search-icon {
-  position: absolute;
-  left: 12px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--color-secondary-text);
-  font-size: 16px;
-}
-
-.search-input {
-  width: 100%;
-  height: 36px;
-  padding: 0 12px 0 36px;
-  font-size: var(--font-size-normal);
-  color: var(--color-body-text);
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border-secondary);
-  border-radius: 18px;
-  outline: none;
-  transition: border-color var(--transition-fast), background var(--transition-fast);
-}
-
-.search-input:focus {
-  background: var(--color-bg-canvas);
-  border-color: var(--color-link);
-}
-
-.search-input::placeholder {
-  color: var(--color-secondary-text);
-}
-
 /* ---- 右侧 ---- */
 .navbar-right {
   display: flex;
@@ -247,7 +253,7 @@ function handleLogout() {
   border: 1px solid var(--color-btn-outline-border);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: background var(--transition-fast);
+  transition: background var(--transition-fast), color 0.3s ease, border-color 0.3s ease;
   text-decoration: none;
 }
 
@@ -279,10 +285,12 @@ function handleLogout() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  transition: color 0.3s ease;
 }
 
 .dropdown-arrow {
   font-size: 12px;
   color: var(--color-secondary-text);
+  transition: color 0.3s ease;
 }
 </style>
