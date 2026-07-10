@@ -5,7 +5,7 @@
       <div class="navbar-left">
         <router-link to="/" class="navbar-logo">
           <span class="logo-icon">💾</span>
-          <span class="logo-text">GameSaves</span>
+          <span class="logo-text">MineSave</span>
         </router-link>
         <nav class="navbar-nav">
           <router-link to="/" class="nav-link" active-class="nav-link--active">首页</router-link>

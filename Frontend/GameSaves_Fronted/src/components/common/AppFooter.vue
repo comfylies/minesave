@@ -2,12 +2,25 @@
   <footer class="app-footer">
     <div class="container footer-inner">
       <div class="footer-left">
-        <span class="footer-logo">💾 GameSaves</span>
-        <span class="footer-text">© 2026 GameSaves</span>
+        <span class="footer-logo">💾 MineSave</span>
+        <span class="footer-text">© 2026 MineSave</span>
       </div>
       <div class="footer-right">
-        <span class="footer-text">ICP备2026000001号-X</span>
-        <span class="footer-text">公安备案 11010000000001号</span>
+        <a
+          class="beian-link"
+          href="https://beian.miit.gov.cn/"
+          target="_blank"
+          rel="noopener noreferrer"
+        >苏ICP备2026043687号</a>
+        <a
+          class="beian-link"
+          href="https://beian.mps.gov.cn/#/query/webSearch?code=32068202000848"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <img class="beian-icon" src="/beian-icon.png" alt="" />
+          苏公网安备32068202000848号
+        </a>
       </div>
     </div>
   </footer>
@@ -47,5 +60,24 @@
   display: flex;
   align-items: center;
   gap: var(--spacing-lg);
+}
+
+.beian-link {
+  font-size: var(--font-size-small);
+  color: var(--color-tertiary-text, #999);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.beian-link:hover {
+  color: var(--color-secondary-text);
+  text-decoration: underline;
+}
+
+.beian-icon {
+  width: 14px;
+  height: 14px;
+  margin-right: 2px;
+  vertical-align: text-bottom;
 }
 </style>

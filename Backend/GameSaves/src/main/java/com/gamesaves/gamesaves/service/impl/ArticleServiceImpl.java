@@ -27,16 +27,24 @@ import com.gamesaves.gamesaves.util.ImageThumbnailService;
 import com.gamesaves.gamesaves.util.XssFilter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.gamesaves.gamesaves.util.PathTraversalValidator;
+import org.apache.commons.compress.archivers.sevenz.SevenZArchiveEntry;
+import org.apache.commons.compress.archivers.sevenz.SevenZFile;
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
+import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream;
 import org.apache.commons.compress.archivers.zip.ZipArchiveEntry;
 import org.apache.commons.compress.archivers.zip.ZipFile;
 
+import java.io.BufferedInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Enumeration;
@@ -45,6 +53,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+/**
+ * 文章服务实现。
+ *
+ * <p>核心流程 createArticle 采用「预检→落库→COS 上传→异步提取」分段策略：
+ * 预检在本地 temp 文件上完成（不访问网络），失败时 DB 和 COS 完全未动。
+ * 提取限制从配置文件 {@code app.extraction.*} 读取，确保预检与异步提取阶段一致。
+ */
 @Service
 @Transactional
 public class ArticleServiceImpl implements ArticleService {
@@ -59,6 +74,19 @@ public class ArticleServiceImpl implements ArticleService {
     private final ZipExtractionService zipExtractionService;
     private final SearchSyncService searchSyncService;
     private final StorageService storageService;
+
+    // ── 提取限制（从配置文件注入，与 ZipExtractionService 保持一致）──
+    @Value("${app.extraction.max-file-size:524288000}")
+    private long maxFileSize;
+
+    @Value("${app.extraction.max-entry-size:104857600}")
+    private long maxEntrySize;
+
+    @Value("${app.extraction.max-total-uncompressed-size:524288000}")
+    private long maxTotalUncompressedSize;
+
+    @Value("${app.extraction.max-entry-count:10000}")
+    private int maxEntryCount;
 
     public ArticleServiceImpl(ArticleRepository articleRepository,
                                GameRepository gameRepository,
@@ -78,6 +106,21 @@ public class ArticleServiceImpl implements ArticleService {
         this.storageService = storageService;
     }
 
+    /**
+     * 创建文章（存档上传）完整流程：
+     *
+     * <ol>
+     *   <li>基本校验（Game/User 存在性）</li>
+     *   <li>README 解析（手动输入 &gt; 上传 .md &gt; 从压缩包提取）</li>
+     *   <li>压缩包本地预检（格式检测 + 结构扫描 + 路径穿越 + 大小限制）</li>
+     *   <li>预检通过 → 创建 Article 记录（DB）</li>
+     *   <li>上传压缩包到 COS（复用预检的 temp 文件）</li>
+     *   <li>封面图处理（可选）</li>
+     *   <li>事务提交后触发异步提取</li>
+     * </ol>
+     *
+     * <p>temp 文件在整个流程中通过 try-finally 保证清理，包括 DB 异常路径。
+     */
     @Override
     public ArticleDetailResponse createArticle(ArticleCreateRequest request, MultipartFile file,
                                                 MultipartFile readmeFile, MultipartFile coverFile) {
@@ -91,7 +134,7 @@ public class ArticleServiceImpl implements ArticleService {
             throw new BadRequestException("ZIP file is required");
         }
 
-        // 2. README 解析（Priority: 手动输入 > 上传 .md > 从ZIP提取）
+        // 2. README 解析（Priority: 手动输入 > 上传 .md > 从压缩包提取）
         String resolvedReadmeRaw = request.getReadmeRaw();
         if ((resolvedReadmeRaw == null || resolvedReadmeRaw.isBlank())
                 && readmeFile != null && !readmeFile.isEmpty()) {
@@ -104,7 +147,7 @@ public class ArticleServiceImpl implements ArticleService {
             }
         }
 
-        // 3. ZIP 本地预检（DB 写入和 COS 上传之前，本地完成）
+        // 3. 压缩包本地预检（DB 写入和 COS 上传之前，本地 temp 文件完成）
         Path tempZip = null;
         long zipSize;
         try {
@@ -118,119 +161,124 @@ public class ArticleServiceImpl implements ArticleService {
             throw e;
         } catch (IOException e) {
             cleanupTempFile(tempZip);
-            throw new FileProcessingException("Failed to read uploaded ZIP: " + e.getMessage(), e);
+            throw new FileProcessingException("Failed to read uploaded file: " + e.getMessage(), e);
         }
 
-        // 4. 预检通过 → 创建 Article 记录
-        final String finalReadmeRaw = resolvedReadmeRaw;
-        String storagePrefix = user.getId() + "/" + game.getId() + "/";
-        Article article = Article.builder()
-                .title(XssFilter.sanitize(request.getTitle()))
-                .version(XssFilter.sanitize(request.getVersion()))
-                .game(game)
-                .user(user)
-                .description(request.getDescription() != null
-                        ? XssFilter.sanitize(request.getDescription()) : null)
-                .readmeRaw(finalReadmeRaw)
-                .zipFilename(file.getOriginalFilename() != null
-                        ? XssFilter.sanitize(file.getOriginalFilename()) : "archive.zip")
-                .storageRoot(storagePrefix)      // placeholder, 拿到 ID 后更新
-                .fileSize(zipSize)               // 预检时已获取
-                .status(Article.ArticleStatus.UPLOADING)
-                .build();
-
-        article = articleRepository.save(article);
-
-        // 拿到 ID → 设置真实的 storageRoot
-        String storageRoot = storagePrefix + article.getId() + "/";
-        article.setStorageRoot(storageRoot);
-
-        // 关联标签
-        if (request.getTagIds() != null && !request.getTagIds().isEmpty()) {
-            List<Tag> tags = tagRepository.findAllById(request.getTagIds());
-            article.setTags(new HashSet<>(tags));
-        }
-
-        article = articleRepository.save(article);
-
-        // 5. 上传 ZIP 到 COS（复用预检步骤落盘的 temp 文件，不重复写盘）
+        // ── try-finally 保证 tempZip 在任意异常路径下都能被清理 ──
         try {
-            String cosPrefix = storageService.articleKey(user.getId(), game.getId(), article.getId(), "");
-            String zipKey = cosPrefix + article.getZipFilename();
-            storageService.storeFromPath(zipKey, tempZip);
-            log.info("Article {} created, ZIP uploaded to {}", article.getId(), zipKey);
-        } catch (Exception e) {
-            log.error("Failed to upload ZIP to COS for article {}: {}", article.getId(), e.getMessage());
-            throw new FileProcessingException("Failed to save uploaded file: " + e.getMessage(), e);
-        } finally {
-            cleanupTempFile(tempZip);
-        }
+            // 4. 预检通过 → 创建 Article 记录
+            final String finalReadmeRaw = resolvedReadmeRaw;
+            String storagePrefix = user.getId() + "/" + game.getId() + "/";
+            Article article = Article.builder()
+                    .title(XssFilter.sanitize(request.getTitle()))
+                    .version(XssFilter.sanitize(request.getVersion()))
+                    .game(game)
+                    .user(user)
+                    .description(request.getDescription() != null
+                            ? XssFilter.sanitize(request.getDescription()) : null)
+                    .readmeRaw(finalReadmeRaw)
+                    .zipFilename(file.getOriginalFilename() != null
+                            ? XssFilter.sanitize(file.getOriginalFilename()) : "archive.zip")
+                    .storageRoot(storagePrefix)      // placeholder, 拿到 ID 后更新
+                    .fileSize(zipSize)               // 预检时已获取
+                    .status(Article.ArticleStatus.UPLOADING)
+                    .build();
 
-        // 6. 封面图处理（如果前端提供）
-        if (coverFile != null && !coverFile.isEmpty()) {
+            article = articleRepository.save(article);
+
+            // 拿到 ID → 设置真实的 storageRoot
+            String storageRoot = storagePrefix + article.getId() + "/";
+            article.setStorageRoot(storageRoot);
+
+            // 关联标签
+            if (request.getTagIds() != null && !request.getTagIds().isEmpty()) {
+                List<Tag> tags = tagRepository.findAllById(request.getTagIds());
+                article.setTags(new HashSet<>(tags));
+            }
+
+            article = articleRepository.save(article);
+
+            // 5. 上传压缩包到 COS（复用预检步骤落盘的 temp 文件，不重复写盘）
             try {
-                String coverExt = validateAndGetImageExtension(coverFile);
-                Path tempCover = Files.createTempFile("cover-", "." + coverExt);
+                String cosPrefix = storageService.articleKey(user.getId(), game.getId(), article.getId(), "");
+                String zipKey = cosPrefix + article.getZipFilename();
+                storageService.storeFromPath(zipKey, tempZip);
+                log.info("Article {} created, ZIP uploaded to {}", article.getId(), zipKey);
+            } catch (Exception e) {
+                log.error("Failed to upload ZIP to COS for article {}: {}", article.getId(), e.getMessage());
+                throw new FileProcessingException("Failed to save uploaded file: " + e.getMessage(), e);
+            }
+
+            // 6. 封面图处理（如果前端提供）
+            if (coverFile != null && !coverFile.isEmpty()) {
                 try {
-                    coverFile.transferTo(tempCover.toFile());
-
-                    // 上传原图
-                    String coverFilename = "cover." + coverExt;
-                    String coverKey = storageService.articleKey(user.getId(), game.getId(), article.getId(), coverFilename);
-                    storageService.storeFromPath(coverKey, tempCover);
-                    article.setCoverImage(storageService.generatePresignedUrl(coverKey, 1440));
-
-                    // 生成缩略图并上传
-                    Path thumbDir = Files.createTempDirectory("thumbs-");
+                    String coverExt = validateAndGetImageExtension(coverFile);
+                    Path tempCover = Files.createTempFile("cover-", "." + coverExt);
                     try {
-                        ImageThumbnailService.generateCoverThumbnails(tempCover, thumbDir);
-                        for (int size : new int[]{270, 360, 720}) {
-                            Path thumbPath = thumbDir.resolve("cover_thumb_" + size + ".jpg");
-                            if (Files.exists(thumbPath)) {
-                                String thumbKey = storageService.articleKey(
-                                        user.getId(), game.getId(), article.getId(), "cover_thumb_" + size + ".jpg");
-                                storageService.storeFromPath(thumbKey, thumbPath);
+                        coverFile.transferTo(tempCover.toFile());
+
+                        // 上传原图
+                        String coverFilename = "cover." + coverExt;
+                        String coverKey = storageService.articleKey(user.getId(), game.getId(), article.getId(), coverFilename);
+                        storageService.storeFromPath(coverKey, tempCover);
+                        article.setCoverImage(storageService.generatePresignedUrl(coverKey, 1440));
+
+                        // 生成缩略图并上传（270p/360p/720p）
+                        Path thumbDir = Files.createTempDirectory("thumbs-");
+                        try {
+                            ImageThumbnailService.generateCoverThumbnails(tempCover, thumbDir);
+                            for (int size : new int[]{270, 360, 720}) {
+                                Path thumbPath = thumbDir.resolve("cover_thumb_" + size + ".jpg");
+                                if (Files.exists(thumbPath)) {
+                                    String thumbKey = storageService.articleKey(
+                                            user.getId(), game.getId(), article.getId(), "cover_thumb_" + size + ".jpg");
+                                    storageService.storeFromPath(thumbKey, thumbPath);
+                                }
+                            }
+                        } finally {
+                            deleteRecursively(thumbDir);
+                        }
+                        // 360h 缩略图（按比例，高 360px），用于管理后台游戏列表
+                        Path thumb360h = ImageThumbnailService.generateThumbnail360h(tempCover);
+                        if (thumb360h != null && Files.exists(thumb360h)) {
+                            try {
+                                String thumb360hKey = storageService.articleKey(
+                                        user.getId(), game.getId(), article.getId(), "cover_thumb_360.jpg");
+                                storageService.storeFromPath(thumb360hKey, thumb360h);
+                            } finally {
+                                Files.deleteIfExists(thumb360h);
                             }
                         }
+                        log.info("Cover image & thumbnails uploaded for article {}: {}", article.getId(), coverFilename);
                     } finally {
-                        deleteRecursively(thumbDir);
+                        Files.deleteIfExists(tempCover);
                     }
-                    // 360h 缩略图（按比例，高 360px）
-                    Path thumb360h = ImageThumbnailService.generateThumbnail360h(tempCover);
-                    if (thumb360h != null && Files.exists(thumb360h)) {
-                        try {
-                            String thumb360hKey = storageService.articleKey(
-                                    user.getId(), game.getId(), article.getId(), "cover_thumb_360.jpg");
-                            storageService.storeFromPath(thumb360hKey, thumb360h);
-                        } finally {
-                            Files.deleteIfExists(thumb360h);
-                        }
-                    }
-                    log.info("Cover image & thumbnails uploaded for article {}: {}", article.getId(), coverFilename);
-                } finally {
-                    Files.deleteIfExists(tempCover);
+                } catch (BadRequestException e) {
+                    throw e;
+                } catch (IOException e) {
+                    log.error("Failed to save cover image for article {}: {}", article.getId(), e.toString());
+                    throw new FileProcessingException("Failed to save cover image: " + e.getMessage(), e);
                 }
-            } catch (BadRequestException e) {
-                throw e;
-            } catch (IOException e) {
-                log.error("Failed to save cover image for article {}: {}", article.getId(), e.toString());
-                throw new FileProcessingException("Failed to save cover image: " + e.getMessage(), e);
             }
+
+            article = articleRepository.save(article);
+
+            // 7. 事务提交后触发异步提取
+            //    afterCommit 确保异步线程（独立线程池）能看到已提交的 Article 行
+            final Long savedArticleId = article.getId();
+            org.springframework.transaction.support.TransactionSynchronizationManager
+                    .registerSynchronization(new org.springframework.transaction.support.TransactionSynchronization() {
+                        @Override
+                        public void afterCommit() {
+                            zipExtractionService.extractAsync(savedArticleId);
+                        }
+                    });
+
+            return ArticleDetailResponse.fromEntity(article);
+        } finally {
+            // 无论成功或失败（包括 DB 异常、COS 异常），确保 temp 文件被清理
+            cleanupTempFile(tempZip);
         }
-
-        article = articleRepository.save(article);
-
-        // 7. 事务提交后触发异步提取
-        final Long savedArticleId = article.getId();
-        org.springframework.transaction.support.TransactionSynchronizationManager
-                .registerSynchronization(new org.springframework.transaction.support.TransactionSynchronization() {
-                    @Override
-                    public void afterCommit() {
-                        zipExtractionService.extractAsync(savedArticleId);
-                    }
-                });
-
-        return ArticleDetailResponse.fromEntity(article);
     }
 
     @Override
@@ -252,7 +300,6 @@ public class ArticleServiceImpl implements ArticleService {
         if (request.getVersion() != null) article.setVersion(XssFilter.sanitize(request.getVersion()));
         if (request.getDescription() != null) article.setDescription(XssFilter.sanitize(request.getDescription()));
 
-        // Update tag associations if tagIds is provided
         if (request.getTagIds() != null) {
             List<Tag> tags = tagRepository.findAllById(request.getTagIds());
             article.setTags(new HashSet<>(tags));
@@ -271,10 +318,10 @@ public class ArticleServiceImpl implements ArticleService {
         String prefix = storageService.articleKeyFromRoot(article.getStorageRoot(), "");
         storageService.deleteDirectory(prefix);
 
-        // Remove from search index
+        // 从搜索索引中移除
         searchSyncService.deleteArticle(id);
 
-        // DB cascade handles savings, saving_items, comments, download_logs
+        // DB 级联删除 savings, saving_items, comments, download_logs
         articleRepository.delete(article);
         log.info("Article {} deleted", id);
     }
@@ -319,9 +366,11 @@ public class ArticleServiceImpl implements ArticleService {
         return PageDTO.of(content, page, size, total);
     }
 
+    // ── 封面图校验 ──
+
     /**
-     * Validate cover image by magic bytes and return the file extension.
-     * Accepts PNG, JPEG, GIF, WebP. Throws BadRequestException for invalid images.
+     * 通过魔术字节验证封面图格式，返回文件扩展名。
+     * 接受 PNG、JPEG、GIF、WebP。其他格式抛出 BadRequestException。
      */
     private String validateAndGetImageExtension(MultipartFile file) {
         try {
@@ -367,23 +416,34 @@ public class ArticleServiceImpl implements ArticleService {
         }
     }
 
+    // ── 压缩包预检（本地 temp 文件，不访问网络）──
+
     /**
-     * 本地压缩包预检（不访问网络，只读 temp 文件）。
+     * 压缩包本地预检 — 支持所有已知格式的结构扫描。
      *
-     * <p>支持 ZIP / 7z / TAR / TAR.GZ / RAR 格式检测。
-     * RAR 不支持提取，检测到后返回友好错误提示。
-     * 在 DB 写入和 COS 上传之前调用，拦截无效文件。
+     * <p>执行顺序：
+     * <ol>
+     *   <li>文件大小检查（空文件 / 超过上限）</li>
+     *   <li>格式检测（magic bytes 优先，扩展名回退）</li>
+     *   <li>不支持格式友好拒绝（RAR）</li>
+     *   <li>格式对应的结构完整性扫描（条目数 / 路径穿越 / 大小限制）</li>
+     * </ol>
+     *
+     * <p>所有限制从配置文件 {@code app.extraction.*} 读取，确保与异步提取阶段完全一致。
+     * 在 DB 写入和 COS 上传之前调用——预检失败时二者完全未动。
      */
     private void validateArchiveFile(Path tempZip, long zipSize, String originalFilename) {
+        // ── 文件大小检查 ──
         if (zipSize == 0) {
             throw new BadRequestException("Uploaded file is empty");
         }
-        if (zipSize > 500 * 1024 * 1024) {
+        if (zipSize > maxFileSize) {
             throw new BadRequestException(
-                    "File too large (" + zipSize / 1024 / 1024 + "MB, max 500MB)");
+                    "File too large (" + zipSize / 1024 / 1024 + "MB, max "
+                            + maxFileSize / 1024 / 1024 + "MB)");
         }
 
-        // 格式检测（magic bytes 优先，扩展名回退）
+        // ── 格式检测（magic bytes 优先，扩展名回退）──
         ArchiveFormat format;
         try {
             format = ArchiveFormat.detect(tempZip)
@@ -396,21 +456,24 @@ public class ArticleServiceImpl implements ArticleService {
             throw new BadRequestException("Cannot read uploaded file: " + e.getMessage());
         }
 
-        // RAR 不支持提取
+        // ── RAR 不支持提取，友好拒绝 ──
         if (!format.isExtractionSupported()) {
             throw new BadRequestException(
                     "RAR format is not yet supported. Please convert to ZIP, 7z, or tar.gz.");
         }
 
-        // ZIP 仍做完整的结构预检；7z/tar 的结构校验由提取阶段完成
-        if (format == ArchiveFormat.ZIP) {
-            validateZipStructure(tempZip, zipSize);
-        } else {
-            log.info("Archive pre-validation passed: format={}, size={} bytes", format, zipSize);
+        // ── 格式对应的结构完整性扫描 ──
+        switch (format) {
+            case ZIP -> validateZipStructure(tempZip, zipSize);
+            case SEVEN_Z -> validateSevenZStructure(tempZip);
+            case TAR_GZ, TAR -> validateTarStructure(tempZip, format);
         }
     }
 
-    /** ZIP 结构完整性预检（Commons Compress 打开 + 条目扫描） */
+    /**
+     * ZIP 结构完整性预检：Commons Compress 打开 + 条目扫描。
+     * 检查条目数、路径穿越、单文件大小、解压总大小。
+     */
     private void validateZipStructure(Path tempZip, long zipSize) {
         try (ZipFile zipFile = ZipFile.builder().setPath(tempZip).get()) {
             Enumeration<ZipArchiveEntry> entries = zipFile.getEntries();
@@ -425,11 +488,13 @@ public class ArticleServiceImpl implements ArticleService {
                 ZipArchiveEntry entry = entries.nextElement();
                 count++;
 
-                if (count > 10_000) {
+                // ── 条目数上限检查 ──
+                if (count > maxEntryCount) {
                     throw new BadRequestException(
-                            "Archive contains too many files (" + count + " so far, max 10,000)");
+                            "Archive contains too many files (" + count + " so far, max " + maxEntryCount + ")");
                 }
 
+                // ── 路径穿越检测 ──
                 try {
                     PathTraversalValidator.validate(entry.getName());
                 } catch (Exception e) {
@@ -437,17 +502,21 @@ public class ArticleServiceImpl implements ArticleService {
                             "Archive contains unsafe file path: " + entry.getName());
                 }
 
+                // ── 单文件大小检查 ──
                 long size = entry.getSize();
-                if (size > 100 * 1024 * 1024) {
+                if (size > maxEntrySize) {
                     throw new BadRequestException(
                             "Archive contains a file that is too large: " + entry.getName()
-                                    + " (" + size / 1024 / 1024 + "MB, max 100MB per file)");
+                                    + " (" + size / 1024 / 1024 + "MB, max "
+                                    + maxEntrySize / 1024 / 1024 + "MB per file)");
                 }
+                // ── 解压总大小检查 ──
                 if (size > 0) {
                     totalUncompressed += size;
-                    if (totalUncompressed > 500 * 1024 * 1024) {
+                    if (totalUncompressed > maxTotalUncompressedSize) {
                         throw new BadRequestException(
-                                "Archive total uncompressed size exceeds 500MB limit");
+                                "Archive total uncompressed size exceeds "
+                                        + maxTotalUncompressedSize / 1024 / 1024 + "MB limit");
                     }
                 }
             }
@@ -462,7 +531,145 @@ public class ArticleServiceImpl implements ArticleService {
         }
     }
 
-    /** 安全清理 temp 文件，不抛异常 */
+    /**
+     * 7z 结构完整性预检：Commons Compress SevenZFile 打开 + 条目扫描。
+     * 7z 不支持随机访问，此处只做元数据扫描（不读取条目内容）。
+     * 检查条目数、路径穿越、条目大小限制。
+     */
+    private void validateSevenZStructure(Path tempZip) {
+        try (SevenZFile sevenZFile = SevenZFile.builder()
+                .setFile(tempZip.toFile())
+                .get()) {
+
+            int count = 0;
+            long totalUncompressed = 0;
+            SevenZArchiveEntry entry;
+            while ((entry = sevenZFile.getNextEntry()) != null) {
+                if (entry.isDirectory()) continue;
+                count++;
+
+                // ── 条目数上限检查 ──
+                if (count > maxEntryCount) {
+                    throw new BadRequestException(
+                            "7z contains too many entries (" + count + " so far, max " + maxEntryCount + ")");
+                }
+
+                String entryName = entry.getName() != null ? entry.getName().trim() : "";
+
+                // ── 路径穿越检测 ──
+                try {
+                    PathTraversalValidator.validate(entryName);
+                } catch (Exception e) {
+                    throw new BadRequestException(
+                            "7z contains unsafe file path: " + entryName);
+                }
+
+                // ── 条目大小检查 ──
+                long size = entry.getSize();
+                if (size > maxEntrySize) {
+                    throw new BadRequestException(
+                            "7z contains a file that is too large: " + entryName
+                                    + " (" + size / 1024 / 1024 + "MB, max "
+                                    + maxEntrySize / 1024 / 1024 + "MB per file)");
+                }
+                if (size > 0) {
+                    totalUncompressed += size;
+                    if (totalUncompressed > maxTotalUncompressedSize) {
+                        throw new BadRequestException(
+                                "7z total uncompressed size exceeds "
+                                        + maxTotalUncompressedSize / 1024 / 1024 + "MB limit");
+                    }
+                }
+            }
+
+            if (count == 0) {
+                throw new BadRequestException("7z archive is empty (no files inside)");
+            }
+
+            log.info("7z pre-validation passed: {} entries, {} bytes uncompressed",
+                    count, totalUncompressed);
+        } catch (BadRequestException e) {
+            throw e;
+        } catch (IOException e) {
+            throw new BadRequestException(
+                    "Cannot open 7z archive — file may be corrupted: " + e.getMessage());
+        }
+    }
+
+    /**
+     * TAR / TAR.GZ 结构完整性预检：流式顺序扫描元数据（不读取条目内容）。
+     * 检查条目数、路径穿越、条目大小限制。
+     */
+    private void validateTarStructure(Path tempZip, ArchiveFormat format) {
+        try (InputStream rawIn = Files.newInputStream(tempZip);
+             InputStream bufIn = new BufferedInputStream(rawIn);
+             InputStream decompIn = format == ArchiveFormat.TAR_GZ
+                     ? new GzipCompressorInputStream(bufIn) : bufIn;
+             TarArchiveInputStream tarIn = new TarArchiveInputStream(decompIn)) {
+
+            int count = 0;
+            long totalUncompressed = 0;
+            TarArchiveEntry entry;
+            while ((entry = tarIn.getNextEntry()) != null) {
+                if (entry.isDirectory()) continue;
+                // 跳过符号链接和硬链接
+                if (entry.isSymbolicLink() || entry.isLink()) continue;
+                count++;
+
+                // ── 条目数上限检查 ──
+                if (count > maxEntryCount) {
+                    throw new BadRequestException(
+                            "Archive contains too many entries (" + count + " so far, max " + maxEntryCount + ")");
+                }
+
+                String entryName = entry.getName() != null ? entry.getName().trim() : "";
+
+                // ── 路径穿越检测 ──
+                try {
+                    PathTraversalValidator.validate(entryName);
+                } catch (Exception e) {
+                    throw new BadRequestException(
+                            "Archive contains unsafe file path: " + entryName);
+                }
+
+                // ── 条目大小检查（TAR 中某些条目可能返回 -1 表示未知大小，跳过检查）──
+                long size = entry.getSize();
+                if (size > maxEntrySize) {
+                    throw new BadRequestException(
+                            "Archive contains a file that is too large: " + entryName
+                                    + " (" + size / 1024 / 1024 + "MB, max "
+                                    + maxEntrySize / 1024 / 1024 + "MB per file)");
+                }
+                if (size > 0) {
+                    totalUncompressed += size;
+                    if (totalUncompressed > maxTotalUncompressedSize) {
+                        throw new BadRequestException(
+                                "Archive total uncompressed size exceeds "
+                                        + maxTotalUncompressedSize / 1024 / 1024 + "MB limit");
+                    }
+                }
+            }
+
+            if (count == 0) {
+                throw new BadRequestException("Archive is empty (no files inside)");
+            }
+
+            log.info("{} pre-validation passed: {} entries, {} bytes uncompressed",
+                    format.name(), count, totalUncompressed);
+        } catch (BadRequestException e) {
+            throw e;
+        } catch (IOException e) {
+            throw new BadRequestException(
+                    "Cannot open archive — file may be corrupted: " + e.getMessage());
+        }
+    }
+
+    // ── Temp 文件清理 ──
+
+    /**
+     * 安全清理 temp 文件（不抛异常）。
+     * 在所有异常路径和正常流程的 finally 块中调用，防止磁盘泄漏。
+     */
     private void cleanupTempFile(Path tempZip) {
         if (tempZip != null) {
             try {
@@ -472,6 +679,8 @@ public class ArticleServiceImpl implements ArticleService {
             }
         }
     }
+
+    // ── 递归目录删除 ──
 
     private void deleteRecursively(Path path) throws IOException {
         if (Files.isDirectory(path)) {

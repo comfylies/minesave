@@ -51,22 +51,24 @@ All file I/O goes through `StorageService` — never touch the filesystem direct
 
 Key semantics:
 - All keys use forward-slash format: `articles/{userId}/{gameId}/{articleId}/{filename}`
-- `getLocalPath(key)` downloads remote files to temp when needed (e.g. ZIP extraction, ImageIO) — local mode returns the direct path
+- `getLocalPath(key)` downloads remote files to temp when needed (e.g. archive extraction, ImageIO) — local mode returns the direct path
 - `generatePresignedUrl(key, minutes)` for secure downloads; local mode falls back to `/storage/` paths
 - Profile configs (`application-{local,minio,cos}.yaml`) wire the right implementation
 
-### Auth (Sa-Token 1.44.0)
+### Auth (Sa-Token 1.44.0 + JWT)
 
-Token-based auth via Sa-Token (NOT Spring Security). Token name: `Authorization` header. Timeout 24h, active timeout 30min. `StpInterfaceImpl` loads role→permission mapping (admin → `user:manage` + `article:manage`).
+Token-based auth via Sa-Token with **JWT mode enabled** (`is-jwt: true`). Token name: `Authorization` header. JWT timeout 7 days (no active/idle timeout — JWT is stateless, server restarts don't invalidate tokens). `StpInterfaceImpl` loads role→permission mapping (admin → `user:manage` + `article:manage`).
 
 **Route-level auth** (`SaTokenConfig`):
 - `/api/auth/**` — public
-- `GET /api/games/**`, `GET /api/articles/**`, `/api/files/**`, `GET /api/users/**`, `GET /api/comments/**` — public (but refresh token active time if logged in)
+- `GET /api/games/**`, `GET /api/articles/**`, `/api/files/**`, `GET /api/users/**`, `GET /api/comments/**` — public
 - `POST/PUT/DELETE` on games/articles — requires login
 - `/api/admin/**` — login + admin permission (`@SaCheckPermission`)
 - All other `/api/**` — requires login
 
-**Login security**: 5 max failed attempts → 30min account lock (`login_fails` table), captcha gate on password login, email code cooldown 60s / TTL 5min.
+**Two login modes:**
+1. **Password + captcha**: username/email + password + graphical captcha image. 5 max failed attempts → 30min account lock (`login_fails` table).
+2. **Email verification code**: email + 6-digit code. Cooldown 60s between sends, TTL 5min, max 5 sends/day per email.
 
 ### Entity Design — CRITICAL
 
@@ -81,12 +83,13 @@ Token-based auth via Sa-Token (NOT Spring Security). Token name: `Authorization`
 ### Article Upload Flow (key data flow)
 
 ```
-POST /api/articles (multipart: metadata JSON + ZIP file + optional README .md)
-  → ArticleServiceImpl saves ZIP to storage, creates Article (status=UPLOADING)
+POST /api/articles (multipart: metadata JSON + archive file + optional README .md)
+  → ArticleServiceImpl saves archive to storage, creates Article (status=UPLOADING)
   → TransactionSynchronization.afterCommit() → triggers async extraction
   → ZipExtractionService.extractAsync() (@Async, 30s timeout)
-    → Downloads ZIP from storage to temp (COS mode) or reads directly (local mode)
-    → ZipExtractor: stream extraction, MD5 content-addressing, auto dir nodes
+    → Downloads archive from storage to temp (COS mode) or reads directly (local mode)
+    → ArchiveFormat.detect() identifies format via magic bytes (ZIP/7z/tar/tar.gz)
+    → Appropriate extractor: ZipExtractor / SevenZExtractor / TarArchiveExtractor
     → MagicNumberValidator checks file headers (reject dangerous types)
     → SavingItemRepository.saveAll()
     → Parallel upload of extracted files back to storage (COS: N concurrent)
@@ -98,6 +101,25 @@ POST /api/articles (multipart: metadata JSON + ZIP file + optional README .md)
 
 **Why `afterCommit()`**: the async extractor runs in a separate thread pool — if it starts before the main transaction commits, it won't see the new Article row (DB isolation level).
 
+### Archive Extraction — Multi-Format
+
+`ArchiveFormat` enum detects format via magic bytes (read order: ZIP → 7z → RAR → tar.gz → tar), with extension-based fallback. Supported formats:
+
+| Format | Extensions | Extraction | Extractor class |
+|--------|-----------|------------|-----------------|
+| ZIP | `.zip` | ✅ | `ZipExtractor` |
+| 7z | `.7z` | ✅ | `SevenZExtractor` |
+| tar.gz | `.tar.gz`, `.tgz` | ✅ | `TarArchiveExtractor` |
+| tar | `.tar` | ✅ | `TarArchiveExtractor` |
+| RAR | `.rar` | ❌ (detected but not extracted) | — |
+
+Key behaviors:
+- **Charset fallback**: UTF-8 → GBK → system default (Chinese Windows archives often use GBK). ZIP uses Apache Commons Compress `ZipFile`, not JDK `ZipInputStream`.
+- **Path traversal defense**: `PathTraversalValidator` rejects `../`, absolute paths, drive letters; `LocalStorageServiceImpl.resolvePath()` has containment guard.
+- **Content dedup**: same MD5 → same `{md5}.{ext}` physical file → write once.
+- **Magic number validation**: `MagicNumberValidator` checks file headers before extraction — blocks executables, DLLs, and other dangerous types. `SafePath` entity stores whitelisted paths per game for security color marking (files inside known safe paths get downgraded warnings).
+- **Parallel extraction**: extracted files uploaded to storage in parallel via `parallelStream()` — critical for COS where each upload is a network round-trip.
+
 ### Meilisearch Search
 
 Search engine for game + article discovery. Single index `saves` with two doc types: `game-{id}` and `article-{id}`.
@@ -107,14 +129,6 @@ Search engine for game + article discovery. Single index `saves` with two doc ty
 - Config at `meilisearch.host` (default `http://localhost:7700`), API key `meilisearch.api-key`
 - `rebuildAll()` does full reindex: all games (including those with 0 articles) + all READY articles, paginated
 
-### ZIP Extraction Gotchas
-
-- **Charset fallback**: UTF-8 → GBK → system default (Chinese Windows ZIPs often use GBK). Uses Apache Commons Compress `ZipFile`, not JDK `ZipInputStream`.
-- **Path traversal defense**: `PathTraversalValidator` rejects `../`, absolute paths, drive letters; `LocalStorageServiceImpl.resolvePath()` has containment guard.
-- **Content dedup**: same MD5 → same `{md5}.{ext}` physical file → write once.
-- **Magic number validation**: `MagicNumberValidator` checks file headers before extraction — blocks executables, DLLs, and other dangerous types. `SafePath` entity stores whitelisted paths per game for security color marking (files inside known safe paths get downgraded warnings).
-- **Parallel extraction**: extracted files uploaded to storage in parallel via `parallelStream()` — critical for COS where each upload is a network round-trip.
-
 ### Image Thumbnails
 
 `ImageThumbnailService` (pure JDK `BufferedImage`, no external imaging library):
@@ -123,17 +137,40 @@ Search engine for game + article discovery. Single index `saves` with two doc ty
 - **360h thumbnails**: proportional resize to 360px height
 - Uses TwelveMonkeys ImageIO for WebP/JPEG format support (JDK doesn't decode WebP natively; if decode fails, thumbnails are skipped gracefully)
 
+### Download System
+
+`FileExplorerService.getZipForDownload()` resolves the article's archive via 3-layer fallback: 1) dynamic path from config `storageBasePath` + userId/gameId/articleId, 2) `article.storageRoot` (legacy), 3) `savings.zipPath` (very old data). Paths resolved to absolute via `@PostConstruct` to avoid Tomcat temp dir drift.
+
+`DownloadService` tracks download counts and logs. `RateLimiter` enforces per-IP download rate limits (configurable via `app.rate-limit.*`).
+
+### Cleanup System
+
+`CleanupScheduler` batch-processes FAILED and stale UPLOADING articles to prevent storage exhaustion. Three triggers:
+- **Scheduled**: every N hours (configurable, default 3h)
+- **Startup**: `@PostConstruct` one-shot cleanup on boot
+- **Manual**: `POST /api/admin/cleanup/trigger` (admin only)
+
+Batch-processed with independent transactions + configurable sleep between batches. Also deletes physical storage files when `app.cleanup.delete-physical-files=true`.
+
+### Tag System
+
+Global tag pool via `Tag` entity. Articles have many-to-many association with tags. `TagService` provides CRUD and search. Tags are indexed in Meilisearch for article discovery.
+
+### Announcement System
+
+`Announcement` entity with title/content/type/pinned fields. `AnnouncementService` provides CRUD. Frontend displays active announcements site-wide. Admin panel has full management UI.
+
+### Ghost Article Diagnostics
+
+Ghost articles = storage files without corresponding DB records (orphaned from failed uploads or game merges). `AdminGhosts.vue` + backend endpoint scan storage directories against the `articles` table to find and report ghosts.
+
 ### API Convention
 
 All responses: `{ "code": 200, "message": "...", "data": {...} }`. Pagination: `PageDTO<T>` with `content/page/size/total`. Exceptions → `GlobalExceptionHandler` maps to HTTP status codes (see `exception/` package).
 
-### Download Path Resolution (3-layer fallback)
-
-`FileExplorerServiceImpl.getZipForDownload()` tries: 1) dynamic path from config `storageBasePath` + userId/gameId/articleId, 2) `article.storageRoot` (legacy), 3) `savings.zipPath` (very old data). Paths resolved to absolute via `@PostConstruct` to avoid Tomcat temp dir drift.
-
 ### Key Dependencies
 
-Apache Commons Compress 1.26 (ZIP), CommonMark 0.22 + GFM extensions (Markdown → HTML), BCrypt (password only, no full Spring Security), HikariCP (connection pool), Meilisearch Java SDK 0.14.4, AWS S3 SDK v2 2.29.52, TwelveMonkeys ImageIO 3.12 (WebP/JPEG thumbnails).
+Apache Commons Compress 1.26 (ZIP/7z/tar), CommonMark 0.22 + GFM extensions (Markdown → HTML), BCrypt (password only, no full Spring Security), HikariCP (connection pool), Meilisearch Java SDK 0.14.4, AWS S3 SDK v2 2.29.52, TwelveMonkeys ImageIO 3.12 (WebP/JPEG thumbnails), Sa-Token 1.44.0 + sa-token-jwt plugin.
 
 ## Frontend Architecture
 
@@ -145,17 +182,66 @@ Axios response interceptor has dual-mode handling:
 - **JSON** (`application/json`) → auto-unwraps `ApiResponse`, extracts `data.data`, callers get business objects directly
 - **Binary/text** (`blob`, `text/plain`, `zip`) → returns full `response` object (with `headers`), caller handles `Content-Disposition` for filenames
 
+401 handling: both HTTP 401 and `ApiResponse.code === 401` trigger auth cleanup + redirect to login — handles JWT expiry and token invalidation.
+
 ### Auth Persistence
 
-Login stores full `UserResponse` in `localStorage`. Router guard reads `localStorage` directly (not Pinia) to avoid flicker on refresh. No JWT — entire user object persisted.
+JWT token stored as `satoken` in `localStorage`. User object also cached in `localStorage` as `currentUser` for UI display (role checks, avatar, etc.). Router guard reads `localStorage` directly (not Pinia) to avoid flicker on refresh.
+
+`useAuthStore` (Pinia) manages login/logout/register flows. Logout clears both `satoken` and `currentUser`, and resets all other stores (articles, games, files) to prevent data leakage across sessions.
+
+**Two login flows:**
+1. **Password login**: username/email + password + captcha image (graphical captcha via `CaptchaUtil`)
+2. **Email code login**: email → send code → enter 6-digit code
+
+### Pinia Stores
+
+| Store | Key state | Purpose |
+|-------|-----------|---------|
+| `auth` | `currentUser`, `token`, `isLoggedIn`, `isAdmin` | Auth state, login/logout/register actions |
+| `articles` | `currentArticle`, `articleList`, `pagination` | Article CRUD, game/user-specific listings |
+| `games` | Game list, search results | Game browsing and search |
+| `files` | File tree for current article | File browser state |
+
+### Router & Layouts
+
+Two layouts:
+- **DefaultLayout** (`/`) — AppNavbar + AppFooter, used for Home/Game/Article/Search/Upload/MySaves/UserProfile
+- **AdminLayout** (`/admin/*`) — separate admin shell, requires auth + admin role
+
+Router guard checks `satoken` in localStorage for `requiresAuth` routes, and `currentUser.role === 'admin'` for `requiresAdmin` routes. Redirects to login with `redirect` query param on missing auth.
+
+### Text Annotation System
+
+Text selection and commenting on file contents (README + preview-able text files). Built on `@recogito/text-annotator` (W3C Web Annotation standard):
+
+- **`useTextAnnotator`** composable — wraps recogito for selection management and event system. Uses a **no-op custom renderer** — recogito handles spatial index/hover/selection but produces zero DOM output.
+- **`HighlightManager`** — custom rendering: colored highlight backgrounds + dotted underlines on annotated text ranges.
+- **`BorderLayer`** — left-side color bars marking annotated paragraphs.
+- **`AnnotationPanel`** — sidebar showing all annotations for the current file, with scroll-to-annotation.
+- **`AnnotationPopup`** — floating popup when text is selected, for creating new annotations.
+
+Annotations are stored as `Comment` entities with W3C-compatible selectors (`TextQuoteSelector` + `TextPositionSelector`) serialized in the `anchor` JSON field. This split-selector approach fixes a historical bug where recogito couldn't resolve single-selector annotations.
+
+### File Preview
+
+Text files with extensions in `app.preview.allowed-extensions` (txt, md, json, xml, yml, yaml, log, csv, ini, cfg, conf, properties, html, css, js, ts, java, py, sh, bat, sql, nbt, mcmeta, etc.) can be previewed in-browser. Max preview size: 5 MB (`app.preview.max-size-bytes`). Binary/image files are served as downloads.
 
 ### Key Views
 
-- **ArticlePage**: 3-column layout — FileBrowser + ReadmeRenderer + AnnotationPanel
-- **UploadPage**: ZIP upload + README dual-mode (hand-written Markdown OR upload .md file)
+- **ArticlePage**: 3-column GitHub-style layout — FileBrowser (tree) + ReadmeRenderer (Markdown with syntax highlighting via highlight.js) + AnnotationPanel
+- **UploadPage**: Archive upload + README dual-mode (hand-written Markdown OR upload .md file). Game creation embedded inline with abuse prevention.
+- **GamePage**: Game detail + article list with gallery/cover views
+- **Admin**: 7 management views — Dashboard, Users, Articles, Announcements, Games, Cleanup (failed archive cleanup trigger + status), Ghosts (orphaned storage diagnostics)
+
+### Key Dependencies
+
+Vue 3.5, Vite 8, Element Plus 2.14, Pinia 3, Vue Router 4, Axios, marked (Markdown), highlight.js (syntax highlighting), @recogito/text-annotator 4.2 (text selection/annotation), bcryptjs (frontend password hashing before sending).
 
 ## Known Limitations
 
-- No DB migration tool (manual SQL for schema changes). Migration SQL files live in project root when needed (e.g. `migration_game_aliases.sql`).
+- No DB migration tool (manual SQL for schema changes). Migration SQL files live in project root when needed.
 - No full Spring Security — only Sa-Token for auth.
 - Meilisearch must be running separately for search to work (install + run `meilisearch` on port 7700 with master key matching config).
+- RAR archives are detected but not extracted (only ZIP, 7z, tar, tar.gz).
+- JWT mode means tokens can't be invalidated server-side before expiry — logout only clears client-side state.

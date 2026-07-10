@@ -2,7 +2,7 @@
   <div class="auth-page">
     <div class="auth-card">
       <div class="auth-header">
-        <router-link to="/" class="auth-logo">💾 GameSaves</router-link>
+        <router-link to="/" class="auth-logo">💾 MineSave</router-link>
         <h1 class="auth-title">登录</h1>
       </div>
 

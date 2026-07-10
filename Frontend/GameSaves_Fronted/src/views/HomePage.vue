@@ -1,10 +1,5 @@
 <template>
   <div class="home-page">
-    <!-- 标题区 -->
-    <div class="home-header">
-      <h1 class="page-title">探索游戏</h1>
-      <p class="page-subtitle">浏览游戏存档，发现其他玩家的精彩时刻</p>
-    </div>
 
     <!-- 排序栏 -->
     <div class="home-toolbar">

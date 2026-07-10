@@ -18,6 +18,7 @@ import java.util.*;
  * 7z 格式提取器 — 通过 Commons Compress {@link SevenZFile} 提取。
  *
  * <p>与 {@link ZipExtractor} 共享同一套安全策略和 content-addressable 存储逻辑。
+ * 工具方法统一使用 {@link ArchiveUtils}。
  */
 public class SevenZExtractor {
 
@@ -25,28 +26,45 @@ public class SevenZExtractor {
 
     private static final int BUFFER_SIZE = 8192;
 
-    // 与 ZipExtractor 一致的限制常量
-    private static final long MAX_ENTRY_SIZE = 100 * 1024 * 1024;
-    private static final long MAX_TOTAL_UNCOMPRESSED_SIZE = 500 * 1024 * 1024;
-    private static final int MAX_ENTRY_COUNT = 10_000;
+    // 提取限制（由调用方从配置文件注入，确保与预检阶段一致）
+    private final long maxEntrySize;
+    private final long maxTotalUncompressedSize;
+    private final int maxEntryCount;
 
     private final Path archivePath;
     private final Path extractRoot;
     private final Long snapshotId;
     private final MagicNumberValidator magicNumberValidator;
 
+    /**
+     * @param archivePath              压缩包本地路径
+     * @param extractRoot              提取目标目录
+     * @param snapshotId               快照 ID
+     * @param magicNumberValidator     魔数校验器
+     * @param maxEntrySize             单条目解压后最大字节数
+     * @param maxTotalUncompressedSize 总解压后最大字节数
+     * @param maxEntryCount            最大条目数
+     */
     public SevenZExtractor(Path archivePath, Path extractRoot, Long snapshotId,
-                           MagicNumberValidator magicNumberValidator) {
+                           MagicNumberValidator magicNumberValidator,
+                           long maxEntrySize, long maxTotalUncompressedSize, int maxEntryCount) {
         this.archivePath = archivePath;
         this.extractRoot = extractRoot;
         this.snapshotId = snapshotId;
         this.magicNumberValidator = magicNumberValidator;
+        this.maxEntrySize = maxEntrySize;
+        this.maxTotalUncompressedSize = maxTotalUncompressedSize;
+        this.maxEntryCount = maxEntryCount;
     }
 
+    /**
+     * 执行 7z 提取，返回统一的 {@link ArchiveExtractionResult.ExtractionResult}。
+     * 7z 格式不支持随机访问条目，必须顺序读取。
+     */
     public ArchiveExtractionResult.ExtractionResult extract() throws IOException {
         Files.createDirectories(extractRoot);
 
-        // Compute archive SHA-256
+        // 计算压缩包 SHA-256 哈希
         String archiveHash;
         try {
             MessageDigest sha256 = MessageDigest.getInstance("SHA-256");
@@ -57,7 +75,7 @@ public class SevenZExtractor {
                     sha256.update(buf, 0, len);
                 }
             }
-            archiveHash = bytesToHex(sha256.digest());
+            archiveHash = ArchiveUtils.bytesToHex(sha256.digest());
         } catch (java.security.NoSuchAlgorithmException e) {
             throw new FileProcessingException("SHA-256 not available", e);
         }
@@ -77,16 +95,17 @@ public class SevenZExtractor {
 
             SevenZArchiveEntry entry;
             while ((entry = sevenZFile.getNextEntry()) != null) {
-                if (items.size() >= MAX_ENTRY_COUNT) {
+                // ── 条目数限制 ──
+                if (items.size() >= maxEntryCount) {
                     throw new FileProcessingException(
-                            "7z contains too many entries (max " + MAX_ENTRY_COUNT + ")");
+                            "7z contains too many entries (max " + maxEntryCount + ")");
                 }
 
                 if (entry.isDirectory()) continue;
 
                 String entryName = entry.getName().trim();
 
-                // 路径穿越检测
+                // ── 路径穿越检测 ──
                 try {
                     PathTraversalValidator.validate(entryName);
                 } catch (Exception e) {
@@ -94,24 +113,26 @@ public class SevenZExtractor {
                     continue;
                 }
 
+                // ── 单条目大小检查 ──
                 long size = entry.getSize();
-                if (size > MAX_ENTRY_SIZE) {
+                if (size > maxEntrySize) {
                     log.warn("Skipping oversized entry ({} bytes): {}", size, entryName);
                     continue;
                 }
+                // ── 累计大小检查 ──
                 if (size > 0) {
                     totalUncompressed += size;
-                    if (totalUncompressed > MAX_TOTAL_UNCOMPRESSED_SIZE) {
+                    if (totalUncompressed > maxTotalUncompressedSize) {
                         throw new FileProcessingException(
                                 "7z total uncompressed size exceeds limit (" +
-                                MAX_TOTAL_UNCOMPRESSED_SIZE / (1024 * 1024) + "MB)");
+                                maxTotalUncompressedSize / (1024 * 1024) + "MB)");
                     }
                 }
 
                 // 读取条目内容（7z 不支持随机访问，必须顺序读取）
                 byte[] entryData = readEntry(sevenZFile, (int) size);
 
-                // Magic number 校验
+                // ── Magic number 校验（检测伪装可执行文件）──
                 String magicViolation = magicNumberValidator.check(entryData, entryName);
                 if (magicViolation != null) {
                     violations.add(magicViolation);
@@ -119,7 +140,7 @@ public class SevenZExtractor {
                     continue;
                 }
 
-                // README images 处理
+                // ── README images 处理（images/ 目录下的图片不存入 saving_items）──
                 String lowerEntry = entryName.toLowerCase();
                 if (lowerEntry.startsWith("images/")) {
                     if (entryData.length <= 10 * 1024 * 1024) {
@@ -134,20 +155,20 @@ public class SevenZExtractor {
                     continue;
                 }
 
-                String fileType = getExtension(entryName);
-                String md5Hash = computeMd5(entryData);
+                // ── Content-addressable 存储（去重）──
+                String fileType = ArchiveUtils.getExtension(entryName);
+                String md5Hash = ArchiveUtils.computeMd5(entryData);
                 String physicalKey = md5Hash + "." + fileType;
 
-                // Content-addressable 存储（去重）
                 Path physicalPath = extractRoot.resolve(physicalKey);
                 if (!Files.exists(physicalPath)) {
                     Files.write(physicalPath, entryData);
                 }
 
-                boolean isText = isTextFile(entryName, entryData);
+                boolean isText = ArchiveUtils.isTextFile(entryName, entryData);
 
                 String parentPath = PathTraversalValidator.computeParentPath(entryName);
-                autoCreateDirectories(items, createdDirs, parentPath);
+                ArchiveUtils.autoCreateDirectories(items, createdDirs, parentPath, snapshotId);
 
                 SavingItem item = SavingItem.builder()
                         .snapshotId(snapshotId)
@@ -162,7 +183,7 @@ public class SevenZExtractor {
                         .build();
                 items.add(item);
 
-                // README 检测
+                // ── README 检测 ──
                 if (entryName.equalsIgnoreCase("README.md") || entryName.equalsIgnoreCase("readme.txt")) {
                     readmeContents.add(new String(entryData, java.nio.charset.StandardCharsets.UTF_8));
                 }
@@ -173,7 +194,7 @@ public class SevenZExtractor {
             throw new MagicNumberViolationException("检测到伪装文件: " + String.join(", ", violations));
         }
 
-        // Count totals
+        // 统计文件数量和总大小
         for (SavingItem item : items) {
             if (!item.getIsDirectory()) {
                 fileCount++;
@@ -181,7 +202,7 @@ public class SevenZExtractor {
             }
         }
 
-        String manifestHash = computeManifestHash(items);
+        String manifestHash = ArchiveUtils.computeManifestHash(items);
 
         log.info("7z extraction complete: {} files, {} bytes", fileCount, totalSize);
         return ArchiveExtractionResult.ExtractionResult.builder()
@@ -195,6 +216,10 @@ public class SevenZExtractor {
                 .build();
     }
 
+    /**
+     * 从 7z 流中顺序读取当前条目内容到内存。
+     * 7z 格式不支持随机访问，必须逐字节读取直到当前条目结束。
+     */
     private byte[] readEntry(SevenZFile sevenZFile, int size) throws IOException {
         ByteArrayOutputStream baos = new ByteArrayOutputStream(size > 0 ? size : 8192);
         byte[] buf = new byte[BUFFER_SIZE];
@@ -203,83 +228,5 @@ public class SevenZExtractor {
             baos.write(buf, 0, len);
         }
         return baos.toByteArray();
-    }
-
-    // ── 共享工具方法（与 ZipExtractor 保持一致） ──
-
-    private void autoCreateDirectories(List<SavingItem> items, Set<String> createdDirs, String parentPath) {
-        if (parentPath == null || parentPath.isEmpty()) return;
-        String[] parts = parentPath.split("/");
-        StringBuilder cumulative = new StringBuilder();
-        for (String part : parts) {
-            if (part.isEmpty()) continue;
-            cumulative.append(part).append("/");
-            String dirPath = cumulative.toString();
-            if (createdDirs.add(dirPath)) {
-                String dirParent = PathTraversalValidator.computeParentPath(
-                        dirPath.endsWith("/") ? dirPath.substring(0, dirPath.length() - 1) : dirPath);
-                items.add(SavingItem.builder()
-                        .snapshotId(snapshotId).virtualPath(dirPath).physicalKey("")
-                        .parentPath(dirParent).isDirectory(true).fileSize(0L)
-                        .md5Hash("").isText(false).build());
-            }
-        }
-    }
-
-    private String computeManifestHash(List<SavingItem> items) {
-        try {
-            MessageDigest md = MessageDigest.getInstance("MD5");
-            items.stream()
-                    .filter(i -> !i.getIsDirectory())
-                    .sorted(Comparator.comparing(SavingItem::getVirtualPath))
-                    .forEach(i -> md.update(i.getMd5Hash().getBytes()));
-            return bytesToHex(md.digest());
-        } catch (java.security.NoSuchAlgorithmException e) {
-            return "";
-        }
-    }
-
-    static String getExtension(String filename) {
-        String clean = filename.trim();
-        int dot = clean.lastIndexOf('.');
-        if (dot < 0) return "";
-        return clean.substring(dot + 1).toLowerCase();
-    }
-
-    static boolean isTextFile(String filename, byte[] content) {
-        String ext = getExtension(filename);
-        Set<String> textExts = Set.of(
-                "txt", "md", "json", "xml", "yml", "yaml", "toml", "ini",
-                "cfg", "conf", "log", "csv", "properties", "html", "css",
-                "js", "ts", "java", "py", "sh", "bat", "sql", "dat",
-                "nbt", "mcmeta", "mf", "lang", "info", "lock", "ojng");
-        if (textExts.contains(ext)) return true;
-        if (content.length > 0 && content.length < 5 * 1024 * 1024) {
-            try {
-                String s = new String(content, java.nio.charset.StandardCharsets.UTF_8);
-                int printable = 0, total = s.length();
-                for (int i = 0; i < total; i++) {
-                    char c = s.charAt(i);
-                    if (c >= 0x20 && c <= 0x7E || c == '\n' || c == '\r' || c == '\t' || c > 0x7F) printable++;
-                }
-                return (double) printable / total > 0.80;
-            } catch (Exception e) { return false; }
-        }
-        return false;
-    }
-
-    static String computeMd5(byte[] data) {
-        try {
-            MessageDigest md5 = MessageDigest.getInstance("MD5");
-            return bytesToHex(md5.digest(data));
-        } catch (java.security.NoSuchAlgorithmException e) {
-            throw new FileProcessingException("MD5 not available", e);
-        }
-    }
-
-    static String bytesToHex(byte[] bytes) {
-        StringBuilder sb = new StringBuilder(bytes.length * 2);
-        for (byte b : bytes) sb.append(String.format("%02x", b));
-        return sb.toString();
     }
 }

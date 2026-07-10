@@ -27,6 +27,11 @@ class ZipExtractorTest {
     @TempDir
     Path tempDir;
 
+    // 测试用提取限制（与 application.yaml 默认值一致）
+    private static final long TEST_MAX_ENTRY_SIZE = 100 * 1024 * 1024;
+    private static final long TEST_MAX_TOTAL_UNCOMPRESSED = 500 * 1024 * 1024;
+    private static final int TEST_MAX_ENTRY_COUNT = 10_000;
+
     private final Random rng = new Random(42); // 固定种子，可复现
 
     @BeforeEach
@@ -92,7 +97,7 @@ class ZipExtractorTest {
     void extract_normalSmallZip_succeeds() throws IOException {
         Path zip = createZipWith(10, 1024);
         Path extractRoot = tempDir.resolve("extracted");
-        ZipExtractor extractor = new ZipExtractor(zip, extractRoot, 1L, magicValidator);
+        ZipExtractor extractor = new ZipExtractor(zip, extractRoot, 1L, magicValidator, TEST_MAX_ENTRY_SIZE, TEST_MAX_TOTAL_UNCOMPRESSED, TEST_MAX_ENTRY_COUNT);
 
         ArchiveExtractionResult.ExtractionResult result = extractor.extract();
         assertNotNull(result);
@@ -107,7 +112,7 @@ class ZipExtractorTest {
             // 空 ZIP
         }
         Path extractRoot = tempDir.resolve("extracted");
-        ZipExtractor extractor = new ZipExtractor(zipPath, extractRoot, 1L, magicValidator);
+        ZipExtractor extractor = new ZipExtractor(zipPath, extractRoot, 1L, magicValidator, TEST_MAX_ENTRY_SIZE, TEST_MAX_TOTAL_UNCOMPRESSED, TEST_MAX_ENTRY_COUNT);
 
         ArchiveExtractionResult.ExtractionResult result = extractor.extract();
         assertEquals(0, result.getFileCount());
@@ -119,7 +124,7 @@ class ZipExtractorTest {
     void extract_fiftyEntries_succeeds() throws IOException {
         Path zip = createZipWith(50, 100);
         Path extractRoot = tempDir.resolve("extracted");
-        ZipExtractor extractor = new ZipExtractor(zip, extractRoot, 1L, magicValidator);
+        ZipExtractor extractor = new ZipExtractor(zip, extractRoot, 1L, magicValidator, TEST_MAX_ENTRY_SIZE, TEST_MAX_TOTAL_UNCOMPRESSED, TEST_MAX_ENTRY_COUNT);
 
         ArchiveExtractionResult.ExtractionResult result = extractor.extract();
         assertEquals(50, result.getFileCount());
@@ -146,7 +151,7 @@ class ZipExtractorTest {
             zos.closeEntry();
         }
         Path extractRoot = tempDir.resolve("extracted");
-        ZipExtractor extractor = new ZipExtractor(zipPath, extractRoot, 1L, magicValidator);
+        ZipExtractor extractor = new ZipExtractor(zipPath, extractRoot, 1L, magicValidator, TEST_MAX_ENTRY_SIZE, TEST_MAX_TOTAL_UNCOMPRESSED, TEST_MAX_ENTRY_COUNT);
 
         ArchiveExtractionResult.ExtractionResult result = extractor.extract();
         assertTrue(result.getFileCount() >= 1, "目录条目应被跳过，文件条目保留");
@@ -158,7 +163,7 @@ class ZipExtractorTest {
     void extract_entryWithPathTraversal_skipped() throws IOException {
         Path zip = createZipWithCustomEntry("../etc/passwd", "malicious".getBytes());
         Path extractRoot = tempDir.resolve("extracted");
-        ZipExtractor extractor = new ZipExtractor(zip, extractRoot, 1L, magicValidator);
+        ZipExtractor extractor = new ZipExtractor(zip, extractRoot, 1L, magicValidator, TEST_MAX_ENTRY_SIZE, TEST_MAX_TOTAL_UNCOMPRESSED, TEST_MAX_ENTRY_COUNT);
 
         ArchiveExtractionResult.ExtractionResult result = extractor.extract();
         assertEquals(0, result.getFileCount(),
@@ -169,7 +174,7 @@ class ZipExtractorTest {
     void extract_entryWithAbsolutePath_skipped() throws IOException {
         Path zip = createZipWithCustomEntry("C:\\Windows\\System32\\evil.dll", "data".getBytes());
         Path extractRoot = tempDir.resolve("extracted");
-        ZipExtractor extractor = new ZipExtractor(zip, extractRoot, 1L, magicValidator);
+        ZipExtractor extractor = new ZipExtractor(zip, extractRoot, 1L, magicValidator, TEST_MAX_ENTRY_SIZE, TEST_MAX_TOTAL_UNCOMPRESSED, TEST_MAX_ENTRY_COUNT);
 
         ArchiveExtractionResult.ExtractionResult result = extractor.extract();
         assertEquals(0, result.getFileCount(),
@@ -186,7 +191,7 @@ class ZipExtractorTest {
         // 超大条目的逻辑已验证（常量存在 + 逻辑正确），编译时保证
         Path zip = createZipWithStoredEntry("normal_file.dat", smallData);
         Path extractRoot = tempDir.resolve("extracted");
-        ZipExtractor extractor = new ZipExtractor(zip, extractRoot, 1L, magicValidator);
+        ZipExtractor extractor = new ZipExtractor(zip, extractRoot, 1L, magicValidator, TEST_MAX_ENTRY_SIZE, TEST_MAX_TOTAL_UNCOMPRESSED, TEST_MAX_ENTRY_COUNT);
 
         ArchiveExtractionResult.ExtractionResult result = extractor.extract();
         assertEquals(1, result.getFileCount(),
@@ -203,7 +208,7 @@ class ZipExtractorTest {
         for (int i = 0; i < highlyCompressible.length; i++) highlyCompressible[i] = 'A';
         Path zip = createZipWithCustomEntry("all_a.txt", highlyCompressible);
         Path extractRoot = tempDir.resolve("extracted");
-        ZipExtractor extractor = new ZipExtractor(zip, extractRoot, 1L, magicValidator);
+        ZipExtractor extractor = new ZipExtractor(zip, extractRoot, 1L, magicValidator, TEST_MAX_ENTRY_SIZE, TEST_MAX_TOTAL_UNCOMPRESSED, TEST_MAX_ENTRY_COUNT);
 
         // 不应抛异常 — 50KB 在 10MB 阈值以下
         ArchiveExtractionResult.ExtractionResult result = extractor.extract();
@@ -218,7 +223,7 @@ class ZipExtractorTest {
         // 创建 1MB ZIP（随机数据），验证正常提取 + SHA-256 hash
         Path zip = createZipWith(100, 10240); // 100 files × 10KB ≈ 1MB
         Path extractRoot = tempDir.resolve("extracted");
-        ZipExtractor extractor = new ZipExtractor(zip, extractRoot, 1L, magicValidator);
+        ZipExtractor extractor = new ZipExtractor(zip, extractRoot, 1L, magicValidator, TEST_MAX_ENTRY_SIZE, TEST_MAX_TOTAL_UNCOMPRESSED, TEST_MAX_ENTRY_COUNT);
 
         ArchiveExtractionResult.ExtractionResult result = extractor.extract();
         assertNotNull(result.getZipHash());
@@ -235,7 +240,7 @@ class ZipExtractorTest {
         rng.nextBytes(data);
         Path zip = createZipWithStoredEntry("large_region_file.mca", data);
         Path extractRoot = tempDir.resolve("extracted");
-        ZipExtractor extractor = new ZipExtractor(zip, extractRoot, 1L, magicValidator);
+        ZipExtractor extractor = new ZipExtractor(zip, extractRoot, 1L, magicValidator, TEST_MAX_ENTRY_SIZE, TEST_MAX_TOTAL_UNCOMPRESSED, TEST_MAX_ENTRY_COUNT);
 
         ArchiveExtractionResult.ExtractionResult result = extractor.extract();
         assertEquals(1, result.getFileCount(),

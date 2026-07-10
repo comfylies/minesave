@@ -4,8 +4,6 @@ import com.gamesaves.gamesaves.entity.SavingItem;
 import com.gamesaves.gamesaves.exception.FileProcessingException;
 import com.gamesaves.gamesaves.exception.MagicNumberViolationException;
 import com.gamesaves.gamesaves.exception.PathTraversalException;
-import lombok.Builder;
-import lombok.Data;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -21,8 +19,9 @@ import org.apache.commons.compress.archivers.zip.ZipArchiveEntry;
 import org.apache.commons.compress.archivers.zip.ZipFile;
 
 /**
- * Extracts ZIP archives using content-addressable storage ({md5}.{ext} naming).
- * Handles path traversal prevention, directory node auto-creation, and parent_path backfill.
+ * ZIP 格式提取器 — 使用 content-addressable storage ({md5}.{ext} 命名)。
+ * 支持路径穿越防护、目录节点自动创建、parent_path 回填。
+ * 工具方法统一使用 {@link ArchiveUtils}。
  */
 public class ZipExtractor {
 
@@ -30,34 +29,52 @@ public class ZipExtractor {
 
     private static final int BUFFER_SIZE = 8192;
 
-    // ZIP bomb protection limits
-    private static final long MAX_ENTRY_SIZE = 100 * 1024 * 1024;             // 单条目解压后上限 100MB
-    private static final long MAX_TOTAL_UNCOMPRESSED_SIZE = 500 * 1024 * 1024; // 总解压后上限 500MB
-    private static final int MAX_ENTRY_COUNT = 10_000;                        // 最多 10000 个条目
-    private static final long SUSPICIOUS_COMPRESSED_SIZE = 100;               // 压缩后不足 100B 但解压巨大 → 炸弹特征
-    private static final long MIN_BOMB_UNCOMPRESSED_SIZE = 10 * 1024 * 1024;  // 解压后至少 10MB 才考虑炸弹
+    // 提取限制（由调用方从配置文件注入，确保与预检阶段一致）
+    private final long maxEntrySize;
+    private final long maxTotalUncompressedSize;
+    private final int maxEntryCount;
 
-    // Memory buffer threshold: entries ≤ this size read into memory; larger entries stream to temp file
-    private static final long MEMORY_BUFFER_THRESHOLD = 10 * 1024 * 1024;     // 10 MB
+    // ZIP 炸弹检测阈值（压缩后极小但解压后巨大 → 典型炸弹特征）
+    private static final long SUSPICIOUS_COMPRESSED_SIZE = 100;
+    private static final long MIN_BOMB_UNCOMPRESSED_SIZE = 10 * 1024 * 1024;
+
+    // 内存缓冲阈值：≤10MB 直接读内存，>10MB 流式写入临时文件
+    private static final long MEMORY_BUFFER_THRESHOLD = 10 * 1024 * 1024;
 
     private final Path zipPath;
     private final Path extractRoot;
     private final Long snapshotId;
     private final MagicNumberValidator magicNumberValidator;
 
+    /**
+     * @param zipPath                   ZIP 文件本地路径
+     * @param extractRoot               提取目标目录
+     * @param snapshotId                快照 ID
+     * @param magicNumberValidator      魔数校验器
+     * @param maxEntrySize              单条目解压后最大字节数
+     * @param maxTotalUncompressedSize  总解压后最大字节数
+     * @param maxEntryCount             最大条目数
+     */
     public ZipExtractor(Path zipPath, Path extractRoot, Long snapshotId,
-                        MagicNumberValidator magicNumberValidator) {
+                        MagicNumberValidator magicNumberValidator,
+                        long maxEntrySize, long maxTotalUncompressedSize, int maxEntryCount) {
         this.zipPath = zipPath;
         this.extractRoot = extractRoot;
         this.snapshotId = snapshotId;
         this.magicNumberValidator = magicNumberValidator;
+        this.maxEntrySize = maxEntrySize;
+        this.maxTotalUncompressedSize = maxTotalUncompressedSize;
+        this.maxEntryCount = maxEntryCount;
     }
 
+    /**
+     * 执行 ZIP 提取，返回统一的 {@link ArchiveExtractionResult.ExtractionResult}。
+     * 支持多 charset 回退（UTF-8 → GBK → 系统默认），处理中文 Windows 编码问题。
+     */
     public ArchiveExtractionResult.ExtractionResult extract() throws IOException {
-        // Ensure extract directory exists
         Files.createDirectories(extractRoot);
 
-        // Compute ZIP SHA-256 hash (streaming — avoids loading entire ZIP into memory)
+        // 计算 ZIP SHA-256 哈希（流式计算，避免整文件加载到内存）
         String zipHash;
         try {
             MessageDigest sha256Digest = MessageDigest.getInstance("SHA-256");
@@ -68,15 +85,13 @@ public class ZipExtractor {
                     sha256Digest.update(buffer, 0, len);
                 }
             }
-            zipHash = bytesToHex(sha256Digest.digest());
+            zipHash = ArchiveUtils.bytesToHex(sha256Digest.digest());
         } catch (java.security.NoSuchAlgorithmException e) {
             throw new FileProcessingException("SHA-256 not available", e);
         }
 
-        // Open ZIP with charset detection (uses Commons Compress for lenient parsing):
-        //  1) Try UTF-8 (standard ZIP encoding)
-        //  2) Fall back to GBK (common on Chinese Windows)
-        //  3) Fall back to default charset
+        // 多 charset 回退提取：UTF-8 → GBK → 系统默认
+        // Commons Compress ZipFile 比 JDK ZipFile 对非标准 ZIP 更宽容
         List<SavingItem> items = new ArrayList<>();
         Set<String> createdDirs = new HashSet<>();
         int fileCount = 0;
@@ -90,15 +105,12 @@ public class ZipExtractor {
 
         for (String cs : charsets) {
             if (extracted) break;
-            // Avoid duplicate: skip if default is already UTF-8 or GBK
-            if (charsets[0].equals(charsets[1]) && cs.equals(charsets[0]) && cs.equals(charsets[2]))
-                continue; // shouldn't happen
             try {
                 processZipEntries(zipPath, items, createdDirs, readmeContents, readmeImages, cs);
                 log.info("Extracted ZIP with {} charset, {} items", cs, items.size());
                 extracted = true;
             } catch (MagicNumberViolationException e) {
-                // Magic number violations are charset-independent — do NOT retry
+                // 魔数违规与 charset 无关，不重试
                 items.clear();
                 createdDirs.clear();
                 readmeContents.clear();
@@ -118,7 +130,8 @@ public class ZipExtractor {
             throw new FileProcessingException(
                     "Failed to extract ZIP with any charset: UTF-8, GBK, default", lastError);
         }
-        // Count totals from processed items
+
+        // 统计文件数量和总大小
         for (SavingItem item : items) {
             if (!item.getIsDirectory()) {
                 fileCount++;
@@ -126,8 +139,7 @@ public class ZipExtractor {
             }
         }
 
-        // Compute file manifest hash
-        String fileManifestHash = computeManifestHash(items);
+        String fileManifestHash = ArchiveUtils.computeManifestHash(items);
 
         return ArchiveExtractionResult.ExtractionResult.builder()
                 .items(items)
@@ -141,9 +153,8 @@ public class ZipExtractor {
     }
 
     /**
-     * Process all entries in a ZIP file using the given charset for filenames.
-     * Uses Apache Commons Compress ZipFile which is more lenient than JDK ZipFile
-     * with non-standard ZIP files (e.g., Chinese Windows GBK-encoded filenames).
+     * 使用指定 charset 处理 ZIP 中所有条目。
+     * 通过 Apache Commons Compress ZipFile（比 JDK ZipFile 对 GBK 编码更宽容）。
      */
     private void processZipEntries(Path zipPath, List<SavingItem> items,
                                     Set<String> createdDirs, List<String> readmeContents,
@@ -159,26 +170,24 @@ public class ZipExtractor {
             Enumeration<ZipArchiveEntry> entries = zipFile.getEntries();
             while (entries.hasMoreElements()) {
                 ZipArchiveEntry entry = entries.nextElement();
-                String entryName = entry.getName().trim(); // strip \r etc. from cross-platform ZIPs
+                String entryName = entry.getName().trim();
 
-                // ── Security: entry count limit ──
-                if (items.size() >= MAX_ENTRY_COUNT) {
+                // ── 条目数限制 ──
+                if (items.size() >= maxEntryCount) {
                     throw new FileProcessingException(
-                            "ZIP contains too many entries (max " + MAX_ENTRY_COUNT + ")");
+                            "ZIP contains too many entries (max " + maxEntryCount + ")");
                 }
 
-                // Skip directories
-                if (entry.isDirectory()) {
-                    continue;
-                }
+                // 跳过目录条目
+                if (entry.isDirectory()) continue;
 
-                // ── Security: symlink detection ──
+                // ── 符号链接检测 ──
                 if (entry.isUnixSymlink()) {
                     log.warn("Skipping symlink entry: {}", entryName);
                     continue;
                 }
 
-                // Security: path traversal check
+                // ── 路径穿越检测 ──
                 try {
                     PathTraversalValidator.validate(entryName);
                 } catch (PathTraversalException e) {
@@ -186,38 +195,38 @@ public class ZipExtractor {
                     continue;
                 }
 
-                // ── Security: per-entry size & compression ratio check ──
+                // ── 单条目大小 & 压缩比炸弹检测 ──
                 long uncompressedSize = entry.getSize();
                 long compressedSize = entry.getCompressedSize();
-                if (uncompressedSize > MAX_ENTRY_SIZE) {
+                if (uncompressedSize > maxEntrySize) {
                     log.warn("Skipping oversized entry ({} bytes): {}", uncompressedSize, entryName);
                     continue;
                 }
-                // 压缩比炸弹检测：压缩后极小（<100B）但解压后 >10MB → 典型炸弹特征
+                // 压缩比炸弹：压缩后极小 (<100B) 但解压后 >10MB → 典型炸弹特征
                 if (compressedSize > 0 && compressedSize < SUSPICIOUS_COMPRESSED_SIZE
                         && uncompressedSize > MIN_BOMB_UNCOMPRESSED_SIZE) {
                     throw new FileProcessingException(
                             "Suspicious compression ratio in entry: " + entryName);
                 }
 
-                // ── Security: cumulative size check ──
+                // ── 累计解压大小检查 ──
                 if (uncompressedSize > 0) {
                     totalUncompressedSize += uncompressedSize;
-                    if (totalUncompressedSize > MAX_TOTAL_UNCOMPRESSED_SIZE) {
+                    if (totalUncompressedSize > maxTotalUncompressedSize) {
                         throw new FileProcessingException(
                                 "ZIP total uncompressed size exceeds limit ("
-                                        + MAX_TOTAL_UNCOMPRESSED_SIZE / (1024 * 1024) + "MB)");
+                                        + maxTotalUncompressedSize / (1024 * 1024) + "MB)");
                     }
                 }
 
-                // ── Read entry content (size-branched: small → memory, large → temp file) ──
+                // ── 读取条目内容（大小分支：≤10MB 内存，>10MB 临时文件）──
                 final byte[] entryData;
                 final String md5Hash;
                 final Path tempFile;
                 final long entrySize;
 
                 if (uncompressedSize > 0 && uncompressedSize <= MEMORY_BUFFER_THRESHOLD) {
-                    // Small file: read into memory (existing fast path)
+                    // 小文件：直接读入内存
                     tempFile = null;
                     try (InputStream is = zipFile.getInputStream(entry);
                          ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
@@ -229,15 +238,9 @@ public class ZipExtractor {
                         entryData = baos.toByteArray();
                     }
                     entrySize = entryData.length;
-                    // MD5 hash (in-memory)
-                    try {
-                        MessageDigest md5Digest = MessageDigest.getInstance("MD5");
-                        md5Hash = bytesToHex(md5Digest.digest(entryData));
-                    } catch (java.security.NoSuchAlgorithmException e) {
-                        throw new FileProcessingException("MD5 not available", e);
-                    }
+                    md5Hash = ArchiveUtils.computeMd5(entryData);
                 } else {
-                    // Large file (or unknown size): stream to temp file, compute MD5 on the fly
+                    // 大文件（或未知大小）：流式写入临时文件，同时计算 MD5
                     entryData = null;
                     tempFile = Files.createTempFile(extractRoot, "zip-extract-", ".tmp");
                     MessageDigest md5Digest;
@@ -259,16 +262,16 @@ public class ZipExtractor {
                         Files.deleteIfExists(tempFile);
                         throw e;
                     }
-                    md5Hash = bytesToHex(md5Digest.digest());
+                    md5Hash = ArchiveUtils.bytesToHex(md5Digest.digest());
                     entrySize = Files.size(tempFile);
                 }
 
-                // ── Magic number validation — detect disguised executables ──
+                // ── Magic number 校验（检测伪装可执行文件）──
                 String magicViolation;
                 if (entryData != null) {
                     magicViolation = magicNumberValidator.check(entryData, entryName);
                 } else {
-                    // Read just the first 4 bytes from temp file (all magic signatures fit in 4 bytes)
+                    // 从临时文件读前 4 字节（所有魔数签名都在 4 字节内）
                     byte[] header = new byte[4];
                     try (InputStream is = Files.newInputStream(tempFile)) {
                         int total = 0;
@@ -277,7 +280,7 @@ public class ZipExtractor {
                             if (n < 0) break;
                             total += n;
                         }
-                        if (total < 2) header = new byte[0]; // too small to contain magic
+                        if (total < 2) header = new byte[0];
                     }
                     magicViolation = magicNumberValidator.check(header, entryName);
                 }
@@ -285,13 +288,13 @@ public class ZipExtractor {
                     violations.add(magicViolation);
                     log.warn("Magic number violation: {}", magicViolation);
                     if (tempFile != null) Files.deleteIfExists(tempFile);
-                    continue;   // skip this entry, keep collecting violations
+                    continue;
                 }
 
-                // ── Handle README images (small files only) ──
+                // ── README images 处理（images/ 目录下小文件不存入 saving_items）──
                 String lowerEntry = entryName.toLowerCase();
                 if (lowerEntry.startsWith("images/")) {
-                    if (entryData != null && !entryDataIsLarge(entryData)) {
+                    if (entryData != null && entryData.length <= 10 * 1024 * 1024) {
                         String relativePath = entryName.substring("images/".length());
                         if (!relativePath.isEmpty()) {
                             readmeImages.add(ArchiveExtractionResult.ReadmeImageEntry.builder()
@@ -301,13 +304,13 @@ public class ZipExtractor {
                         }
                     }
                     if (tempFile != null) Files.deleteIfExists(tempFile);
-                    continue; // 图片不存入 saving_items，跳过 content-addressed 存储
+                    continue;
                 }
 
-                String fileType = getExtension(entryName);
+                // ── Content-addressable 存储（去重）──
+                String fileType = ArchiveUtils.getExtension(entryName);
                 String physicalKey = md5Hash + "." + fileType;
 
-                // ── Write to content-addressable storage (deduplicate) ──
                 Path physicalPath = extractRoot.resolve(physicalKey);
                 if (!Files.exists(physicalPath)) {
                     if (entryData != null) {
@@ -319,12 +322,12 @@ public class ZipExtractor {
                     log.debug("Dedup: file {} already exists as {}", entryName, physicalKey);
                 }
 
-                // ── Determine if text-previewable ──
+                // ── 文本可预览性判断 ──
                 boolean isText;
                 if (entryData != null) {
-                    isText = isTextFile(entryName, entryData);
+                    isText = ArchiveUtils.isTextFile(entryName, entryData);
                 } else {
-                    // For large files, read first 5MB for text detection
+                    // 大文件：读前 5MB 用于文本检测
                     long previewLen = Math.min(entrySize, 5 * 1024 * 1024);
                     byte[] preview = new byte[(int) previewLen];
                     try (InputStream is = Files.newInputStream(tempFile)) {
@@ -335,22 +338,22 @@ public class ZipExtractor {
                             total += n;
                         }
                         if (total < preview.length) {
-                            preview = java.util.Arrays.copyOf(preview, total);
+                            preview = Arrays.copyOf(preview, total);
                         }
                     }
-                    isText = isTextFile(entryName, preview);
+                    isText = ArchiveUtils.isTextFile(entryName, preview);
                 }
 
-                // ── Clean up temp file ──
+                // 清理临时文件
                 if (tempFile != null) {
                     try { Files.deleteIfExists(tempFile); } catch (IOException ignored) {}
                 }
 
-                // Auto-create directory nodes for all parent paths
+                // ── 自动创建父目录节点（GitHub 风格文件浏览）──
                 String parentPath = PathTraversalValidator.computeParentPath(entryName);
-                autoCreateDirectories(items, createdDirs, parentPath);
+                ArchiveUtils.autoCreateDirectories(items, createdDirs, parentPath, snapshotId);
 
-                // Create file entry
+                // 创建文件条目
                 SavingItem item = SavingItem.builder()
                         .snapshotId(snapshotId)
                         .virtualPath(entryName)
@@ -364,121 +367,18 @@ public class ZipExtractor {
                         .build();
                 items.add(item);
 
-                // Check for README files
+                // ── README 文件检测 ──
                 if (entryName.equalsIgnoreCase("README.md")
                         || entryName.equalsIgnoreCase("readme.txt")) {
                     readmeContents.add(new String(entryData, StandardCharsets.UTF_8));
                 }
             }
 
-            // If any disguised executables were found, reject the entire archive
+            // 存在任何伪装文件 → 拒绝整个压缩包
             if (!violations.isEmpty()) {
                 String message = "检测到伪装文件: " + String.join(", ", violations);
                 throw new MagicNumberViolationException(message);
             }
         }
     }
-
-    /**
-     * Auto-create directory node entries for GitHub-style browsing.
-     * E.g., for parentPath="DIM-1/data/", create "DIM-1/" and "DIM-1/data/" if not exists.
-     */
-    private void autoCreateDirectories(List<SavingItem> items, Set<String> createdDirs, String parentPath) {
-        if (parentPath == null || parentPath.isEmpty()) {
-            return;
-        }
-
-        // Split parent path into segments and create nodes
-        String[] parts = parentPath.split("/");
-        StringBuilder cumulative = new StringBuilder();
-        for (String part : parts) {
-            if (part.isEmpty()) continue;
-            cumulative.append(part).append("/");
-            String dirPath = cumulative.toString();
-            if (createdDirs.add(dirPath)) {
-                String dirParentPath = PathTraversalValidator.computeParentPath(
-                        dirPath.endsWith("/") ? dirPath.substring(0, dirPath.length() - 1) : dirPath);
-                SavingItem dirItem = SavingItem.builder()
-                        .snapshotId(snapshotId)
-                        .virtualPath(dirPath)
-                        .physicalKey("")
-                        .parentPath(dirParentPath)
-                        .isDirectory(true)
-                        .fileSize(0L)
-                        .md5Hash("")
-                        .isText(false)
-                        .build();
-                items.add(dirItem);
-            }
-        }
-    }
-
-    private String computeManifestHash(List<SavingItem> items) {
-        try {
-            MessageDigest md = MessageDigest.getInstance("MD5");
-            items.stream()
-                    .filter(i -> !i.getIsDirectory())
-                    .sorted(Comparator.comparing(SavingItem::getVirtualPath))
-                    .forEach(i -> md.update(i.getMd5Hash().getBytes()));
-            return bytesToHex(md.digest());
-        } catch (java.security.NoSuchAlgorithmException e) {
-            return "";
-        }
-    }
-
-    private static String getExtension(String filename) {
-        // Strip trailing whitespace/control chars (e.g. \r from cross-platform ZIPs)
-        String clean = filename.trim();
-        int dot = clean.lastIndexOf('.');
-        if (dot < 0) return "";
-        return clean.substring(dot + 1).toLowerCase();
-    }
-
-    private static boolean isTextFile(String filename, byte[] content) {
-        String ext = getExtension(filename).toLowerCase();
-        // Known text extensions (expanded for testing)
-        Set<String> textExts = Set.of(
-                "txt", "md", "json", "xml", "yml", "yaml", "toml", "ini",
-                "cfg", "conf", "log", "csv", "properties", "html", "css",
-                "js", "ts", "java", "py", "sh", "bat", "sql", "dat",
-                "nbt", "mcmeta", "mf", "lang", "info", "lock", "ojng"
-        );
-        if (textExts.contains(ext)) {
-            return true;
-        }
-        // Heuristic: for files under 5MB, detect if content is mostly text
-        // (relaxed threshold for testing phase)
-        if (content.length > 0 && content.length < 5 * 1024 * 1024) {
-            try {
-                String s = new String(content, java.nio.charset.StandardCharsets.UTF_8);
-                int printable = 0;
-                int total = s.length();
-                for (int i = 0; i < total; i++) {
-                    char c = s.charAt(i);
-                    if (c >= 0x20 && c <= 0x7E || c == '\n' || c == '\r' || c == '\t' || c > 0x7F) {
-                        printable++;
-                    }
-                }
-                // Relaxed: 80% printable = likely text
-                return (double) printable / total > 0.80;
-            } catch (Exception e) {
-                return false;
-            }
-        }
-        return false;
-    }
-
-    /** 判断文件是否过大（>10MB，避免大文件存入 readme/images/） */
-    private static boolean entryDataIsLarge(byte[] data) {
-        return data.length > 10 * 1024 * 1024;
-    }
-
-    private static String bytesToHex(byte[] bytes) {
-        StringBuilder sb = new StringBuilder(bytes.length * 2);
-        for (byte b : bytes) {
-            sb.append(String.format("%02x", b));
-        }
-        return sb.toString();
-    }
-
 }

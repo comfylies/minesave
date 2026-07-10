@@ -20,6 +20,7 @@ import java.util.*;
  *
  * <p>TAR 无法随机访问条目，必须从头到尾顺序读取。
  * 安全策略和 content-addressable 存储逻辑与其他提取器一致。
+ * 工具方法统一使用 {@link ArchiveUtils}，不再依赖 {@link SevenZExtractor}。
  */
 public class TarArchiveExtractor {
 
@@ -27,10 +28,11 @@ public class TarArchiveExtractor {
 
     private static final int BUFFER_SIZE = 8192;
 
-    private static final long MAX_ENTRY_SIZE = 100 * 1024 * 1024;
-    private static final long MAX_TOTAL_UNCOMPRESSED_SIZE = 500 * 1024 * 1024;
-    private static final int MAX_ENTRY_COUNT = 10_000;
-    private static final long MEMORY_BUFFER_THRESHOLD = 10 * 1024 * 1024;
+    // 提取限制（由调用方从配置文件注入，确保与预检阶段一致）
+    private final long maxEntrySize;
+    private final long maxTotalUncompressedSize;
+    private final int maxEntryCount;
+    private static final long MEMORY_BUFFER_THRESHOLD = 10 * 1024 * 1024; // 10 MB
 
     private final Path archivePath;
     private final Path extractRoot;
@@ -38,8 +40,19 @@ public class TarArchiveExtractor {
     private final ArchiveFormat format;
     private final MagicNumberValidator magicNumberValidator;
 
+    /**
+     * @param archivePath              压缩包本地路径
+     * @param extractRoot              提取目标目录
+     * @param snapshotId               快照 ID
+     * @param format                   格式（TAR 或 TAR_GZ）
+     * @param magicNumberValidator     魔数校验器
+     * @param maxEntrySize             单条目解压后最大字节数
+     * @param maxTotalUncompressedSize 总解压后最大字节数
+     * @param maxEntryCount            最大条目数
+     */
     public TarArchiveExtractor(Path archivePath, Path extractRoot, Long snapshotId,
-                               ArchiveFormat format, MagicNumberValidator magicNumberValidator) {
+                               ArchiveFormat format, MagicNumberValidator magicNumberValidator,
+                               long maxEntrySize, long maxTotalUncompressedSize, int maxEntryCount) {
         if (format != ArchiveFormat.TAR_GZ && format != ArchiveFormat.TAR) {
             throw new IllegalArgumentException("TarArchiveExtractor only supports TAR and TAR_GZ, got: " + format);
         }
@@ -48,12 +61,19 @@ public class TarArchiveExtractor {
         this.snapshotId = snapshotId;
         this.format = format;
         this.magicNumberValidator = magicNumberValidator;
+        this.maxEntrySize = maxEntrySize;
+        this.maxTotalUncompressedSize = maxTotalUncompressedSize;
+        this.maxEntryCount = maxEntryCount;
     }
 
+    /**
+     * 执行 TAR/TAR.GZ 提取，返回统一的 {@link ArchiveExtractionResult.ExtractionResult}。
+     * TAR 流式读取，无随机访问能力，大文件通过临时文件中转。
+     */
     public ArchiveExtractionResult.ExtractionResult extract() throws IOException {
         Files.createDirectories(extractRoot);
 
-        // Archive hash (SHA-256 of the raw file)
+        // 计算压缩包 SHA-256 哈希
         String archiveHash;
         try {
             MessageDigest sha256 = MessageDigest.getInstance("SHA-256");
@@ -62,7 +82,7 @@ public class TarArchiveExtractor {
                 int len;
                 while ((len = fis.read(buf)) != -1) sha256.update(buf, 0, len);
             }
-            archiveHash = SevenZExtractor.bytesToHex(sha256.digest());
+            archiveHash = ArchiveUtils.bytesToHex(sha256.digest());
         } catch (java.security.NoSuchAlgorithmException e) {
             throw new FileProcessingException("SHA-256 not available", e);
         }
@@ -76,7 +96,7 @@ public class TarArchiveExtractor {
         List<String> violations = new ArrayList<>();
         long totalUncompressed = 0;
 
-        // Build the input stream chain
+        // 构建输入流链：raw → buffered → [optional GZIP decompress] → TAR parser
         try (InputStream rawIn = Files.newInputStream(archivePath);
              InputStream bufIn = new BufferedInputStream(rawIn, BUFFER_SIZE);
              InputStream decompIn = wrapDecompressor(bufIn);
@@ -84,12 +104,14 @@ public class TarArchiveExtractor {
 
             TarArchiveEntry entry;
             while ((entry = tarIn.getNextEntry()) != null) {
-                if (items.size() >= MAX_ENTRY_COUNT) {
+                // ── 条目数限制 ──
+                if (items.size() >= maxEntryCount) {
                     throw new FileProcessingException(
-                            "Archive contains too many entries (max " + MAX_ENTRY_COUNT + ")");
+                            "Archive contains too many entries (max " + maxEntryCount + ")");
                 }
 
                 if (entry.isDirectory()) continue;
+                // ── 符号链接/硬链接跳过 ──
                 if (entry.isSymbolicLink() || entry.isLink()) {
                     log.warn("Skipping link entry: {}", entry.getName());
                     continue;
@@ -97,7 +119,7 @@ public class TarArchiveExtractor {
 
                 String entryName = entry.getName().trim();
 
-                // 路径穿越检测
+                // ── 路径穿越检测 ──
                 try {
                     PathTraversalValidator.validate(entryName);
                 } catch (Exception e) {
@@ -110,21 +132,23 @@ public class TarArchiveExtractor {
                     log.warn("Skipping entry with unknown size: {}", entryName);
                     continue;
                 }
-                if (size > MAX_ENTRY_SIZE) {
+                // ── 单条目大小检查 ──
+                if (size > maxEntrySize) {
                     log.warn("Skipping oversized entry ({} bytes): {}", size, entryName);
                     skipEntry(tarIn, size);
                     continue;
                 }
+                // ── 累计大小检查 ──
                 if (size > 0) {
                     totalUncompressed += size;
-                    if (totalUncompressed > MAX_TOTAL_UNCOMPRESSED_SIZE) {
+                    if (totalUncompressed > maxTotalUncompressedSize) {
                         throw new FileProcessingException(
                                 "Archive total uncompressed size exceeds " +
-                                MAX_TOTAL_UNCOMPRESSED_SIZE / (1024 * 1024) + "MB limit");
+                                maxTotalUncompressedSize / (1024 * 1024) + "MB limit");
                     }
                 }
 
-                // Read entry content (streaming for large files)
+                // 读取条目内容：≤10MB 直接读内存，>10MB 先写临时文件再读回
                 byte[] entryData;
                 Path tempFile = null;
                 if (size <= MEMORY_BUFFER_THRESHOLD) {
@@ -135,7 +159,7 @@ public class TarArchiveExtractor {
                     entryData = Files.readAllBytes(tempFile);
                 }
 
-                // Magic number 校验
+                // ── Magic number 校验（检测伪装可执行文件）──
                 String magicViolation = magicNumberValidator.check(
                         entryData.length > 4 ? entryData : new byte[0], entryName);
                 if (magicViolation != null) {
@@ -145,7 +169,7 @@ public class TarArchiveExtractor {
                     continue;
                 }
 
-                // README images
+                // ── README images 处理（images/ 目录下的图片不存入 saving_items）──
                 String lowerEntry = entryName.toLowerCase();
                 if (lowerEntry.startsWith("images/") && entryData.length <= 10 * 1024 * 1024) {
                     String relativePath = entryName.substring("images/".length());
@@ -157,8 +181,9 @@ public class TarArchiveExtractor {
                     continue;
                 }
 
-                String fileType = SevenZExtractor.getExtension(entryName);
-                String md5Hash = SevenZExtractor.computeMd5(entryData);
+                // ── Content-addressable 存储（去重）──
+                String fileType = ArchiveUtils.getExtension(entryName);
+                String md5Hash = ArchiveUtils.computeMd5(entryData);
                 String physicalKey = md5Hash + "." + fileType;
 
                 Path physicalPath = extractRoot.resolve(physicalKey);
@@ -166,12 +191,13 @@ public class TarArchiveExtractor {
                     Files.write(physicalPath, entryData);
                 }
 
-                boolean isText = SevenZExtractor.isTextFile(entryName, entryData);
+                boolean isText = ArchiveUtils.isTextFile(entryName, entryData);
 
+                // 清理临时文件
                 if (tempFile != null) Files.deleteIfExists(tempFile);
 
                 String parentPath = PathTraversalValidator.computeParentPath(entryName);
-                autoCreateDirectories(items, createdDirs, parentPath);
+                ArchiveUtils.autoCreateDirectories(items, createdDirs, parentPath, snapshotId);
 
                 SavingItem item = SavingItem.builder()
                         .snapshotId(snapshotId)
@@ -186,6 +212,7 @@ public class TarArchiveExtractor {
                         .build();
                 items.add(item);
 
+                // ── README 检测 ──
                 if (entryName.equalsIgnoreCase("README.md") || entryName.equalsIgnoreCase("readme.txt")) {
                     readmeContents.add(new String(entryData, java.nio.charset.StandardCharsets.UTF_8));
                 }
@@ -200,7 +227,7 @@ public class TarArchiveExtractor {
             if (!item.getIsDirectory()) { fileCount++; totalSize += item.getFileSize(); }
         }
 
-        String manifestHash = computeManifestHash(items);
+        String manifestHash = ArchiveUtils.computeManifestHash(items);
 
         log.info("{} extraction complete: {} files, {} bytes", format.name(), fileCount, totalSize);
         return ArchiveExtractionResult.ExtractionResult.builder()
@@ -210,16 +237,15 @@ public class TarArchiveExtractor {
                 .build();
     }
 
-    /** 根据格式包装解压流 */
+    /** 根据格式包装解压流：TAR_GZ 需要 GZIP 解压层，TAR 直接透传 */
     private InputStream wrapDecompressor(InputStream in) throws IOException {
         if (format == ArchiveFormat.TAR_GZ) {
             return new GzipCompressorInputStream(in);
         }
-        // TAR — no decompression needed
         return in;
     }
 
-    /** 将条目内容读入内存 */
+    /** 将条目内容读入内存（用于小文件 ≤10MB） */
     private byte[] readToMemory(TarArchiveInputStream tarIn, int size) throws IOException {
         ByteArrayOutputStream baos = new ByteArrayOutputStream(size > 0 ? size : 8192);
         byte[] buf = new byte[BUFFER_SIZE];
@@ -232,7 +258,7 @@ public class TarArchiveExtractor {
         return baos.toByteArray();
     }
 
-    /** 将条目内容读入临时文件 */
+    /** 将条目内容写入临时文件（用于大文件 >10MB） */
     private void readToFile(TarArchiveInputStream tarIn, Path tempFile, long size) throws IOException {
         try (OutputStream os = Files.newOutputStream(tempFile)) {
             byte[] buf = new byte[BUFFER_SIZE];
@@ -245,7 +271,7 @@ public class TarArchiveExtractor {
         }
     }
 
-    /** 跳过大条目（不读取内容） */
+    /** 跳过超大条目（不读取内容，仅推进流指针） */
     private void skipEntry(TarArchiveInputStream tarIn, long size) throws IOException {
         long skipped = tarIn.skip(size);
         if (skipped < size) {
@@ -257,34 +283,5 @@ public class TarArchiveExtractor {
                 remaining -= len;
             }
         }
-    }
-
-    private void autoCreateDirectories(List<SavingItem> items, Set<String> createdDirs, String parentPath) {
-        if (parentPath == null || parentPath.isEmpty()) return;
-        String[] parts = parentPath.split("/");
-        StringBuilder cumulative = new StringBuilder();
-        for (String part : parts) {
-            if (part.isEmpty()) continue;
-            cumulative.append(part).append("/");
-            String dirPath = cumulative.toString();
-            if (createdDirs.add(dirPath)) {
-                String dirParent = PathTraversalValidator.computeParentPath(
-                        dirPath.endsWith("/") ? dirPath.substring(0, dirPath.length() - 1) : dirPath);
-                items.add(SavingItem.builder()
-                        .snapshotId(snapshotId).virtualPath(dirPath).physicalKey("")
-                        .parentPath(dirParent).isDirectory(true).fileSize(0L)
-                        .md5Hash("").isText(false).build());
-            }
-        }
-    }
-
-    private String computeManifestHash(List<SavingItem> items) {
-        try {
-            MessageDigest md = MessageDigest.getInstance("MD5");
-            items.stream().filter(i -> !i.getIsDirectory())
-                    .sorted(Comparator.comparing(SavingItem::getVirtualPath))
-                    .forEach(i -> md.update(i.getMd5Hash().getBytes()));
-            return SevenZExtractor.bytesToHex(md.digest());
-        } catch (java.security.NoSuchAlgorithmException e) { return ""; }
     }
 }

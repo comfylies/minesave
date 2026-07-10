@@ -190,12 +190,12 @@ public class EmailCodeService {
         MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
         helper.setFrom(mailFrom);
         helper.setTo(to);
-        helper.setSubject("GameSaves - Email Verification Code");
+        helper.setSubject("MineSave - Email Verification Code");
 
         String htmlContent = """
                 <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto;
                             padding: 24px; background: #f9fafb; border-radius: 8px;">
-                    <h2 style="color: #1a1a2e; text-align: center;">💾 GameSaves</h2>
+                    <h2 style="color: #1a1a2e; text-align: center;">💾 MineSave</h2>
                     <p style="color: #555; font-size: 14px;">Your verification code is:</p>
                     <div style="text-align: center; padding: 16px; background: #ffffff;
                                 border: 1px solid #e5e7eb; border-radius: 6px; margin: 16px 0;">

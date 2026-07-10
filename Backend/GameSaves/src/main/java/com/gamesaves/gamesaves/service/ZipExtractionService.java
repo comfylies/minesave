@@ -9,6 +9,7 @@ import com.gamesaves.gamesaves.repository.SavingItemRepository;
 import com.gamesaves.gamesaves.repository.SavingsRepository;
 import com.gamesaves.gamesaves.util.ArchiveExtractionResult;
 import com.gamesaves.gamesaves.util.ArchiveFormat;
+import com.gamesaves.gamesaves.util.ArchiveUtils;
 import com.gamesaves.gamesaves.util.ImageThumbnailService;
 import com.gamesaves.gamesaves.util.MagicNumberValidator;
 import com.gamesaves.gamesaves.util.SevenZExtractor;
@@ -28,6 +29,12 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
+/**
+ * 压缩包提取服务 — 异步提取存档文件并上传到存储。
+ *
+ * <p>支持 ZIP / 7z / TAR / TAR.GZ 四种格式，通过 {@link ArchiveFormat} 自动检测并分发到对应提取器。
+ * 提取限制从配置文件 {@code app.extraction.*} 读取，确保与上传预检阶段一致。
+ */
 @Service
 public class ZipExtractionService {
 
@@ -42,6 +49,16 @@ public class ZipExtractionService {
 
     @Value("${app.extraction.timeout-seconds:30}")
     private int timeoutSeconds;
+
+    // 提取限制 — 从配置文件读取，与 ArticleServiceImpl 预检保持一致
+    @Value("${app.extraction.max-entry-size:104857600}")
+    private long maxEntrySize;
+
+    @Value("${app.extraction.max-total-uncompressed-size:524288000}")
+    private long maxTotalUncompressedSize;
+
+    @Value("${app.extraction.max-entry-count:10000}")
+    private int maxEntryCount;
 
     public ZipExtractionService(ArticleRepository articleRepository,
                                 SavingsRepository savingsRepository,
@@ -58,8 +75,9 @@ public class ZipExtractionService {
     }
 
     /**
-     * Async ZIP extraction with timeout.
-     * The ZIP file must already be saved to storage before calling this.
+     * 异步提取存档（带超时控制）。
+     * 调用方通过 {@code TransactionSynchronization.afterCommit()} 触发，
+     * 确保提取线程能看到已提交的 Article 记录。
      */
     @Async("extractionExecutor")
     public CompletableFuture<Void> extractAsync(Long articleId) {
@@ -73,21 +91,27 @@ public class ZipExtractionService {
         }
     }
 
+    /**
+     * 提取主流程：
+     * 1. 从存储获取压缩包本地路径
+     * 2. 检测格式 → 分发到对应提取器
+     * 3. 并行上传提取的文件到存储
+     * 4. 上传 README + README 图片
+     * 5. 更新 Article 状态为 READY + Meilisearch 索引
+     */
     private void extract(Long articleId) throws Exception {
         Article article = articleRepository.findById(articleId)
                 .orElseThrow(() -> new RuntimeException("Article not found: " + articleId));
 
-        // Set status to EXTRACTING
         updateArticleStatus(articleId, Article.ArticleStatus.EXTRACTING);
 
         String cosPrefix = storageService.articleKey(
                 article.getUser().getId(), article.getGame().getId(), articleId, "");
 
-        // Get ZIP from storage — local mode returns direct path, COS mode downloads to temp
         String zipFilename = article.getZipFilename();
         Path tempDir = Files.createTempDirectory("extract-" + articleId + "-");
         try {
-            // Get ZIP locally for extraction (ZIP must be a local file for Commons Compress)
+            // 从存储获取压缩包本地路径（local 模式返回原路径，COS 模式下载到临时目录）
             Optional<Path> localZipOpt = storageService.getLocalPath(cosPrefix + zipFilename);
             Path zipPath;
             if (localZipOpt.isPresent()) {
@@ -99,20 +123,20 @@ public class ZipExtractionService {
             Path extractRoot = tempDir.resolve("extracted");
             Files.createDirectories(extractRoot);
 
-            // Create savings record
+            // 创建 Savings 快照记录
             Savings savings = Savings.builder()
                     .articleId(articleId)
                     .userId(article.getUser().getId())
                     .gameId(article.getGame().getId())
-                    .zipPath(cosPrefix + zipFilename)          // storage key, not local path
-                    .extractRoot(cosPrefix + "extracted/")       // storage key prefix
+                    .zipPath(cosPrefix + zipFilename)          // storage key，非本地路径
+                    .extractRoot(cosPrefix + "extracted/")     // storage key 前缀
                     .zipHash("pending")
                     .fileCount(0)
                     .totalSize(0L)
                     .build();
             savings = savingsRepository.save(savings);
 
-            // Detect archive format and dispatch to correct extractor
+            // ── 格式检测 + 分发提取 ──
             ArchiveFormat fmt = ArchiveFormat.detect(zipPath)
                     .orElseGet(() -> ArchiveFormat.detectByExtension(zipFilename)
                             .orElseThrow(() -> new RuntimeException(
@@ -124,29 +148,32 @@ public class ZipExtractionService {
                                 + "Please convert to ZIP, 7z, or tar.gz.");
             }
 
+            // 统一提取入口：所有提取器共享相同的限制参数（从配置文件注入）
             ArchiveExtractionResult.ExtractionResult result;
             switch (fmt) {
                 case ZIP -> {
-                    ZipExtractor extractor = new ZipExtractor(zipPath, extractRoot, savings.getId(), magicNumberValidator);
+                    ZipExtractor extractor = new ZipExtractor(zipPath, extractRoot, savings.getId(),
+                            magicNumberValidator, maxEntrySize, maxTotalUncompressedSize, maxEntryCount);
                     result = extractor.extract();
                 }
                 case SEVEN_Z -> {
-                    SevenZExtractor extractor = new SevenZExtractor(zipPath, extractRoot, savings.getId(), magicNumberValidator);
+                    SevenZExtractor extractor = new SevenZExtractor(zipPath, extractRoot, savings.getId(),
+                            magicNumberValidator, maxEntrySize, maxTotalUncompressedSize, maxEntryCount);
                     result = extractor.extract();
                 }
                 case TAR_GZ, TAR -> {
-                    TarArchiveExtractor extractor = new TarArchiveExtractor(zipPath, extractRoot, savings.getId(), fmt, magicNumberValidator);
+                    TarArchiveExtractor extractor = new TarArchiveExtractor(zipPath, extractRoot, savings.getId(),
+                            fmt, magicNumberValidator, maxEntrySize, maxTotalUncompressedSize, maxEntryCount);
                     result = extractor.extract();
                 }
                 default -> throw new RuntimeException("Unexpected archive format: " + fmt);
             }
 
-            // Pre-create extracted/ directory (single-thread) to avoid NTFS race
-            // when parallel threads call storeFromPath concurrently on Windows.
-            // Linux is not affected, but the one-time cost is zero.
+            // 预创建 extracted/ 目录（单线程），防止 Windows NTFS 下并行 storeFromPath 竞态
+            // Linux 不受影响，但一次调用成本为零
             storageService.store(cosPrefix + "extracted/.placeholder", new byte[0]);
 
-            // Upload extracted files to storage in parallel (COS: N concurrent uploads vs sequential)
+            // ── 并行上传提取的文件到存储（COS: N 并发网络往返 vs 顺序单线程）──
             List<SavingItem> items = result.getItems();
             items.parallelStream().forEach(item -> {
                 if (!item.getIsDirectory()) {
@@ -158,13 +185,13 @@ public class ZipExtractionService {
                 }
             });
 
-            // Save all file/directory entries in batch
+            // 批量写入 saving_items 数据库记录
             if (!items.isEmpty()) {
                 savingItemRepository.saveAll(items);
             }
             log.info("Saved {} saving_items for article {}", items.size(), articleId);
 
-            // Write README.md to temp and upload
+            // ── 上传 README.md（从压缩包中提取的优先，用户手写的不覆盖）──
             String readmeRawFromZip = null;
             if (result.getReadmeContents() != null && !result.getReadmeContents().isEmpty()) {
                 readmeRawFromZip = result.getReadmeContents().get(0);
@@ -175,7 +202,7 @@ public class ZipExtractionService {
                 storageService.storeFromPath(cosPrefix + "readme/README.md", readmePath);
             }
 
-            // Upload README images
+            // ── 上传 README 图片（含缩略图）──
             if (result.getReadmeImages() != null) {
                 Path imagesDir = tempDir.resolve("images");
                 Files.createDirectories(imagesDir);
@@ -187,10 +214,9 @@ public class ZipExtractionService {
                     String imgKey = cosPrefix + "readme/images/" + img.getRelativePath();
                     storageService.storeFromPath(imgKey, imgPath);
 
-                    // Generate 720-wide proportional thumbnail, upload to storage
+                    // 生成 720px 宽等比缩略图并上传
                     try {
                         if (ImageThumbnailService.generateReadmeThumbnail(imgPath)) {
-                            // Thumbnail is at {name}_thumb.jpg next to original
                             String origName = imgPath.getFileName().toString();
                             String base = origName.contains(".")
                                     ? origName.substring(0, origName.lastIndexOf('.'))
@@ -212,14 +238,14 @@ public class ZipExtractionService {
                 log.info("Extracted {} readme images to storage", result.getReadmeImages().size());
             }
 
-            // Update savings record
+            // 更新 Savings 快照统计
             savings.setZipHash(result.getZipHash());
             savings.setFileManifestHash(result.getFileManifestHash());
             savings.setFileCount(result.getFileCount());
             savings.setTotalSize(result.getTotalSize());
             savingsRepository.save(savings);
 
-            // Update article: store raw markdown only, frontend renders with marked (GFM)
+            // 更新 Article：优先使用用户手写 README，否则用压缩包内提取的内容
             String finalReadmeRaw = article.getReadmeRaw();
             if (finalReadmeRaw == null || finalReadmeRaw.isBlank()) {
                 finalReadmeRaw = readmeRawFromZip;
@@ -234,7 +260,7 @@ public class ZipExtractionService {
                     articleId, result.getFileCount(), result.getTotalSize());
 
         } finally {
-            // Clean up temp directory
+            // 清理临时目录
             try {
                 deleteRecursively(tempDir);
             } catch (Exception e) {
@@ -265,7 +291,7 @@ public class ZipExtractionService {
                 readmeRaw != null ? readmeRaw.length() : 0,
                 fileSize);
 
-        // Index in Meilisearch
+        // 同步到 Meilisearch 搜索索引
         searchSyncService.indexArticle(article);
     }
 

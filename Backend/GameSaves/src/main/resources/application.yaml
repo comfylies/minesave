@@ -81,7 +81,10 @@ app:
     window-seconds: 60
   extraction:
     timeout-seconds: 30
-    max-file-size: 209715200                 # 200 MB
+    max-file-size: 524288000                 # 500 MB（上传文件大小上限）
+    max-entry-size: 104857600                # 100 MB（单条目解压后上限）
+    max-total-uncompressed-size: 524288000   # 500 MB（总解压后大小上限）
+    max-entry-count: 10000                   # 最大条目数
   login:
     max-fail-count: 5
     lock-minutes: 30
