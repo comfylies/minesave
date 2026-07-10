@@ -1,7 +1,7 @@
 <template>
   <div class="admin-announcements">
-    <div class="page-header">
-      <h2 class="page-title">公告管理</h2>
+    <div class="admin-page-header">
+      <h2 class="admin-page-title">公告管理</h2>
       <el-button type="primary" @click="openCreateDialog">
         <el-icon><Plus /></el-icon>
         新建公告
@@ -79,10 +79,10 @@
           <el-input v-model="form.title" placeholder="公告标题" maxlength="200" show-word-limit />
         </el-form-item>
         <el-form-item label="内容 (Markdown)" prop="contentRaw">
-          <div class="editor-wrapper">
-            <div class="editor-toolbar">
-              <span class="toolbar-hint">支持 Markdown 语法</span>
-              <div class="toolbar-actions">
+          <div class="admin-editor-wrapper">
+            <div class="admin-editor-toolbar">
+              <span class="admin-editor-hint">支持 Markdown 语法</span>
+              <div class="admin-editor-actions">
                 <input
                   ref="imageInput"
                   type="file"
@@ -97,6 +97,10 @@
                   style="display: none"
                   @change="handleMdUpload"
                 />
+                <el-button size="small" @click="showPreview = !showPreview">
+                  <el-icon><View /></el-icon>
+                  {{ showPreview ? '编辑' : '预览' }}
+                </el-button>
                 <el-button size="small" @click="$refs.imageInput.click()" :loading="uploading">
                   <el-icon><Picture /></el-icon>
                   插入图片
@@ -107,7 +111,9 @@
                 </el-button>
               </div>
             </div>
+            <div v-if="showPreview" class="admin-markdown-preview" v-html="renderedMarkdown"></div>
             <el-input
+              v-else
               v-model="form.contentRaw"
               type="textarea"
               :rows="14"
@@ -135,11 +141,12 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Plus, Edit, Delete, Switch, Picture, Upload } from '@element-plus/icons-vue'
+import { Plus, Edit, Delete, Switch, Picture, Upload, View } from '@element-plus/icons-vue'
 import { announcementApi } from '../../api/announcementApi'
 import { formatDateTime as formatTime } from '@/utils/format'
+import { marked } from 'marked'
 
 const announcements = ref([])
 const loading = ref(false)
@@ -149,9 +156,19 @@ const editingId = ref(null)
 const submitting = ref(false)
 const uploading = ref(false)
 const uploadingMd = ref(false)
+const showPreview = ref(false)
 const formRef = ref(null)
 const imageInput = ref(null)
 const mdInput = ref(null)
+
+const renderedMarkdown = computed(() => {
+  if (!form.value.contentRaw) return '<p style="color:#909399">暂无内容</p>'
+  try {
+    return marked.parse(form.value.contentRaw)
+  } catch {
+    return '<p style="color:#f56c6c">Markdown 渲染错误</p>'
+  }
+})
 
 const form = ref({
   title: '',
@@ -307,40 +324,5 @@ onMounted(() => {
 <style scoped>
 .admin-announcements {
   max-width: 1100px;
-}
-
-.page-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 24px;
-}
-
-.page-title {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 600;
-  color: #303133;
-}
-
-.editor-wrapper {
-  width: 100%;
-}
-
-.editor-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-}
-
-.toolbar-hint {
-  font-size: 12px;
-  color: #909399;
-}
-
-.toolbar-actions {
-  display: flex;
-  gap: 8px;
 }
 </style>

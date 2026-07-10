@@ -1,12 +1,12 @@
 <template>
   <div class="admin-games">
-    <div class="page-header">
-      <h2 class="page-title">游戏管理</h2>
-      <span class="page-subtitle">{{ games.length }} 个游戏</span>
+    <div class="admin-page-header-group">
+      <h2 class="admin-page-title">游戏管理</h2>
+      <span class="admin-page-subtitle">{{ games.length }} 个游戏</span>
     </div>
 
     <!-- 工具栏 -->
-    <div class="toolbar">
+    <div class="admin-toolbar">
       <el-input
         v-model="searchQuery"
         placeholder="搜索游戏名..."
@@ -33,7 +33,7 @@
                 @error="onCoverError($event)"
                 alt=""
               />
-              <div v-else class="cover-placeholder">
+              <div v-else class="admin-cover-placeholder cover-ph">
                 <el-icon :size="32"><PictureFilled /></el-icon>
               </div>
             </div>
@@ -100,7 +100,7 @@
         </el-table-column>
 
         <!-- 操作 -->
-        <el-table-column label="操作" width="120" align="center">
+        <el-table-column label="操作" width="200" align="center">
           <template #default="{ row }">
             <el-button
               type="primary"
@@ -109,6 +109,16 @@
             >
               合并
             </el-button>
+            <el-popconfirm
+              :title="`确定要删除「${row.name}」及其全部 ${row.articleCount} 个存档吗？此操作不可恢复！`"
+              confirm-button-text="级联删除"
+              cancel-button-text="取消"
+              @confirm="handleDeleteGame(row)"
+            >
+              <template #reference>
+                <el-button type="danger" size="small">删除</el-button>
+              </template>
+            </el-popconfirm>
           </template>
         </el-table-column>
       </el-table>
@@ -122,7 +132,7 @@
       :close-on-click-modal="false"
     >
       <div v-if="mergeSource" class="merge-dialog">
-        <p class="merge-desc">
+        <p class="admin-merge-desc">
           将 <strong>{{ mergeSource.name }}</strong> 的所有存档和别名迁移到目标游戏，合并后<strong>{{ mergeSource.name }}</strong>将被删除。
         </p>
 
@@ -138,7 +148,7 @@
                 @error="onCoverError($event)"
                 alt=""
               />
-              <div v-else class="cover-placeholder small">
+              <div v-else class="admin-cover-placeholder merge-ph">
                 <el-icon :size="24"><PictureFilled /></el-icon>
               </div>
             </div>
@@ -165,7 +175,7 @@
                 @error="onCoverError($event)"
                 alt=""
               />
-              <div v-else class="cover-placeholder small">
+              <div v-else class="admin-cover-placeholder merge-ph">
                 <el-icon :size="24"><PictureFilled /></el-icon>
               </div>
             </div>
@@ -174,7 +184,6 @@
                 v-model="selectedTargetId"
                 placeholder="选择目标游戏"
                 filterable
-                :filter-method="filterTargetGames"
                 style="width: 100%"
               >
                 <el-option
@@ -192,7 +201,7 @@
         </div>
 
         <!-- 合并结果摘要 -->
-        <div v-if="mergeTarget" class="merge-summary">
+        <div v-if="mergeTarget" class="admin-merge-summary">
           <p><strong>合并后：</strong></p>
           <ul>
             <li>「{{ mergeSource.name }}」→ 「{{ mergeTarget.name }}」的别名</li>
@@ -295,12 +304,14 @@ function openMergeDialog(game) {
   mergeDialogVisible.value = true
 }
 
-function filterTargetGames(query) {
-  // el-select 的 filter-method，前端过滤即可（数据量小）
-  allTargetGames.value = games.value.filter(g =>
-    g.id !== mergeSource.value?.id &&
-    g.name.toLowerCase().includes(query.toLowerCase())
-  )
+async function handleDeleteGame(row) {
+  try {
+    const result = await adminApi.deleteGame(row.id)
+    ElMessage.success(`已删除游戏「${row.name}」及其 ${result.articlesDeleted} 个存档`)
+    await loadGames()
+  } catch {
+    // error handled by interceptor
+  }
 }
 
 async function confirmMerge() {
@@ -342,32 +353,6 @@ async function confirmMerge() {
   max-width: 1100px;
 }
 
-.page-header {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  margin-bottom: 20px;
-}
-
-.page-title {
-  font-size: 20px;
-  font-weight: 600;
-  color: #303133;
-}
-
-.page-subtitle {
-  font-size: 13px;
-  color: #909399;
-}
-
-/* 工具栏 */
-.toolbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
 /* 封面缩略图 */
 .cover-cell {
   display: flex;
@@ -379,30 +364,19 @@ async function confirmMerge() {
 .cover-thumb {
   max-height: 56px;
   max-width: 100px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   object-fit: cover;
 }
 
-.cover-placeholder {
+.cover-ph {
   width: 100px;
   height: 56px;
-  background: #f5f7fa;
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #c0c4cc;
-}
-
-.cover-placeholder.small {
-  width: 80px;
-  height: 48px;
 }
 
 /* 游戏名 */
 .game-name-link {
   font-weight: 600;
-  color: #409eff;
+  color: var(--color-link);
   text-decoration: none;
 }
 
@@ -413,7 +387,7 @@ async function confirmMerge() {
 /* 别名数 */
 .alias-count {
   font-weight: 500;
-  color: #606266;
+  color: var(--color-body-text);
 }
 
 /* 冲突 */
@@ -422,39 +396,33 @@ async function confirmMerge() {
 }
 
 .conflict-popover {
-  font-size: 13px;
+  font-size: var(--font-size-small);
 }
 
 .conflict-hint {
-  margin: 0 0 8px;
-  color: #606266;
+  margin: 0 0 var(--spacing-sm);
+  color: var(--color-secondary-text);
 }
 
 /* ── 合并弹窗 ── */
 .merge-dialog {
-  font-size: 14px;
-}
-
-.merge-desc {
-  margin: 0 0 20px;
-  color: #606266;
-  line-height: 1.6;
+  font-size: var(--font-size-normal);
 }
 
 .merge-cards {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 24px;
-  margin-bottom: 20px;
+  gap: var(--spacing-lg);
+  margin-bottom: var(--spacing-lg);
 }
 
 .merge-card {
   width: 240px;
   min-height: 290px;
-  border: 2px solid #e4e7ed;
+  border: 2px solid var(--color-border-primary);
   border-radius: 10px;
-  padding: 20px 16px 16px;
+  padding: var(--spacing-lg) var(--spacing-md) var(--spacing-md);
   text-align: center;
   position: relative;
   display: flex;
@@ -463,12 +431,12 @@ async function confirmMerge() {
 }
 
 .merge-card.source-card {
-  border-color: #f56c6c;
+  border-color: var(--color-danger-text);
   background: #fef0f0;
 }
 
 .merge-card.target-card {
-  border-color: #67c23a;
+  border-color: var(--color-success-text);
   background: #f0f9eb;
 }
 
@@ -477,16 +445,16 @@ async function confirmMerge() {
   top: -13px;
   left: 50%;
   transform: translateX(-50%);
-  font-size: 12px;
+  font-size: var(--font-size-small);
   padding: 3px 14px;
   border-radius: 12px;
-  background: #f56c6c;
+  background: var(--color-danger-text);
   color: #fff;
   white-space: nowrap;
 }
 
 .merge-card-badge.target {
-  background: #67c23a;
+  background: var(--color-success-text);
 }
 
 .merge-card-cover {
@@ -496,30 +464,35 @@ async function confirmMerge() {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
-  background: #f5f7fa;
+  background: var(--color-bg-secondary);
 }
 
 .merge-thumb {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
+}
+
+.merge-ph {
+  width: 80px;
+  height: 48px;
 }
 
 .merge-card-name {
   font-weight: 600;
-  font-size: 16px;
+  font-size: var(--font-size-large);
   margin: 10px 0 6px;
-  color: #303133;
+  color: var(--color-body-text);
   line-height: 1.3;
   word-break: break-word;
 }
 
 .merge-card-meta {
-  font-size: 13px;
-  color: #909399;
+  font-size: var(--font-size-small);
+  color: var(--color-secondary-text);
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -533,34 +506,13 @@ async function confirmMerge() {
 }
 
 .merge-card-select {
-  margin-top: 12px;
+  margin-top: var(--spacing-sm);
   width: 100%;
 }
 
 .target-option-meta {
   float: right;
-  color: #909399;
-  font-size: 12px;
-}
-
-.merge-summary {
-  padding: 12px 16px;
-  background: #f5f7fa;
-  border-radius: 6px;
-  font-size: 13px;
-  color: #606266;
-}
-
-.merge-summary p {
-  margin: 0 0 6px;
-}
-
-.merge-summary ul {
-  margin: 0;
-  padding-left: 18px;
-}
-
-.merge-summary li {
-  margin-bottom: 4px;
+  color: var(--color-secondary-text);
+  font-size: var(--font-size-small);
 }
 </style>

@@ -1,28 +1,47 @@
 <template>
   <div class="admin-dashboard">
-    <h2 class="page-title">仪表盘</h2>
+    <h2 class="admin-page-title">仪表盘</h2>
 
-    <el-row :gutter="20">
+    <!-- 核心统计卡片 -->
+    <el-row :gutter="20" class="admin-card-row">
       <el-col :xs="24" :sm="12" :md="6" v-for="card in statCards" :key="card.label">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-content">
-            <div class="stat-icon" :style="{ background: card.color }">
-              <el-icon :size="28"><component :is="card.icon" /></el-icon>
+        <el-card shadow="hover" class="admin-stat-card">
+          <div class="admin-stat-content">
+            <div class="admin-stat-icon" :style="{ background: card.color }">
+              <el-icon :size="24"><component :is="card.icon" /></el-icon>
             </div>
-            <div class="stat-info">
-              <div class="stat-value">{{ card.value }}</div>
-              <div class="stat-label">{{ card.label }}</div>
+            <div class="admin-stat-info">
+              <div class="admin-stat-value">{{ card.value }}</div>
+              <div class="admin-stat-label">{{ card.label }}</div>
             </div>
           </div>
         </el-card>
       </el-col>
     </el-row>
 
-    <el-row :gutter="20" style="margin-top: 24px">
+    <!-- 辅助统计卡片 -->
+    <el-row :gutter="20" class="admin-card-row">
+      <el-col :xs="24" :sm="12" :md="6" v-for="card in pendingCards" :key="card.label">
+        <el-card shadow="hover" class="admin-stat-card" :class="card.cssClass">
+          <div class="admin-stat-content">
+            <div class="admin-stat-icon" :style="{ background: card.color }">
+              <el-icon :size="24"><component :is="card.icon" /></el-icon>
+            </div>
+            <div class="admin-stat-info">
+              <div class="admin-stat-value">{{ card.value }}</div>
+              <div class="admin-stat-label">{{ card.label }}</div>
+            </div>
+          </div>
+        </el-card>
+      </el-col>
+    </el-row>
+
+    <!-- 系统概览 -->
+    <el-row :gutter="20">
       <el-col :span="24">
         <el-card shadow="hover">
           <template #header>
-            <span class="card-header-title">系统概览</span>
+            <span class="admin-card-header-title">系统概览</span>
           </template>
           <el-descriptions :column="2" border>
             <el-descriptions-item label="用户总数">
@@ -43,6 +62,18 @@
             <el-descriptions-item label="图片存储空间">
               {{ formatStorage(stats.imageStorageBytes) }}
             </el-descriptions-item>
+            <el-descriptions-item label="失败文章">
+              <el-tag v-if="stats.failedArticleCount > 0" type="danger" size="small">
+                {{ stats.failedArticleCount }} 篇
+              </el-tag>
+              <span v-else class="stat-ok">0 篇</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="上传中（可能卡住）">
+              <el-tag v-if="stats.uploadingArticleCount > 0" type="warning" size="small">
+                {{ stats.uploadingArticleCount }} 篇
+              </el-tag>
+              <span v-else class="stat-ok">0 篇</span>
+            </el-descriptions-item>
           </el-descriptions>
         </el-card>
       </el-col>
@@ -54,8 +85,10 @@
 import { ref, computed, onMounted } from 'vue'
 import { adminApi } from '../../api/adminApi'
 import {
-  User, Document, Monitor, ChatLineSquare, PictureFilled
+  User, Document, Monitor, ChatLineSquare, PictureFilled,
+  WarningFilled, CircleCloseFilled
 } from '@element-plus/icons-vue'
+import { formatSize } from '@/utils/format'
 
 const stats = ref({
   userCount: 0,
@@ -63,24 +96,27 @@ const stats = ref({
   gameCount: 0,
   commentCount: 0,
   downloadCount: 0,
-  imageStorageBytes: 0
+  imageStorageBytes: 0,
+  failedArticleCount: 0,
+  uploadingArticleCount: 0
 })
 
 function formatStorage(bytes) {
-  if (!bytes || bytes === 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB']
-  let i = 0
-  let size = bytes
-  while (size >= 1024 && i < units.length - 1) { size /= 1024; i++ }
-  return size.toFixed(i === 0 ? 0 : 1) + ' ' + units[i]
+  return formatSize(bytes)
 }
 
 const statCards = computed(() => [
-  { label: '用户数', value: stats.value.userCount, icon: User, color: '#409EFF' },
-  { label: '文章数', value: stats.value.articleCount, icon: Document, color: '#67C23A' },
-  { label: '游戏数', value: stats.value.gameCount, icon: Monitor, color: '#E6A23C' },
-  { label: '评论数', value: stats.value.commentCount, icon: ChatLineSquare, color: '#F56C6C' },
-  { label: '图片存储', value: formatStorage(stats.value.imageStorageBytes), icon: PictureFilled, color: '#8B5CF6' }
+  { label: '用户数', value: stats.value.userCount, icon: User, color: '#3b82f6' },
+  { label: '文章数', value: stats.value.articleCount, icon: Document, color: '#22c55e' },
+  { label: '游戏数', value: stats.value.gameCount, icon: Monitor, color: '#f59e0b' },
+  { label: '评论数', value: stats.value.commentCount, icon: ChatLineSquare, color: '#ef4444' }
+])
+
+const pendingCards = computed(() => [
+  { label: '下载总次数', value: stats.value.downloadCount, icon: PictureFilled, color: '#8b5cf6', cssClass: '' },
+  { label: '图片存储', value: formatStorage(stats.value.imageStorageBytes), icon: PictureFilled, color: '#6366f1', cssClass: '' },
+  { label: '失败文章', value: stats.value.failedArticleCount, icon: CircleCloseFilled, color: '#ef4444', cssClass: stats.value.failedArticleCount > 0 ? 'admin-stat-card-warn' : '' },
+  { label: '上传中', value: stats.value.uploadingArticleCount, icon: WarningFilled, color: '#f59e0b', cssClass: stats.value.uploadingArticleCount > 0 ? 'admin-stat-card-warn' : '' }
 ])
 
 onMounted(async () => {
@@ -97,48 +133,7 @@ onMounted(async () => {
   max-width: 1200px;
 }
 
-.page-title {
-  margin: 0 0 24px;
-  font-size: 20px;
-  font-weight: 600;
-  color: #303133;
-}
-
-.stat-card {
-  margin-bottom: 20px;
-}
-
-.stat-content {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.stat-icon {
-  width: 56px;
-  height: 56px;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  flex-shrink: 0;
-}
-
-.stat-value {
-  font-size: 28px;
-  font-weight: 700;
-  color: #303133;
-  line-height: 1.2;
-}
-
-.stat-label {
-  font-size: 14px;
-  color: #909399;
-  margin-top: 4px;
-}
-
-.card-header-title {
-  font-weight: 600;
+.stat-ok {
+  color: var(--color-success-text);
 }
 </style>

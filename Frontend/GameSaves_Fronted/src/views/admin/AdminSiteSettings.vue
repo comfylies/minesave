@@ -1,6 +1,6 @@
 <template>
   <div class="admin-site-settings">
-    <h2 class="page-title">站点设置</h2>
+    <h2 class="admin-page-title">站点设置</h2>
 
     <el-card shadow="hover" class="settings-card">
       <template #header>
@@ -108,13 +108,6 @@ async function handleRemove() {
 <style scoped>
 .admin-site-settings {
   max-width: 680px;
-}
-
-.page-title {
-  font-size: var(--font-size-xlarge);
-  font-weight: 600;
-  margin: 0 0 var(--spacing-lg) 0;
-  color: var(--color-body-text);
 }
 
 .settings-card {

@@ -1,9 +1,9 @@
 <template>
   <div class="admin-articles">
-    <h2 class="page-title">文章管理</h2>
+    <h2 class="admin-page-title">文章管理</h2>
 
     <!-- 搜索与筛选 -->
-    <el-card shadow="never" class="search-card">
+    <el-card shadow="never" class="admin-search-card">
       <el-input
         v-model="keyword"
         placeholder="搜索文章标题或作者..."
@@ -20,7 +20,7 @@
         v-model="statusFilter"
         placeholder="状态筛选"
         clearable
-        style="width: 160px; margin-left: 12px"
+        style="width: 160px"
         @change="search"
       >
         <el-option label="全部" value="" />
@@ -29,20 +29,25 @@
         <el-option label="解压中" value="EXTRACTING" />
         <el-option label="失败" value="FAILED" />
       </el-select>
-      <el-button type="primary" @click="search" style="margin-left: 12px">
+      <el-button type="primary" @click="search">
         <el-icon><Search /></el-icon>
         搜索
       </el-button>
     </el-card>
 
     <!-- 表格 -->
-    <el-card shadow="hover" class="table-card">
-      <el-table :data="articles" v-loading="loading" stripe border style="width: 100%">
-        <el-table-column prop="id" label="ID" width="70" align="center" />
-        <el-table-column prop="title" label="标题" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="gameName" label="游戏" min-width="120" />
-        <el-table-column prop="username" label="作者" min-width="100" />
-        <el-table-column prop="status" label="状态" width="100" align="center">
+    <el-card shadow="hover" class="admin-table-card">
+      <el-table
+        :data="articles"
+        v-loading="loading"
+        stripe border
+        style="width: 100%"
+      >
+        <el-table-column prop="id" label="ID" width="65" align="center" />
+        <el-table-column prop="title" label="标题" min-width="60" show-overflow-tooltip />
+        <el-table-column prop="gameName" label="游戏" width="160" align="center" />
+        <el-table-column prop="username" label="作者" width="100" align="center" />
+        <el-table-column prop="status" label="状态" width="90" align="center">
           <template #default="{ row }">
             <el-tag
               :type="statusType(row.status)"
@@ -52,39 +57,41 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="version" label="版本" width="90" align="center" />
-        <el-table-column prop="downloadCount" label="下载" width="80" align="center" />
-        <el-table-column prop="createdAt" label="创建时间" min-width="160">
+        <el-table-column prop="version" label="版本" width="115" align="center" />
+        <el-table-column prop="downloadCount" label="下载" width="70" align="center" />
+        <el-table-column prop="createdAt" label="创建时间" width="155" align="center">
           <template #default="{ row }">
             {{ row.createdAt ? new Date(row.createdAt).toLocaleString() : '-' }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="120" align="center" fixed="right">
+        <el-table-column label="操作" width="130" align="center" fixed="right">
           <template #default="{ row }">
-            <el-button
-              text
-              type="primary"
-              size="small"
-              @click="$router.push(`/articles/${row.id}`)"
-            >
-              查看
-            </el-button>
-            <el-popconfirm
-              :title="`确定要删除文章「${row.title}」吗？此操作不可恢复。`"
-              confirm-button-text="确定删除"
-              cancel-button-text="取消"
-              @confirm="handleDelete(row)"
-            >
-              <template #reference>
-                <el-button text type="danger" size="small">删除</el-button>
-              </template>
-            </el-popconfirm>
+            <div class="action-btns">
+              <el-button
+                text
+                type="primary"
+                size="small"
+                @click="$router.push(`/articles/${row.id}`)"
+              >
+                查看
+              </el-button>
+              <el-popconfirm
+                :title="`确定要删除文章「${row.title}」吗？此操作不可恢复。`"
+                confirm-button-text="确定删除"
+                cancel-button-text="取消"
+                @confirm="handleDelete(row)"
+              >
+                <template #reference>
+                  <el-button text type="danger" size="small">删除</el-button>
+                </template>
+              </el-popconfirm>
+            </div>
           </template>
         </el-table-column>
       </el-table>
 
       <!-- 分页 -->
-      <div class="pagination-wrapper">
+      <div class="admin-pagination-wrapper">
         <el-pagination
           v-model:current-page="page"
           v-model:page-size="size"
@@ -151,29 +158,10 @@ onMounted(() => {
   max-width: 1400px;
 }
 
-.page-title {
-  margin: 0 0 24px;
-  font-size: 20px;
-  font-weight: 600;
-  color: #303133;
-}
-
-.search-card {
-  margin-bottom: 16px;
-}
-
-.search-card .el-card__body {
+.action-btns {
   display: flex;
   align-items: center;
-}
-
-.table-card {
-  margin-bottom: 16px;
-}
-
-.pagination-wrapper {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 16px;
+  justify-content: center;
+  gap: 0;
 }
 </style>

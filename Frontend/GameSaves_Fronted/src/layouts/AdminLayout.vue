@@ -9,9 +9,9 @@
       <el-menu
         :default-active="activeMenu"
         router
-        background-color="#304156"
-        text-color="#bfcbd9"
-        active-text-color="#409EFF"
+        background-color="#334155"
+        text-color="#b0bccf"
+        active-text-color="#7db9fa"
         class="admin-menu"
       >
         <el-menu-item index="/admin">
@@ -93,14 +93,15 @@ const pageTitle = computed(() => route.meta?.title || '')
 <style scoped>
 .admin-layout {
   height: 100vh;
-  background: #f0f2f5;
+  background: var(--color-bg-secondary);
 }
 
 .admin-aside {
-  background-color: #304156;
+  background-color: #334155;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.06);
 }
 
 .admin-logo {
@@ -109,41 +110,50 @@ const pageTitle = computed(() => route.meta?.title || '')
   align-items: center;
   justify-content: center;
   gap: 10px;
-  color: #fff;
+  color: #f1f5f9;
   font-size: 18px;
   font-weight: 600;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
 }
 
 .logo-text {
   white-space: nowrap;
+  letter-spacing: 0.5px;
 }
 
 .admin-menu {
   border-right: none;
   flex: 1;
+  overflow-y: auto;
 }
 
 .admin-header {
-  background: #fff;
+  background: var(--color-bg-canvas);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 24px;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  padding: 0 var(--spacing-lg);
+  box-shadow: var(--shadow-sm);
   height: 60px;
   z-index: 10;
+  flex-shrink: 0;
+}
+
+.admin-header .header-left {
+  display: flex;
+  align-items: center;
 }
 
 .admin-header .header-right {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: var(--spacing-md);
 }
 
 .admin-main {
-  padding: 24px;
+  padding: var(--spacing-lg);
   overflow-y: auto;
-  background: #f0f2f5;
+  background: var(--color-bg-secondary);
 }
 </style>
