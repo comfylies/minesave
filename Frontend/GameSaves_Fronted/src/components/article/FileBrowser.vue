@@ -28,7 +28,7 @@
         >
           <span class="col-name">
             <FileIcon :is-directory="true" />
-            <span class="dir-name">{{ dir.name }}</span>
+            <span class="dir-name" :title="dir.name">{{ dir.name }}</span>
           </span>
           <span class="col-size">-</span>
         </div>
@@ -44,7 +44,7 @@
         >
           <span class="col-name">
             <FileIcon :type="file.fileType" />
-            <span class="file-name">{{ file.name }}</span>
+            <span class="file-name" :title="file.name">{{ file.name }}</span>
             <span v-if="file.securityLevel === 'danger'" class="security-badge security-badge--danger">⚠ 可疑</span>
             <span v-else-if="file.securityLevel === 'warning'" class="security-badge security-badge--warning">注意</span>
           </span>
@@ -195,6 +195,9 @@ function securityTooltip(file) {
 .dir-name {
   font-weight: 600;
   color: var(--color-link);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .dir-name:hover {
@@ -204,6 +207,9 @@ function securityTooltip(file) {
 /* ---- 文件名 ---- */
 .file-name {
   color: var(--color-body-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ---- 安全颜色标记 ---- */

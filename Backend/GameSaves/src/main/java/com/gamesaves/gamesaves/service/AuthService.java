@@ -177,39 +177,55 @@ public class AuthService {
         // 1. 校验图形验证码
         validateCaptcha(captchaKey, captchaCode);
 
-        // 2. 唯一性校验（统一错误消息，防止用户名枚举）
-        if (userRepository.existsByUsername(request.getUsername())) {
-            throw new BadRequestException("Registration failed, please check your information");
-        }
-        if (request.getPhone() != null && userRepository.existsByPhone(request.getPhone())) {
-            throw new BadRequestException("Registration failed, please check your information");
-        }
-        if (userRepository.existsByEmail(request.getEmail())) {
-            throw new BadRequestException("Registration failed, please check your information");
+        // 2. 校验邮箱验证码
+        boolean emailCodeValid = emailCodeService.verifyCode(request.getEmail(), request.getEmailCode());
+        if (!emailCodeValid) {
+            throw new BadRequestException("邮箱验证码错误或已过期，请重新获取");
         }
 
-        // 3. 校验昵称（若前端未传，使用用户名作为默认昵称）
+        // 3. 唯一性校验（统一错误消息，防止用户名枚举）
+        if (userRepository.existsByUsername(request.getUsername())) {
+            throw new BadRequestException("用户名已被注册");
+        }
+        if (request.getPhone() != null && userRepository.existsByPhone(request.getPhone())) {
+            throw new BadRequestException("手机号已被注册");
+        }
+        if (userRepository.existsByEmail(request.getEmail())) {
+            throw new BadRequestException("邮箱已被注册");
+        }
+
+        // 4. 校验昵称（若前端未传，使用用户名作为默认昵称）
         String nickname = request.getNickname() != null && !request.getNickname().isBlank()
                 ? XssFilter.sanitize(request.getNickname().trim())
                 : XssFilter.sanitize(request.getUsername());
 
-        // 4. 创建用户
+        // 5. 创建用户
         String encodedPassword = passwordEncoder.encode(request.getPassword());
         User user = User.builder()
-                .username(XssFilter.sanitize(request.getUsername()))
+                .username(XssFilter.sanitize(request.getUsername().trim()))
                 .password(encodedPassword)
                 .nickname(nickname)
                 .phone(request.getPhone() != null ? XssFilter.sanitize(request.getPhone()) : null)
-                .email(XssFilter.sanitize(request.getEmail()))
+                .email(XssFilter.sanitize(request.getEmail().trim().toLowerCase()))
                 .role("user")
                 .isActive(true)
                 .build();
 
         user = userRepository.save(user);
-        log.info("User registered: {}", user.getUsername());
+        log.info("User registered: {} (email: {})", user.getUsername(), maskEmail(user.getEmail()));
 
-        // 4. 自动登录
+        // 6. 自动登录
         return doLogin(user);
+    }
+
+    /** 邮箱脱敏用于日志输出 */
+    private static String maskEmail(String email) {
+        if (email == null || !email.contains("@")) return email;
+        String[] parts = email.split("@");
+        String name = parts[0];
+        String domain = parts[1];
+        if (name.length() <= 2) return name + "***@" + domain;
+        return name.substring(0, 2) + "***@" + domain;
     }
 
     // ==================== 发送邮箱验证码 ====================

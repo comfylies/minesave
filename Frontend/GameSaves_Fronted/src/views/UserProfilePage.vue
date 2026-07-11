@@ -15,9 +15,9 @@
       <div class="profile-header">
         <el-avatar :size="80" :src="user.avatarUrl" icon="UserFilled" class="profile-avatar" />
         <div class="profile-info">
-          <h1 class="profile-name">{{ user.nickname || user.username }}</h1>
-          <p class="profile-username">@{{ user.username }}</p>
-          <p v-if="user.bio" class="profile-bio">{{ user.bio }}</p>
+          <h1 class="profile-name" :title="user.nickname || user.username">{{ user.nickname || user.username }}</h1>
+          <p class="profile-username" :title="'@' + user.username">@{{ user.username }}</p>
+          <p v-if="user.bio" class="profile-bio" :title="user.bio">{{ user.bio }}</p>
           <div class="profile-meta">
             <span class="meta-item">
               <el-icon><Calendar /></el-icon>
@@ -83,19 +83,20 @@
                   </div>
                 </td>
                 <td>
-                  <span class="article-title-link">{{ article.title }}</span>
+                  <span class="article-title-link" :title="article.title">{{ article.title }}</span>
                 </td>
                 <td>
                   <router-link
                     :to="`/games/${article.gameId}`"
                     class="article-game"
+                    :title="article.gameName"
                     @click.stop
                   >
                     {{ article.gameName }}
                   </router-link>
                 </td>
                 <td>
-                  <span class="article-version">{{ article.version }}</span>
+                  <span class="article-version" :title="article.version">{{ article.version }}</span>
                 </td>
                 <td class="col-number">{{ formatSize(article.fileSize) }}</td>
                 <td class="col-number">{{ article.downloadCount || 0 }}</td>
@@ -218,17 +219,27 @@ watch(() => route.params.userId, () => {
   font-size: var(--font-size-title);
   font-weight: 600;
   color: var(--color-body-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .profile-username {
   font-size: var(--font-size-xlarge);
   color: var(--color-secondary-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .profile-bio {
   font-size: var(--font-size-large);
   color: var(--color-body-text);
   margin-top: var(--spacing-sm);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .profile-meta {
@@ -316,6 +327,10 @@ watch(() => route.params.userId, () => {
 .article-title-link {
   font-weight: 600;
   color: var(--color-link);
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .article-row:hover .article-title-link {
@@ -325,12 +340,20 @@ watch(() => route.params.userId, () => {
 .article-game {
   font-size: var(--font-size-normal);
   color: var(--color-link);
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .article-version {
   font-size: var(--font-size-small);
   color: var(--color-secondary-text);
   font-family: ui-monospace, monospace;
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .col-number {

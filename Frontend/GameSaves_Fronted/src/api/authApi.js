@@ -13,11 +13,11 @@ export const authApi = {
   loginWithEmail: ({ email, code }) =>
     client.post('/auth/login/email', { email, code }),
 
-  /** 发送邮箱验证码 */
-  sendEmailCode: (email) =>
-    client.post('/auth/email-code', { email }),
+  /** 发送邮箱验证码（需先通过图形验证码） */
+  sendEmailCode: (email, captchaKey, captchaCode) =>
+    client.post('/auth/email-code', { email, captchaKey, captchaCode }),
 
-  /** 用户注册（带验证码） */
+  /** 用户注册（需图形验证码 + 邮箱验证码） */
   register: (data, captchaKey, captchaCode) =>
     client.post('/auth/register', data, {
       params: { captchaKey, captchaCode }

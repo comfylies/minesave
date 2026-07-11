@@ -14,8 +14,8 @@
     <template v-else-if="gameStore.currentGame">
       <!-- 游戏信息头部 -->
       <div class="game-header">
-        <h1 class="page-title">{{ gameStore.currentGame.name }}</h1>
-        <p class="game-description">{{ gameStore.currentGame.description || '暂无描述' }}</p>
+        <h1 class="page-title" :title="gameStore.currentGame.name">{{ gameStore.currentGame.name }}</h1>
+        <p class="game-description" :title="gameStore.currentGame.description">{{ gameStore.currentGame.description || '暂无描述' }}</p>
         <div class="game-stats">
           <span class="stat-item">
             <el-icon><Folder /></el-icon>
@@ -191,6 +191,13 @@ watch(() => route.params.gameId, (newId) => {
 /* ---- 头部 ---- */
 .game-header {
   margin-bottom: var(--spacing-md);
+  min-width: 0;
+}
+
+.game-header .page-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .game-description {
@@ -198,6 +205,8 @@ watch(() => route.params.gameId, (newId) => {
   color: var(--color-secondary-text);
   margin-top: var(--spacing-sm);
   line-height: 1.6;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .game-stats {

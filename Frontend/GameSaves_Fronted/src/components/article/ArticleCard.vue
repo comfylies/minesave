@@ -12,7 +12,7 @@
       />
       <div v-else class="cover-placeholder">
         <el-icon :size="36"><FolderOpened /></el-icon>
-        <span class="placeholder-game">{{ article.gameName }}</span>
+        <span class="placeholder-game" :title="article.gameName">{{ article.gameName }}</span>
       </div>
     </div>
 
@@ -132,6 +132,11 @@ function onCoverError() {
 .placeholder-game {
   font-size: var(--font-size-small);
   color: var(--color-secondary-text);
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 var(--spacing-sm);
 }
 
 /* ---- 信息区域 ---- */
@@ -187,6 +192,13 @@ function onCoverError() {
   font-size: var(--font-size-small);
   color: var(--color-secondary-text);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
+}
+
+.card-meta-item:first-child {
+  max-width: 120px;
 }
 
 .card-meta-time {

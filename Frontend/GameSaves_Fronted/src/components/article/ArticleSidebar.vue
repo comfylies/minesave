@@ -6,7 +6,7 @@
         <el-avatar :size="32" :src="article.avatarUrl">
           {{ article.nickname?.charAt(0) }}
         </el-avatar>
-        <span class="author-name">{{ article.nickname }}</span>
+        <span class="author-name" :title="article.nickname">{{ article.nickname }}</span>
       </router-link>
     </div>
 
@@ -49,10 +49,10 @@
 
     <!-- 游戏 -->
     <div class="sidebar-section">
-      <router-link :to="`/games/${article.gameId}`" class="sidebar-game">
+      <router-link :to="`/games/${article.gameId}`" class="sidebar-game" :title="article.gameName">
         {{ article.gameName }}
       </router-link>
-      <span class="sidebar-version">版本 {{ article.version }}</span>
+      <span class="sidebar-version" :title="'版本 ' + article.version">版本 {{ article.version }}</span>
     </div>
 
     <!-- 时间 -->
@@ -137,11 +137,15 @@ const statusText = computed(() => {
   gap: var(--spacing-sm);
   text-decoration: none;
   color: var(--color-body-text);
+  min-width: 0;
 }
 
 .author-name {
   font-weight: 600;
   font-size: var(--font-size-normal);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sidebar-author:hover .author-name {
@@ -207,6 +211,9 @@ const statusText = computed(() => {
   font-weight: 500;
   text-decoration: none;
   margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sidebar-game:hover {
@@ -216,6 +223,10 @@ const statusText = computed(() => {
 .sidebar-version {
   font-size: 12px;
   color: var(--color-secondary-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
 }
 
 /* 时间 */

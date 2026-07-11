@@ -378,6 +378,12 @@ async function confirmMerge() {
   font-weight: 600;
   color: var(--color-link);
   text-decoration: none;
+  display: inline-block;
+  max-width: 200px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
 }
 
 .game-name-link:hover {

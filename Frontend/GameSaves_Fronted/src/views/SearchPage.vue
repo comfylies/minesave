@@ -81,7 +81,7 @@
               <h4 class="result-title" v-html="highlightOr(hit, 'title', hit.title)"></h4>
               <p class="result-desc" v-html="highlightOr(hit, 'description', hit.description)"></p>
               <div class="result-tags">
-                <span class="result-game">{{ hit.gameName }}</span>
+                <span class="result-game" :title="hit.gameName">{{ hit.gameName }}</span>
                 <el-tag
                   v-for="tag in hit.tags"
                   :key="tag"
@@ -329,6 +329,12 @@ watch(() => route.query.q, (newQ) => {
   font-size: 12px;
   color: var(--color-link);
   font-weight: 500;
+  max-width: 150px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: inline-block;
+  vertical-align: middle;
 }
 
 .tag-chip {

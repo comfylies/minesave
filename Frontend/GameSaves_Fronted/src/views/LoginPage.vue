@@ -267,9 +267,13 @@ async function handleSendEmailCode() {
     ElMessage.warning('请先输入邮箱')
     return
   }
+  if (!emailForm.emailCaptchaCode) {
+    ElMessage.warning('请先填写图形验证码')
+    return
+  }
   try {
-    await authApi.sendEmailCode(emailForm.email)
-    ElMessage.success('验证码已发送，请查收邮件')
+    await authApi.sendEmailCode(emailForm.email, emailCaptchaKey.value, emailForm.emailCaptchaCode)
+    ElMessage.success('验证码已发送，5分钟内有效（2分钟后可使用）')
     // 开始倒计时
     emailCooldown.value = 60
     cooldownTimer = setInterval(() => {
@@ -278,7 +282,12 @@ async function handleSendEmailCode() {
         clearInterval(cooldownTimer)
       }
     }, 1000)
+    // 刷新图形验证码
+    refreshEmailCaptcha()
+    emailForm.emailCaptchaCode = ''
   } catch (e) {
+    refreshEmailCaptcha()
+    emailForm.emailCaptchaCode = ''
     // error shown by interceptor
   }
 }

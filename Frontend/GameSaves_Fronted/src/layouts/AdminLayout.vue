@@ -60,7 +60,7 @@
           </el-breadcrumb>
         </div>
         <div class="header-right">
-          <el-tag v-if="auth.currentUser" type="warning" effect="dark">
+          <el-tag v-if="auth.currentUser" type="warning" effect="dark" class="header-username-tag">
             {{ auth.currentUser.username }}
           </el-tag>
           <el-button text size="small" @click="$router.push('/')">
@@ -149,6 +149,13 @@ const pageTitle = computed(() => route.meta?.title || '')
   display: flex;
   align-items: center;
   gap: var(--spacing-md);
+}
+
+.header-username-tag {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .admin-main {

@@ -65,17 +65,17 @@
                 </router-link>
               </td>
               <td>
-                <router-link :to="`/articles/${article.id}`" class="saves-title">
+                <router-link :to="`/articles/${article.id}`" class="saves-title" :title="article.title">
                   {{ article.title }}
                 </router-link>
               </td>
               <td>
-                <router-link :to="`/games/${article.gameId}`" class="saves-game">
+                <router-link :to="`/games/${article.gameId}`" class="saves-game" :title="article.gameName">
                   {{ article.gameName }}
                 </router-link>
               </td>
               <td>
-                <span class="saves-version">{{ article.version }}</span>
+                <span class="saves-version" :title="article.version">{{ article.version }}</span>
               </td>
               <td>
                 <el-tag
@@ -311,6 +311,10 @@ onMounted(() => {
 .saves-title {
   font-weight: 600;
   color: var(--color-link);
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .saves-title:hover {
@@ -320,12 +324,20 @@ onMounted(() => {
 .saves-game {
   font-size: var(--font-size-normal);
   color: var(--color-link);
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .saves-version {
   font-size: var(--font-size-small);
   color: var(--color-secondary-text);
   font-family: ui-monospace, monospace;
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .col-number {

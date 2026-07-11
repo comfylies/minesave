@@ -1,8 +1,8 @@
 <template>
   <router-link :to="`/games/${game.id}`" class="game-card">
     <div class="game-card-body">
-      <h3 class="game-name">{{ game.name }}</h3>
-      <p class="game-desc">{{ game.description || '暂无描述' }}</p>
+      <h3 class="game-name" :title="game.name">{{ game.name }}</h3>
+      <p class="game-desc" :title="game.description">{{ game.description || '暂无描述' }}</p>
     </div>
     <div class="game-card-footer">
       <span class="game-meta">
@@ -63,6 +63,9 @@ function formatDate(dateStr) {
   font-weight: 600;
   color: var(--color-link);
   margin-bottom: var(--spacing-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .game-card:hover .game-name {

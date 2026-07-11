@@ -416,13 +416,14 @@ onBeforeUnmount(() => {
   margin-bottom: 6px;
 }
 
-.card-author { font-size: 12px; font-weight: 600; color: #303133; }
+.card-author { font-size: 12px; font-weight: 600; color: #303133; max-width: 80px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .card-role-tag {
   font-size: 10px;
   padding: 1px 5px;
   border-radius: 3px;
   font-weight: 500;
+  flex-shrink: 0;
 }
 
 .role-tag--admin { background: #fde8e8; color: #c0392b; }
@@ -439,8 +440,9 @@ onBeforeUnmount(() => {
 
 .card-replies { margin-top: 6px; padding-top: 6px; border-top: 1px solid #f2f3f5; }
 .reply-item { padding: 3px 0; font-size: 12px; color: #606266; line-height: 1.5; }
-.reply-author { font-weight: 600; color: #303133; }
-.reply-time { font-size: 11px; color: #c0c4cc; margin-left: 6px; }
+.reply-author { font-weight: 600; color: #303133; max-width: 80px; display: inline-block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+.reply-time { font-size: 11px; color: #c0c4cc; margin-left: 6px; white-space: nowrap; }
+.reply-content { word-break: break-word; }
 
 .card-actions { margin-top: 6px; display: flex; justify-content: flex-end; }
 
