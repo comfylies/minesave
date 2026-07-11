@@ -88,8 +88,8 @@ app:
   login:
     max-fail-count: 5
     lock-minutes: 30
-    email-code-cooldown: 60
-    email-code-ttl: 300
+    email-code-cooldown: 90
+    email-code-ttl: 600
   security:
     magic-number:
       enabled: true

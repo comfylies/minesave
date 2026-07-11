@@ -51,8 +51,8 @@ export const useAuthStore = defineStore('auth', () => {
     return result
   }
 
-  async function register(data, captchaKey, captchaCode) {
-    const result = await authApi.register(data, captchaKey, captchaCode)
+  async function register(data) {
+    const result = await authApi.register(data)
     saveAuth(result)
     return result
   }

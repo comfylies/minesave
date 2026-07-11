@@ -20,7 +20,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * 邮箱验证码服务。
  *
  * <p>生成6位数字验证码并通过邮件发送，内存存储，定时清理过期数据。
- * 安全防护：每日上限5次 + 发送后2分钟冷却 + 发送频率限制 + 验证码有效期。
+ * 安全防护：每日上限5次 + 发送频率限制 + 验证码有效期。
  *
  * <p>引用的开源项目：
  * <ul>
@@ -33,7 +33,6 @@ public class EmailCodeService {
 
     private static final Logger log = LoggerFactory.getLogger(EmailCodeService.class);
     private static final SecureRandom RANDOM = new SecureRandom();
-    private static final long USABLE_DELAY_MS = 120_000; // 发送后2分钟才能使用
     private static final int MAX_DAILY_SENDS = 5;       // 每日每邮箱上限5次
 
     private final JavaMailSender mailSender;
@@ -81,7 +80,7 @@ public class EmailCodeService {
         // 生成6位数字验证码
         String code = String.format("%06d", RANDOM.nextInt(1_000_000));
 
-        // 存储验证码（过期时间 = 当前时间 + TTL，usableAfter = 当前时间 + 2min冷却）
+        // 存储验证码（过期时间 = 当前时间 + TTL）
         codeCache.put(email, new CodeEntry(code, now + ttlSeconds * 1000L, now));
 
         // 递增每日计数
@@ -112,12 +111,6 @@ public class EmailCodeService {
         }
 
         long now = System.currentTimeMillis();
-
-        // 检查是否已过冷却期（发送后2分钟内不能使用）
-        if (now < entry.createdTime + USABLE_DELAY_MS) {
-            log.info("Email code verification blocked: 2min cooldown not elapsed for {}", maskEmail(email));
-            return false;
-        }
 
         // 检查过期
         if (now > entry.expireTime) {

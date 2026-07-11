@@ -42,6 +42,21 @@ public class AuthController {
         return ApiResponse.success(captcha);
     }
 
+    // ==================== 字段可用性检查 ====================
+
+    /**
+     * 检查用户名/邮箱/手机号是否可用（注册时实时提示）
+     * 限流：每 IP 每秒最多 1 次
+     */
+    @GetMapping("/check-field")
+    public ApiResponse<AuthService.CheckFieldResult> checkField(
+            @RequestParam String field,
+            @RequestParam String value,
+            HttpServletRequest request) {
+        AuthService.CheckFieldResult result = authService.checkFieldAvailability(field, value, request);
+        return ApiResponse.success(result);
+    }
+
     // ==================== 账号密码登录（带验证码） ====================
 
     /**
@@ -78,20 +93,18 @@ public class AuthController {
     @PostMapping("/email-code")
     public ApiResponse<Void> sendEmailCode(@Valid @RequestBody EmailCodeRequest request) {
         authService.sendEmailCode(request);
-        return ApiResponse.success("Verification code sent, valid for 5 minutes (usable after 2 minutes)", null);
+        return ApiResponse.success("Verification code sent, valid for 10 minutes", null);
     }
 
     // ==================== 注册 ====================
 
     /**
-     * 用户注册（带图形验证码）
+     * 用户注册（邮箱验证码校验）
      */
     @PostMapping("/register")
     public ApiResponse<LoginResponse> register(
-            @Valid @RequestBody RegisterRequest request,
-            @RequestParam(required = false) String captchaKey,
-            @RequestParam(required = false) String captchaCode) {
-        LoginResponse result = authService.register(request, captchaKey, captchaCode);
+            @Valid @RequestBody RegisterRequest request) {
+        LoginResponse result = authService.register(request);
         return ApiResponse.success("Registration successful", result);
     }
 

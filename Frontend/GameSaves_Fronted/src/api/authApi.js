@@ -1,6 +1,10 @@
 import client from './client'
 
 export const authApi = {
+  /** 检查字段可用性（注册实时提示） */
+  checkField: (field, value) =>
+    client.get('/auth/check-field', { params: { field, value } }),
+
   /** 获取图形验证码 */
   getCaptcha: () =>
     client.get('/auth/captcha'),
@@ -17,11 +21,9 @@ export const authApi = {
   sendEmailCode: (email, captchaKey, captchaCode) =>
     client.post('/auth/email-code', { email, captchaKey, captchaCode }),
 
-  /** 用户注册（需图形验证码 + 邮箱验证码） */
-  register: (data, captchaKey, captchaCode) =>
-    client.post('/auth/register', data, {
-      params: { captchaKey, captchaCode }
-    }),
+  /** 用户注册（需邮箱验证码） */
+  register: (data) =>
+    client.post('/auth/register', data),
 
   /** 退出登录 */
   logout: () =>

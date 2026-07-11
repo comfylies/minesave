@@ -273,9 +273,9 @@ async function handleSendEmailCode() {
   }
   try {
     await authApi.sendEmailCode(emailForm.email, emailCaptchaKey.value, emailForm.emailCaptchaCode)
-    ElMessage.success('验证码已发送，5分钟内有效（2分钟后可使用）')
+    ElMessage.success('验证码已发送，10分钟内有效')
     // 开始倒计时
-    emailCooldown.value = 60
+    emailCooldown.value = 90
     cooldownTimer = setInterval(() => {
       emailCooldown.value--
       if (emailCooldown.value <= 0) {

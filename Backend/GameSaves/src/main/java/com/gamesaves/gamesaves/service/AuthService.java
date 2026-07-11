@@ -46,6 +46,9 @@ public class AuthService {
     // 图形验证码缓存：captchaKey → code
     private final ConcurrentHashMap<String, CaptchaCacheEntry> captchaCache = new ConcurrentHashMap<>();
 
+    // 字段可用性检查限流：ip → lastCheckTimestamp
+    private final ConcurrentHashMap<String, Long> fieldCheckRateLimiter = new ConcurrentHashMap<>();
+
     private final UserRepository userRepository;
     private final LoginFailRepository loginFailRepository;
     private final EmailCodeService emailCodeService;
@@ -173,17 +176,8 @@ public class AuthService {
 
     // ==================== 注册 ====================
 
-    public LoginResponse register(RegisterRequest request, String captchaKey, String captchaCode) {
-        // 1. 校验图形验证码
-        validateCaptcha(captchaKey, captchaCode);
-
-        // 2. 校验邮箱验证码
-        boolean emailCodeValid = emailCodeService.verifyCode(request.getEmail(), request.getEmailCode());
-        if (!emailCodeValid) {
-            throw new BadRequestException("邮箱验证码错误或已过期，请重新获取");
-        }
-
-        // 3. 唯一性校验（统一错误消息，防止用户名枚举）
+    public LoginResponse register(RegisterRequest request) {
+        // 1. 唯一性校验（先检查，不消耗验证码）
         if (userRepository.existsByUsername(request.getUsername())) {
             throw new BadRequestException("用户名已被注册");
         }
@@ -194,12 +188,18 @@ public class AuthService {
             throw new BadRequestException("邮箱已被注册");
         }
 
-        // 4. 校验昵称（若前端未传，使用用户名作为默认昵称）
+        // 2. 校验邮箱验证码
+        boolean emailCodeValid = emailCodeService.verifyCode(request.getEmail(), request.getEmailCode());
+        if (!emailCodeValid) {
+            throw new BadRequestException("邮箱验证码错误或已过期，请重新获取");
+        }
+
+        // 3. 校验昵称（若前端未传，使用用户名作为默认昵称）
         String nickname = request.getNickname() != null && !request.getNickname().isBlank()
                 ? XssFilter.sanitize(request.getNickname().trim())
                 : XssFilter.sanitize(request.getUsername());
 
-        // 5. 创建用户
+        // 4. 创建用户
         String encodedPassword = passwordEncoder.encode(request.getPassword());
         User user = User.builder()
                 .username(XssFilter.sanitize(request.getUsername().trim()))
@@ -214,7 +214,7 @@ public class AuthService {
         user = userRepository.save(user);
         log.info("User registered: {} (email: {})", user.getUsername(), maskEmail(user.getEmail()));
 
-        // 6. 自动登录
+        // 5. 自动登录
         return doLogin(user);
     }
 
@@ -226,6 +226,65 @@ public class AuthService {
         String domain = parts[1];
         if (name.length() <= 2) return name + "***@" + domain;
         return name.substring(0, 2) + "***@" + domain;
+    }
+
+    // ==================== 字段可用性检查 ====================
+
+    /** 字段可用性检查结果 */
+    public record CheckFieldResult(String field, String value, boolean available, String message) {}
+
+    /**
+     * 检查用户名/邮箱/手机号是否可用（用于注册实时提示）。
+     * 限流：每 IP 每秒最多 1 次请求。
+     */
+    public CheckFieldResult checkFieldAvailability(String field, String value, HttpServletRequest request) {
+        // 限流检查
+        String ip = getClientIp(request);
+        long now = System.currentTimeMillis();
+        Long lastCheck = fieldCheckRateLimiter.get(ip);
+        if (lastCheck != null && (now - lastCheck) < 1000) {
+            throw new BadRequestException("操作过于频繁，请稍后再试");
+        }
+        fieldCheckRateLimiter.put(ip, now);
+
+        // 定期清理过期限流记录
+        if (fieldCheckRateLimiter.size() > 5000) {
+            fieldCheckRateLimiter.entrySet().removeIf(e -> now - e.getValue() > 5000);
+        }
+
+        if (value == null || value.isBlank()) {
+            return new CheckFieldResult(field, value, false, "字段不能为空");
+        }
+
+        boolean available;
+        String message;
+
+        switch (field) {
+            case "username" -> {
+                available = !userRepository.existsByUsername(value.trim());
+                message = available ? "用户名可用" : "用户名已被注册";
+            }
+            case "email" -> {
+                String email = value.trim().toLowerCase();
+                // 先校验格式
+                if (!email.matches("^[\\w.+-]+@[\\w-]+\\.[a-zA-Z]{2,}$")) {
+                    return new CheckFieldResult(field, value, false, "邮箱格式不正确");
+                }
+                available = !userRepository.existsByEmail(email);
+                message = available ? "邮箱可用" : "邮箱已被注册";
+            }
+            case "phone" -> {
+                String phone = value.trim();
+                if (!phone.matches("^1[3-9]\\d{9}$")) {
+                    return new CheckFieldResult(field, value, false, "手机号格式不正确");
+                }
+                available = !userRepository.existsByPhone(phone);
+                message = available ? "手机号可用" : "手机号已被注册";
+            }
+            default -> throw new BadRequestException("不支持的字段类型：" + field);
+        }
+
+        return new CheckFieldResult(field, value, available, message);
     }
 
     // ==================== 发送邮箱验证码 ====================

@@ -179,29 +179,27 @@ class AuthServiceTest {
     // ═══════════════════════════════════════════════════════════════
 
     @Test
-    void register_duplicateUsername_shouldReturnUnifiedMessage() {
-        CaptchaInfo captcha = generateCaptcha();
-
+    void register_duplicateUsername_shouldThrow() {
         RegisterRequest req = new RegisterRequest();
         req.setUsername("admin");
         req.setPassword("password123");
         req.setNickname("Test");
         req.setEmail("test@example.com");
 
-        BadRequestException ex = assertThrows(BadRequestException.class,
-                () -> authService.register(req, captcha.key(), captcha.code()));
-        assertEquals("Registration failed, please check your information", ex.getMessage());
+        assertThrows(BadRequestException.class,
+                () -> authService.register(req));
     }
 
     @Test
-    void register_withoutCaptcha_shouldThrow() {
+    void register_withoutEmailCode_shouldThrow() {
         RegisterRequest req = new RegisterRequest();
-        req.setUsername(TEST_USER_PREFIX + "nocaptcha");
+        req.setUsername(TEST_USER_PREFIX + "noemailcode");
         req.setPassword("password123");
-        req.setEmail("nocaptcha@example.com");
+        req.setEmail("noemailcode@example.com");
+        req.setEmailCode(null);
 
-        assertThrows(CaptchaValidationException.class,
-                () -> authService.register(req, null, null));
+        assertThrows(BadRequestException.class,
+                () -> authService.register(req));
     }
 
     // ═══════════════════════════════════════════════════════════════
