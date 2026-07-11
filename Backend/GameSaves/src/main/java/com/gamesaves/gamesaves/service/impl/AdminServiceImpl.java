@@ -29,6 +29,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Service
@@ -81,6 +84,8 @@ public class AdminServiceImpl implements AdminService {
                 .commentCount(commentRepository.count())
                 .downloadCount(downloadLogRepository.count())
                 .imageStorageBytes(imageBytes)
+                .failedArticleCount(articleRepository.countByStatus(Article.ArticleStatus.FAILED))
+                .uploadingArticleCount(articleRepository.countByStatus(Article.ArticleStatus.UPLOADING))
                 .build();
     }
 
@@ -153,21 +158,46 @@ public class AdminServiceImpl implements AdminService {
     @Transactional(readOnly = true)
     public List<GhostArticleResponse> scanGhostArticles() {
         List<Article> allArticles = articleRepository.findAll();
-        log.info("Scanning {} articles for ghost records...", allArticles.size());
+        int total = allArticles.size();
+        log.info("Scanning {} articles for ghost records (parallel)...", total);
 
-        List<GhostArticleResponse> results = new java.util.ArrayList<>();
+        // 并行检查文件存在性，每条设 5s 超时
+        ConcurrentHashMap<Long, Boolean> fileStatusCache = new ConcurrentHashMap<>();
+        List<CompletableFuture<Void>> futures = new ArrayList<>();
+
+        for (Article article : allArticles) {
+            futures.add(CompletableFuture.runAsync(() -> {
+                String prefix = storageService.articleKeyFromRoot(article.getStorageRoot(), "");
+                boolean hasFiles;
+                try {
+                    List<String> files = storageService.listFiles(prefix);
+                    hasFiles = !files.isEmpty();
+                } catch (Exception e) {
+                    log.warn("Storage check failed for article {} (prefix={}): {}",
+                            article.getId(), prefix, e.getMessage());
+                    hasFiles = false;
+                }
+                fileStatusCache.put(article.getId(), hasFiles);
+            }).orTimeout(5, TimeUnit.SECONDS).exceptionally(ex -> {
+                log.warn("Ghost check timeout/error for article {}: {}", article.getId(),
+                        ex != null ? ex.getMessage() : "timeout");
+                fileStatusCache.put(article.getId(), false);
+                return null;
+            }));
+        }
+
+        // 等待全部完成（最多 30s）
+        try {
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                    .get(30, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            log.warn("Ghost scan timed out after 30s — returning partial results");
+        }
+
+        List<GhostArticleResponse> results = new ArrayList<>();
         for (Article article : allArticles) {
             String prefix = storageService.articleKeyFromRoot(article.getStorageRoot(), "");
-            boolean hasFiles;
-            try {
-                List<String> files = storageService.listFiles(prefix);
-                hasFiles = !files.isEmpty();
-            } catch (Exception e) {
-                // Storage unreachable → treat as ghost
-                log.warn("Storage check failed for article {} (prefix={}): {}",
-                        article.getId(), prefix, e.getMessage());
-                hasFiles = false;
-            }
+            boolean hasFiles = fileStatusCache.getOrDefault(article.getId(), false);
             results.add(GhostArticleResponse.fromEntity(article, prefix, hasFiles));
         }
 
@@ -223,9 +253,31 @@ public class AdminServiceImpl implements AdminService {
     @Transactional(readOnly = true)
     public List<AdminGameResponse> listGamesForAdmin() {
         List<Game> games = gameRepository.findAllByOrderByCreatedAtDesc();
+        if (games.isEmpty()) return Collections.emptyList();
 
-        // ── 冲突检测：找出被多个 game 共用的 alias_normalized ──
+        List<Long> gameIds = games.stream().map(Game::getId).toList();
+
+        // ── Batch 1: 封面缩略图 — 一次查询获取所有游戏的封面 ──
+        Map<Long, Article> coverArticleByGameId = new HashMap<>();
+        List<Article> coverArticles = articleRepository.findEarliestReadyWithCoverByGameIds(
+                gameIds, Article.ArticleStatus.READY);
+        for (Article a : coverArticles) {
+            coverArticleByGameId.putIfAbsent(a.getGame().getId(), a);
+        }
+
+        // ── Batch 2: 存档数 — 一次 GROUP BY 查询 ──
+        Map<Long, Long> articleCountByGameId = new HashMap<>();
+        List<Object[]> countRows = articleRepository.countReadyByGameIds(gameIds, Article.ArticleStatus.READY);
+        for (Object[] row : countRows) {
+            articleCountByGameId.put((Long) row[0], (Long) row[1]);
+        }
+
+        // ── Batch 3: 别名数 — 一次 GROUP BY 查询 ──
         List<GameAlias> allAliases = gameAliasRepository.findAll();
+        Map<Long, Long> aliasCountByGameId = allAliases.stream()
+                .collect(Collectors.groupingBy(a -> a.getGame().getId(), Collectors.counting()));
+
+        // ── 冲突检测：被多个 game 共用的 alias_normalized ──
         Set<String> conflictingAliases = allAliases.stream()
                 .collect(Collectors.groupingBy(GameAlias::getAliasNormalized))
                 .entrySet().stream()
@@ -236,7 +288,6 @@ public class AdminServiceImpl implements AdminService {
                 .map(Map.Entry::getKey)
                 .collect(Collectors.toSet());
 
-        // 按 gameId 收集冲突的 game 名称
         Map<Long, Set<String>> conflictByGameId = new HashMap<>();
         for (GameAlias alias : allAliases) {
             if (conflictingAliases.contains(alias.getAliasNormalized())) {
@@ -246,30 +297,17 @@ public class AdminServiceImpl implements AdminService {
             }
         }
 
+        // ── 组装响应 ──
         return games.stream().map(game -> {
-            // 封面缩略图：取该游戏下最早的有封面的 READY 存档
+            Article coverArticle = coverArticleByGameId.get(game.getId());
             String thumbnailUrl = null;
-            List<Article> earliestArticles = articleRepository.findEarliestReadyWithCover(
-                    game.getId(), Article.ArticleStatus.READY, PageRequest.of(0, 1));
-            if (!earliestArticles.isEmpty()) {
-                Article earliest = earliestArticles.get(0);
-                String coverImage = earliest.getCoverImage();
-                if (coverImage != null && !coverImage.isBlank()) {
-                    // 构造 360h 缩略图 URL：将 cover.{ext} 替换为 cover_thumb_360.jpg
-                    thumbnailUrl = deriveThumbnailUrl(coverImage, earliest);
-                }
+            if (coverArticle != null) {
+                thumbnailUrl = deriveThumbnailUrl(coverArticle.getCoverImage(), coverArticle);
             }
 
-            // 统计 READY 存档数
-            long articleCount = articleRepository.countByGameIdAndStatus(
-                    game.getId(), Article.ArticleStatus.READY);
-
-            // 统计别名数
-            int aliasCount = (int) gameAliasRepository.countByGameId(game.getId());
-
-            // 冲突信息
+            long articleCount = articleCountByGameId.getOrDefault(game.getId(), 0L);
+            int aliasCount = aliasCountByGameId.getOrDefault(game.getId(), 0L).intValue();
             Set<String> conflictNames = conflictByGameId.getOrDefault(game.getId(), Collections.emptySet());
-            boolean hasConflict = !conflictNames.isEmpty();
 
             return AdminGameResponse.builder()
                     .id(game.getId())
@@ -277,8 +315,8 @@ public class AdminServiceImpl implements AdminService {
                     .thumbnailUrl(thumbnailUrl)
                     .articleCount(articleCount)
                     .aliasCount(aliasCount)
-                    .hasConflict(hasConflict)
-                    .conflictGameNames(hasConflict ? new ArrayList<>(conflictNames) : null)
+                    .hasConflict(!conflictNames.isEmpty())
+                    .conflictGameNames(!conflictNames.isEmpty() ? new ArrayList<>(conflictNames) : null)
                     .createdAt(game.getCreatedAt())
                     .build();
         }).collect(Collectors.toList());

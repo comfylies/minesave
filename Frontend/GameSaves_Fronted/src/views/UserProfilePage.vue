@@ -73,7 +73,7 @@
                   <div class="cover-thumb">
                     <img
                       v-if="article.coverImage"
-                      :src="thumbUrl(article.coverImage, 270)"
+                      :src="article.coverThumbnail || thumbUrl(article.coverImage, 270)"
                       :alt="article.title"
                       class="cover-thumb-img"
                       loading="lazy"

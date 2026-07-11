@@ -57,8 +57,20 @@ public interface ArticleRepository extends JpaRepository<Article, Long> {
     @Query("SELECT a FROM Article a JOIN FETCH a.user JOIN FETCH a.game")
     Page<Article> findAllWithDetails(Pageable pageable);
 
-    // ── Admin: game listing ────────────────────────────────────────────
+    // ── Admin: game listing (batch-optimized) ───────────────────────────
 
+    /** Batch: for each gameId, get the earliest READY article with a cover image. */
+    @Query("SELECT a FROM Article a WHERE a.game.id IN :gameIds AND a.status = :status AND a.coverImage IS NOT NULL AND a.id IN " +
+           "(SELECT MIN(a2.id) FROM Article a2 WHERE a2.game.id = a.game.id AND a2.status = :status AND a2.coverImage IS NOT NULL)")
+    List<Article> findEarliestReadyWithCoverByGameIds(@Param("gameIds") List<Long> gameIds,
+                                                       @Param("status") Article.ArticleStatus status);
+
+    /** Batch: count READY articles per game. Returns Object[]{gameId, count}. */
+    @Query("SELECT a.game.id, COUNT(a) FROM Article a WHERE a.game.id IN :gameIds AND a.status = :status GROUP BY a.game.id")
+    List<Object[]> countReadyByGameIds(@Param("gameIds") List<Long> gameIds,
+                                        @Param("status") Article.ArticleStatus status);
+
+    // Legacy: single-game query kept for backward compatibility
     /** Find the earliest READY article with a cover image for a game (for thumbnail URL). */
     @Query("SELECT a FROM Article a WHERE a.game.id = :gameId AND a.status = :status AND a.coverImage IS NOT NULL ORDER BY a.createdAt ASC")
     List<Article> findEarliestReadyWithCover(@Param("gameId") Long gameId,
@@ -110,4 +122,13 @@ public interface ArticleRepository extends JpaRepository<Article, Long> {
            "com.gamesaves.gamesaves.entity.Article.ArticleStatus.UPLOADING) " +
            "AND a.updatedAt < :cutoff")
     long countStaleFailedOrUploading(@Param("cutoff") LocalDateTime cutoff);
+
+    // ── Cascade delete / admin ─────────────────────────────────────────
+
+    /** Find all articles for a game (any status). */
+    @Query("SELECT a FROM Article a WHERE a.game.id = :gameId")
+    List<Article> findAllByGameId(@Param("gameId") Long gameId);
+
+    /** Count articles by status (for dashboard). */
+    long countByStatus(Article.ArticleStatus status);
 }

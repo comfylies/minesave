@@ -9,12 +9,15 @@ import com.gamesaves.gamesaves.entity.GameAlias;
 import com.gamesaves.gamesaves.exception.BadRequestException;
 import com.gamesaves.gamesaves.exception.ResourceNotFoundException;
 import com.gamesaves.gamesaves.repository.ArticleRepository;
+import com.gamesaves.gamesaves.repository.CommentRepository;
+import com.gamesaves.gamesaves.repository.DownloadLogRepository;
 import com.gamesaves.gamesaves.repository.GameAliasRepository;
 import com.gamesaves.gamesaves.repository.GameRepository;
 import com.gamesaves.gamesaves.repository.SafePathRepository;
 import com.gamesaves.gamesaves.repository.SavingsRepository;
 import com.gamesaves.gamesaves.service.GameService;
 import com.gamesaves.gamesaves.service.SearchSyncService;
+import com.gamesaves.gamesaves.service.StorageService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -36,19 +39,28 @@ public class GameServiceImpl implements GameService {
     private final SavingsRepository savingsRepository;
     private final SafePathRepository safePathRepository;
     private final SearchSyncService searchSyncService;
+    private final CommentRepository commentRepository;
+    private final DownloadLogRepository downloadLogRepository;
+    private final StorageService storageService;
 
     public GameServiceImpl(GameRepository gameRepository,
                            GameAliasRepository aliasRepository,
                            ArticleRepository articleRepository,
                            SavingsRepository savingsRepository,
                            SafePathRepository safePathRepository,
-                           SearchSyncService searchSyncService) {
+                           SearchSyncService searchSyncService,
+                           CommentRepository commentRepository,
+                           DownloadLogRepository downloadLogRepository,
+                           StorageService storageService) {
         this.gameRepository = gameRepository;
         this.aliasRepository = aliasRepository;
         this.articleRepository = articleRepository;
         this.savingsRepository = savingsRepository;
         this.safePathRepository = safePathRepository;
         this.searchSyncService = searchSyncService;
+        this.commentRepository = commentRepository;
+        this.downloadLogRepository = downloadLogRepository;
+        this.storageService = storageService;
     }
 
     // ──────────────────────────────────────────────
@@ -226,6 +238,43 @@ public class GameServiceImpl implements GameService {
         } catch (DataIntegrityViolationException e) {
             throw new BadRequestException("Cannot delete game: it has associated articles");
         }
+    }
+
+    @Override
+    public int deleteGameCascade(Long id) {
+        Game game = gameRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Game", id));
+
+        // 1. 查找所有关联存档（任意状态）
+        List<Article> articles = articleRepository.findAllByGameId(id);
+        int articleCount = articles.size();
+        log.info("Cascade-deleting game '{}' (id={}) with {} articles", game.getName(), id, articleCount);
+
+        // 2. 逐个删除存档（含存储文件、评论、下载记录、搜索索引）
+        for (Article article : articles) {
+            try {
+                String prefix = storageService.articleKeyFromRoot(article.getStorageRoot(), "");
+                storageService.deleteDirectory(prefix);
+            } catch (Exception e) {
+                log.warn("Failed to delete storage files for article {}: {}", article.getId(), e.getMessage());
+            }
+            try { searchSyncService.deleteArticle(article.getId()); } catch (Exception e) { /* ignore */ }
+            commentRepository.deleteByArticleId(article.getId());
+            downloadLogRepository.deleteByArticleId(article.getId());
+            savingsRepository.deleteByArticleId(article.getId());
+            articleRepository.delete(article);
+        }
+
+        // 3. 清理别名、安全路径
+        aliasRepository.deleteByGameId(id);
+        safePathRepository.deleteByGameId(id);
+
+        // 4. 删除搜索索引 + 游戏本身
+        searchSyncService.deleteGame(id);
+        gameRepository.delete(game);
+
+        log.info("Game '{}' (id={}) cascade-deleted with {} articles", game.getName(), id, articleCount);
+        return articleCount;
     }
 
     // ──────────────────────────────────────────────

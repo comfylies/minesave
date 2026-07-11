@@ -27,6 +27,7 @@ public class ArticleListItemResponse {
     private Integer downloadCount;
     private String status;
     private String coverImage;
+    private String coverThumbnail;  // 360p 缩略图 URL（列表/卡片），可能为 null（缩略图不存在时降级到原图）
     private List<String> tagNames;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

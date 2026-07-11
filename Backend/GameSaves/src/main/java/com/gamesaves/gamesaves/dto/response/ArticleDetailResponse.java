@@ -33,6 +33,8 @@ public class ArticleDetailResponse {
     private String status;
     private String errorMessage;
     private String coverImage;
+    private String coverThumbnail;    // 360p 缩略图 URL（用于卡片/列表展示）
+    private String coverThumbnail720;  // 720p 缩略图 URL（用于详情页封面图）
     private List<TagResponse> tags;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

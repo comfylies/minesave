@@ -17,4 +17,8 @@ public class DashboardStatsResponse {
     private long commentCount;
     private long downloadCount;
     private long imageStorageBytes;
+
+    // 待处理统计
+    private long failedArticleCount;
+    private long uploadingArticleCount;
 }

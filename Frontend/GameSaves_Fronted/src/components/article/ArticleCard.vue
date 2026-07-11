@@ -61,10 +61,10 @@ const props = defineProps({
 const coverFailed = ref(false)
 const useOriginal = ref(false)
 
-// Start with thumbnail; fall back to original on error
+// Start with server-provided thumbnail (360p). Fallback to client-side derivation for legacy data.
 const coverSrc = computed(() => {
   if (useOriginal.value) return props.article.coverImage
-  return thumbUrl(props.article.coverImage, 360) || props.article.coverImage
+  return props.article.coverThumbnail || thumbUrl(props.article.coverImage, 360) || props.article.coverImage
 })
 
 function onCoverError() {

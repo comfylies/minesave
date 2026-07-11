@@ -19,12 +19,7 @@ Game Save Sharing Platform (游戏存档分享平台) — GitHub-style file brow
 ./mvnw spring-boot:run -Dspring-boot.run.profiles=cos    # COS production storage
 ```
 
-### Frontend (`Frontend/GameSaves_Fronted/`)
-
-```bash
-npm run dev      # :3000, proxies /api and /storage → localhost:8080
-npm run build    # Production build
-```
+IntelliJ run configurations are pre-made in `.run/` (GameSaves [local], [minio], [cos]).
 
 ### Database
 
@@ -35,6 +30,15 @@ mysql -u root -p3256 gamesaving < test_data_insert.sql
 ```
 
 MySQL 8.0, database `gamesaving`, user `root`, password `3256`. JPA `ddl-auto: validate` — entities MUST match table schema; all tables created manually via SQL scripts. Test users: `admin` / `player_one` / `speedrunner`, password `password123`.
+
+**Migration SQL** files live either at the project root or in `Backend/GameSaves/` (e.g., `migration_add_site_settings.sql`). Apply them manually with `mysql` CLI.
+
+### Frontend (`Frontend/GameSaves_Fronted/`)
+
+```bash
+npm run dev      # :3000, proxies /api and /storage → localhost:8080
+npm run build    # Production build
+```
 
 ## Backend Architecture
 
@@ -47,7 +51,7 @@ All file I/O goes through `StorageService` — never touch the filesystem direct
 | Value | Class | Use case |
 |-------|-------|----------|
 | `local` (default) | `LocalStorageServiceImpl` | Local filesystem, maps keys → `Database/{userId}/{gameId}/{articleId}/` with path traversal guard |
-| `s3` | `S3StorageServiceImpl` | AWS S3-compatible (MinIO for test, Tencent COS for production). Uses AWS SDK v2. |
+| `s3` | `S3StorageServiceImpl` | AWS S3-compatible (MinIO for test, Tencent COS for production). Uses AWS SDK v2. Production (COS) requires env vars: `COS_ACCESS_KEY`, `COS_SECRET_KEY`, `COS_APPID`. |
 
 Key semantics:
 - All keys use forward-slash format: `articles/{userId}/{gameId}/{articleId}/{filename}`
@@ -57,7 +61,7 @@ Key semantics:
 
 ### Auth (Sa-Token 1.44.0 + JWT)
 
-Token-based auth via Sa-Token with **JWT mode enabled** (`is-jwt: true`). Token name: `Authorization` header. JWT timeout 7 days (no active/idle timeout — JWT is stateless, server restarts don't invalidate tokens). `StpInterfaceImpl` loads role→permission mapping (admin → `user:manage` + `article:manage`).
+Token-based auth via Sa-Token with **JWT mode enabled** (`is-jwt: true`). Config classes: `SaTokenConfig` (route-level rules) + `SaTokenJwtConfig` (JWT plugin setup) + `StpInterfaceImpl` (role→permission mapping: admin → `user:manage` + `article:manage`). Token name: `Authorization` header. JWT timeout 7 days (no active/idle timeout — JWT is stateless, server restarts don't invalidate tokens).
 
 **Route-level auth** (`SaTokenConfig`):
 - `/api/auth/**` — public
@@ -164,13 +168,24 @@ Global tag pool via `Tag` entity. Articles have many-to-many association with ta
 
 Ghost articles = storage files without corresponding DB records (orphaned from failed uploads or game merges). `AdminGhosts.vue` + backend endpoint scan storage directories against the `articles` table to find and report ghosts.
 
+### Site Settings System
+
+Key-value store for site-wide configuration (`SiteSetting` entity, `site_settings` table). Currently supports `background_image_url` (homepage hero background). `SiteSettingController` provides public GET and admin POST endpoints. Frontend admin panel at `AdminSiteSettings.vue` (`/admin/site-settings`). Migration SQL at `Backend/GameSaves/migration_add_site_settings.sql`.
+
+### DataInitializer (Startup Bootstrap)
+
+`DataInitializer` is a `CommandLineRunner` that runs on startup in **non-prod profiles only**. It:
+- Ensures 3 test users exist with correctly BCrypt-hashed passwords (`password123`): `admin`, `player_one`, `speedrunner`
+- Rebuilds the Meilisearch search index via `SearchSyncService.rebuildAll()`
+- Resets test user passwords on every startup to keep them in a known-good state regardless of SQL init file contents
+
 ### API Convention
 
 All responses: `{ "code": 200, "message": "...", "data": {...} }`. Pagination: `PageDTO<T>` with `content/page/size/total`. Exceptions → `GlobalExceptionHandler` maps to HTTP status codes (see `exception/` package).
 
 ### Key Dependencies
 
-Apache Commons Compress 1.26 (ZIP/7z/tar), CommonMark 0.22 + GFM extensions (Markdown → HTML), BCrypt (password only, no full Spring Security), HikariCP (connection pool), Meilisearch Java SDK 0.14.4, AWS S3 SDK v2 2.29.52, TwelveMonkeys ImageIO 3.12 (WebP/JPEG thumbnails), Sa-Token 1.44.0 + sa-token-jwt plugin.
+Apache Commons Compress 1.26 (ZIP/7z/tar), CommonMark 0.22 + GFM extensions (Markdown → HTML), BCrypt (password only, no full Spring Security), HikariCP (connection pool), Meilisearch Java SDK 0.14.4, AWS S3 SDK v2 2.29.52, TwelveMonkeys ImageIO 3.12 (WebP/JPEG thumbnails), Sa-Token 1.44.0 + sa-token-jwt plugin, OkHttp 4.12 (Meilisearch SDK HTTP client), Lombok.
 
 ## Frontend Architecture
 
@@ -201,13 +216,17 @@ JWT token stored as `satoken` in `localStorage`. User object also cached in `loc
 | `auth` | `currentUser`, `token`, `isLoggedIn`, `isAdmin` | Auth state, login/logout/register actions |
 | `articles` | `currentArticle`, `articleList`, `pagination` | Article CRUD, game/user-specific listings |
 | `games` | Game list, search results | Game browsing and search |
-| `files` | File tree for current article | File browser state |
+| `files` | File tree, current path, breadcrumbs | File browser state for article file trees |
+
+### API Modules (`api/`)
+
+12 modules all using the shared Axios instance from `client.js`: `authApi`, `userApi`, `gameApi`, `articleApi`, `fileApi`, `commentApi`, `searchApi`, `tagApi`, `announcementApi`, `adminApi`, `siteSettingsApi`.
 
 ### Router & Layouts
 
 Two layouts:
-- **DefaultLayout** (`/`) — AppNavbar + AppFooter, used for Home/Game/Article/Search/Upload/MySaves/UserProfile
-- **AdminLayout** (`/admin/*`) — separate admin shell, requires auth + admin role
+- **DefaultLayout** (`/`) — AppNavbar + AppFooter. Routes: Home (`/`, `noHeaderOffset` for hero), Browse (`/browse`, wide), Game (`/games/:gameId`, wide), Article (`/articles/:articleId`), Search (`/search`, wide), Upload (auth), MySaves (auth), UserProfile
+- **AdminLayout** (`/admin/*`) — separate admin shell with sidebar, 8 sub-routes: Dashboard, Users, Articles, Announcements, Games, Cleanup, Ghosts, Site Settings
 
 Router guard checks `satoken` in localStorage for `requiresAuth` routes, and `currentUser.role === 'admin'` for `requiresAdmin` routes. Redirects to login with `redirect` query param on missing auth.
 
@@ -216,10 +235,11 @@ Router guard checks `satoken` in localStorage for `requiresAuth` routes, and `cu
 Text selection and commenting on file contents (README + preview-able text files). Built on `@recogito/text-annotator` (W3C Web Annotation standard):
 
 - **`useTextAnnotator`** composable — wraps recogito for selection management and event system. Uses a **no-op custom renderer** — recogito handles spatial index/hover/selection but produces zero DOM output.
-- **`HighlightManager`** — custom rendering: colored highlight backgrounds + dotted underlines on annotated text ranges.
-- **`BorderLayer`** — left-side color bars marking annotated paragraphs.
+- **`HighlightManager`** — custom rendering via CSS Custom Highlight API: colored highlight backgrounds + dotted underlines on annotated text ranges. Zero DOM overhead, no reflow impact.
+- **`BorderLayer`** — left-side color bars marking annotated paragraphs. Uses ResizeObserver + rAF for performance.
 - **`AnnotationPanel`** — sidebar showing all annotations for the current file, with scroll-to-annotation.
 - **`AnnotationPopup`** — floating popup when text is selected, for creating new annotations.
+- **`useViewMode`** — global singleton composable for gallery/cover view toggle, persisted to localStorage.
 
 Annotations are stored as `Comment` entities with W3C-compatible selectors (`TextQuoteSelector` + `TextPositionSelector`) serialized in the `anchor` JSON field. This split-selector approach fixes a historical bug where recogito couldn't resolve single-selector annotations.
 
@@ -229,10 +249,20 @@ Text files with extensions in `app.preview.allowed-extensions` (txt, md, json, x
 
 ### Key Views
 
+- **HomePage**: Google-style centered search hero with background image (configurable via Site Settings). `noHeaderOffset` meta — navbar overlays the hero.
+- **BrowsePage**: Wide-layout browse/discover page for exploring games and saves.
 - **ArticlePage**: 3-column GitHub-style layout — FileBrowser (tree) + ReadmeRenderer (Markdown with syntax highlighting via highlight.js) + AnnotationPanel
 - **UploadPage**: Archive upload + README dual-mode (hand-written Markdown OR upload .md file). Game creation embedded inline with abuse prevention.
 - **GamePage**: Game detail + article list with gallery/cover views
-- **Admin**: 7 management views — Dashboard, Users, Articles, Announcements, Games, Cleanup (failed archive cleanup trigger + status), Ghosts (orphaned storage diagnostics)
+- **Admin**: 8 management views — Dashboard, Users, Articles, Announcements, Games, Cleanup (failed archive cleanup trigger + status), Ghosts (orphaned storage diagnostics), Site Settings
+
+### Frontend Utilities
+
+- `utils/format.js` — file size, relative time, date formatting, text truncation, status mapping
+- `utils/imageUrl.js` — thumbnail URL derivation (original URL → 270p/360p/720p variants)
+- `assets/styles/variables.css` — design tokens (GitHub-style light theme: white bg, black text, border colors)
+- `assets/styles/global.css` — global styles + Element Plus theme overrides
+- `assets/styles/github-markdown.css` — Markdown rendering styles
 
 ### Key Dependencies
 
@@ -240,8 +270,11 @@ Vue 3.5, Vite 8, Element Plus 2.14, Pinia 3, Vue Router 4, Axios, marked (Markdo
 
 ## Known Limitations
 
-- No DB migration tool (manual SQL for schema changes). Migration SQL files live in project root when needed.
+- No DB migration tool (manual SQL for schema changes). Migration SQL files live at project root or `Backend/GameSaves/` — apply with `mysql` CLI.
 - No full Spring Security — only Sa-Token for auth.
 - Meilisearch must be running separately for search to work (install + run `meilisearch` on port 7700 with master key matching config).
 - RAR archives are detected but not extracted (only ZIP, 7z, tar, tar.gz).
 - JWT mode means tokens can't be invalidated server-side before expiry — logout only clears client-side state.
+- No frontend test setup (no vitest/jest configured).
+- Frontend has no `.env` files — API base URL handled via Vite proxy (dev) or reverse proxy (production).
+- `Database/` directory (uploaded files) is gitignored — not part of this repo.

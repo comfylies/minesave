@@ -37,9 +37,6 @@ public class ImageThumbnailService {
     public static final int README_MAX_SHORT = 720;
 
     // JPEG quality (0.0–1.0). 0.85 is the sweet spot: near-lossless visually, ~3× smaller than PNG.
-    // Height-targeted thumbnail suffix
-    public static final String THUMB_360H_SUFFIX = "_360h.jpg";
-
     // JPEG quality (0.0–1.0). 0.85 is the sweet spot: near-lossless visually, ~3× smaller than PNG.
     private static final float JPEG_QUALITY = 0.85f;
 
@@ -50,9 +47,10 @@ public class ImageThumbnailService {
     public static void generateCoverThumbnails(Path originalPath, Path outputDir) throws IOException {
         BufferedImage original = ImageIO.read(originalPath.toFile());
         if (original == null) {
-            // WebP and other formats not natively supported by JDK
-            // Thumbnails are skipped — frontend falls back to original image
-            log.warn("Cannot decode image for thumbnails (format not supported by JDK): {}."
+            // WebP 等格式依赖 TwelveMonkeys ImageIO 插件（已在 pom.xml 中引入 imageio-webp）。
+            // 若插件未正确注册（如 SPI 冲突），ImageIO.read 返回 null，缩略图将被跳过。
+            // 前端通过 onCoverError 降级到原图。
+            log.warn("Cannot decode image for thumbnails (format not supported by ImageIO): {}."
                     + " Original will be used directly.", originalPath.getFileName());
             return;
         }
@@ -67,42 +65,6 @@ public class ImageThumbnailService {
             writeJpeg(thumb, outPath);
             log.debug("Cover thumbnail generated: {} ({}×{})", outPath.getFileName(), w, h);
         }
-    }
-
-    /**
-     * Generate a proportional 360px-height thumbnail (width follows aspect ratio).
-     * Output written to the same directory as source: {@code {name}_360h.jpg}.
-     *
-     * @param source path to the original image
-     * @return path to the generated thumbnail, or null if the format is unsupported
-     */
-    public static Path generateThumbnail360h(Path source) throws IOException {
-        BufferedImage original = ImageIO.read(source.toFile());
-        if (original == null) {
-            log.warn("Cannot decode image for 360h thumbnail (format not supported by JDK): {}",
-                    source.getFileName());
-            return null;
-        }
-
-        int origW = original.getWidth();
-        int origH = original.getHeight();
-
-        // Already small enough — no need for a separate thumbnail
-        if (origH <= 360) {
-            log.debug("Image height <= 360px, skipping 360h thumbnail: {}", source.getFileName());
-            return null;
-        }
-
-        int newH = 360;
-        int newW = (int) Math.round(origW * 360.0 / origH);
-        BufferedImage thumb = resize(original, newW, newH);
-
-        String origName = source.getFileName().toString();
-        String thumbName = stripExtension(origName) + THUMB_360H_SUFFIX;
-        Path thumbPath = source.resolveSibling(thumbName);
-        writeJpeg(thumb, thumbPath);
-        log.debug("360h thumbnail generated: {} ({}×{})", thumbPath.getFileName(), newW, newH);
-        return thumbPath;
     }
 
     /**

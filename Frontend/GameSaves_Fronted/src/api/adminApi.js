@@ -54,7 +54,17 @@ export const adminApi = {
     return client.post('/admin/games/merge', null, { params: { sourceId, targetId } })
   },
 
-  // ==================== 失败存档清理 ====================
+  /** 级联删除游戏及其所有存档 */
+  deleteGame(gameId) {
+    return client.delete(`/admin/games/${gameId}`)
+  },
+
+  // ==================== 文章批量操作 ====================
+
+  /** 批量删除文章 */
+  batchDeleteArticles(ids) {
+    return client.delete('/admin/articles/batch', { data: ids })
+  },
 
   // ==================== 幽灵文章诊断 ====================
 
@@ -66,6 +76,13 @@ export const adminApi = {
   /** 批量删除幽灵文章 */
   deleteGhostArticles(ids) {
     return client.delete('/admin/articles/ghosts', { data: ids })
+  },
+
+  // ==================== 审计日志 ====================
+
+  /** 获取审计日志列表 */
+  getAuditLogs(page = 0, size = 20) {
+    return client.get('/admin/audit-logs', { params: { page, size } })
   },
 
   // ==================== 失败存档清理 ====================

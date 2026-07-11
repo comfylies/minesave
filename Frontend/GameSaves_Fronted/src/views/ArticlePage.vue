@@ -149,14 +149,14 @@ import { articleApi } from '../api/articleApi'
 import { fileApi } from '../api/fileApi'
 import { thumbUrl } from '../utils/imageUrl'
 
-// Cover image fallback: 720p → original
+// Cover image fallback: server 720p thumbnail → client derivation → original
 const coverFailed = ref(false)
 const useOriginal = ref(false)
 const coverSrc = computed(() => {
   const img = articleStore.currentArticle?.coverImage
   if (!img) return ''
   if (useOriginal.value) return img
-  return thumbUrl(img, 720) || img
+  return articleStore.currentArticle?.coverThumbnail720 || thumbUrl(img, 720) || img
 })
 function onCoverError() {
   if (!useOriginal.value) {

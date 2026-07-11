@@ -217,11 +217,11 @@ public class ArticleServiceImpl implements ArticleService {
                     try {
                         coverFile.transferTo(tempCover.toFile());
 
-                        // 上传原图
+                        // 上传原图，DB 存储 key（非预签名 URL，避免链接过期）
                         String coverFilename = "cover." + coverExt;
                         String coverKey = storageService.articleKey(user.getId(), game.getId(), article.getId(), coverFilename);
                         storageService.storeFromPath(coverKey, tempCover);
-                        article.setCoverImage(storageService.generatePresignedUrl(coverKey, 1440));
+                        article.setCoverImage(coverKey);
 
                         // 生成缩略图并上传（270p/360p/720p）
                         Path thumbDir = Files.createTempDirectory("thumbs-");
@@ -237,17 +237,6 @@ public class ArticleServiceImpl implements ArticleService {
                             }
                         } finally {
                             deleteRecursively(thumbDir);
-                        }
-                        // 360h 缩略图（按比例，高 360px），用于管理后台游戏列表
-                        Path thumb360h = ImageThumbnailService.generateThumbnail360h(tempCover);
-                        if (thumb360h != null && Files.exists(thumb360h)) {
-                            try {
-                                String thumb360hKey = storageService.articleKey(
-                                        user.getId(), game.getId(), article.getId(), "cover_thumb_360.jpg");
-                                storageService.storeFromPath(thumb360hKey, thumb360h);
-                            } finally {
-                                Files.deleteIfExists(thumb360h);
-                            }
                         }
                         log.info("Cover image & thumbnails uploaded for article {}: {}", article.getId(), coverFilename);
                     } finally {
@@ -288,7 +277,13 @@ public class ArticleServiceImpl implements ArticleService {
                 .orElseThrow(() -> new ResourceNotFoundException("Article", id));
 
         Savings savings = savingsRepository.findByArticleId(id).orElse(null);
-        return ArticleDetailResponse.fromEntity(article, savings);
+        ArticleDetailResponse response = ArticleDetailResponse.fromEntity(article, savings);
+        // 将 storage key 解析为可公开访问的 URL
+        String coverKey = article.getCoverImage();
+        response.setCoverImage(resolveCoverUrl(coverKey));
+        response.setCoverThumbnail(resolveCoverThumbnailUrl(coverKey, 360));
+        response.setCoverThumbnail720(resolveCoverThumbnailUrl(coverKey, 720));
+        return response;
     }
 
     @Override
@@ -347,6 +342,11 @@ public class ArticleServiceImpl implements ArticleService {
 
         List<ArticleListItemResponse> content = articles.stream()
                 .map(ArticleListItemResponse::fromEntity)
+                .peek(item -> {
+                    String coverKey = item.getCoverImage();
+                    item.setCoverImage(resolveCoverUrl(coverKey));
+                    item.setCoverThumbnail(resolveCoverThumbnailUrl(coverKey, 360));
+                })
                 .collect(Collectors.toList());
 
         return PageDTO.of(content, page, size, total);
@@ -361,6 +361,11 @@ public class ArticleServiceImpl implements ArticleService {
 
         List<ArticleListItemResponse> content = articles.stream()
                 .map(ArticleListItemResponse::fromEntity)
+                .peek(item -> {
+                    String coverKey = item.getCoverImage();
+                    item.setCoverImage(resolveCoverUrl(coverKey));
+                    item.setCoverThumbnail(resolveCoverThumbnailUrl(coverKey, 360));
+                })
                 .collect(Collectors.toList());
 
         return PageDTO.of(content, page, size, total);
@@ -414,6 +419,56 @@ public class ArticleServiceImpl implements ArticleService {
         } catch (IOException e) {
             throw new BadRequestException("Failed to read cover image: " + e.getMessage());
         }
+    }
+
+    // ── 封面图 URL 解析 ──
+
+    /**
+     * 将存储 key 解析为对外 URL。
+     *
+     * <p>DB 中存储的是 storage key（如 {@code articles/1/2/42/cover.png}），
+     * 读取时转为可公开访问的 URL。兼容存量数据中已存为 URL 的情况。
+     */
+    private String resolveCoverUrl(String coverKey) {
+        if (coverKey == null || coverKey.isBlank()) return null;
+        // 存量数据：已是完整 URL（http/https 或 /storage/ 路径），直接返回
+        if (coverKey.startsWith("http://") || coverKey.startsWith("https://")
+                || coverKey.startsWith("/storage/")) {
+            return coverKey;
+        }
+        // 新数据：storage key → public URL
+        try {
+            return storageService.getPublicUrl(coverKey);
+        } catch (Exception e) {
+            log.warn("Failed to resolve cover URL for key {}: {}", coverKey, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 推导封面缩略图的对外 URL。
+     * 从封面 key 推导缩略图 key（{@code cover_thumb_{size}.jpg}），若缩略图存在则返回其 public URL。
+     *
+     * @param coverKey 封面 storage key（如 {@code articles/1/2/42/cover.png}）
+     * @param size     缩略图尺寸：270 / 360 / 720
+     * @return 缩略图 URL，若缩略图不存在则返回 null（前端降级到原图）
+     */
+    private String resolveCoverThumbnailUrl(String coverKey, int size) {
+        if (coverKey == null || coverKey.isBlank()) return null;
+        // 存量 URL 无法推导缩略图 key
+        if (coverKey.startsWith("http://") || coverKey.startsWith("https://")
+                || coverKey.startsWith("/storage/")) {
+            return null;
+        }
+        String thumbKey = coverKey.replaceAll("\\.[^.]+$", "_thumb_" + size + ".jpg");
+        try {
+            if (storageService.exists(thumbKey)) {
+                return storageService.getPublicUrl(thumbKey);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to resolve thumbnail URL for key {}: {}", thumbKey, e.getMessage());
+        }
+        return null;
     }
 
     // ── 压缩包预检（本地 temp 文件，不访问网络）──

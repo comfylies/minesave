@@ -25,4 +25,9 @@ public interface SavingsRepository extends JpaRepository<Savings, Long> {
     @Modifying
     @Query("UPDATE Savings s SET s.gameId = :targetId WHERE s.gameId = :sourceId")
     int updateGameId(@Param("sourceId") Long sourceId, @Param("targetId") Long targetId);
+
+    /** Admin cascade delete: remove all savings for a game. */
+    @Modifying
+    @Query("DELETE FROM Savings s WHERE s.gameId = :gameId")
+    int deleteByGameId(@Param("gameId") Long gameId);
 }

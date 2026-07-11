@@ -7,6 +7,7 @@ import com.gamesaves.gamesaves.dto.request.AnnouncementCreateRequest;
 import com.gamesaves.gamesaves.dto.request.TagCreateRequest;
 import com.gamesaves.gamesaves.dto.response.*;
 import com.gamesaves.gamesaves.exception.BadRequestException;
+import com.gamesaves.gamesaves.service.AdminAuditLogService;
 import com.gamesaves.gamesaves.service.AdminService;
 import com.gamesaves.gamesaves.service.AnnouncementService;
 import com.gamesaves.gamesaves.service.CleanupScheduler;
@@ -44,6 +45,7 @@ public class AdminController {
     private final StorageService storageService;
     private final GameService gameService;
     private final SiteSettingService siteSettingService;
+    private final AdminAuditLogService auditLogService;
 
     public AdminController(AdminService adminService, AnnouncementService announcementService,
                            TagService tagService, SearchSyncService searchSyncService,
@@ -51,7 +53,8 @@ public class AdminController {
                            CleanupScheduler cleanupScheduler,
                            StorageService storageService,
                            GameService gameService,
-                           SiteSettingService siteSettingService) {
+                           SiteSettingService siteSettingService,
+                           AdminAuditLogService auditLogService) {
         this.adminService = adminService;
         this.announcementService = announcementService;
         this.tagService = tagService;
@@ -61,6 +64,22 @@ public class AdminController {
         this.storageService = storageService;
         this.gameService = gameService;
         this.siteSettingService = siteSettingService;
+        this.auditLogService = auditLogService;
+    }
+
+    // ── 审计日志辅助方法 ──
+    private void audit(String action, String targetType, Long targetId, String detail) {
+        auditLogService.log(action, targetType, targetId, detail);
+    }
+
+    /** 获取审计日志列表 */
+    @GetMapping("/audit-logs")
+    @SaCheckPermission("user:manage")
+    public ApiResponse<Page<com.gamesaves.gamesaves.entity.AdminAuditLog>> listAuditLogs(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return ApiResponse.success(auditLogService.list(
+                PageRequest.of(page, size, Sort.by("createdAt").descending())));
     }
 
     @GetMapping("/dashboard")
@@ -85,6 +104,7 @@ public class AdminController {
     @SaCheckPermission("user:manage")
     public ApiResponse<AdminUserResponse> toggleUserBan(@PathVariable Long id) {
         AdminUserResponse user = adminService.toggleUserBan(id);
+        audit("toggle_ban", "user", id, user.getIsActive() ? "解封" : "封禁");
         return ApiResponse.success(user);
     }
 
@@ -104,7 +124,20 @@ public class AdminController {
     @SaCheckPermission("article:manage")
     public ApiResponse<String> deleteArticle(@PathVariable Long id) {
         adminService.deleteArticle(id);
+        audit("delete_article", "article", id, "单篇删除");
         return ApiResponse.success("Article deleted", "ok");
+    }
+
+    /** 批量删除文章 */
+    @DeleteMapping("/articles/batch")
+    @SaCheckPermission("article:manage")
+    public ApiResponse<Map<String, Object>> batchDeleteArticles(@RequestBody List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            throw new BadRequestException("请提供要删除的文章 ID 列表");
+        }
+        int deleted = adminService.deleteGhostArticles(ids);
+        audit("batch_delete_articles", "article", null, "批量删除 " + deleted + "/" + ids.size() + " 篇");
+        return ApiResponse.success(Map.of("deleted", deleted, "requested", ids.size()));
     }
 
     // ==================== 幽灵文章诊断 ====================
@@ -410,12 +443,27 @@ public class AdminController {
             @RequestParam Long sourceId,
             @RequestParam Long targetId) {
         Map<String, Object> result = gameService.mergeGames(sourceId, targetId);
+        audit("merge_games", "game", sourceId,
+                "合并 game#" + sourceId + " → game#" + targetId);
         return ApiResponse.success("Games merged", result);
+    }
+
+    /** 级联删除游戏及其所有存档 */
+    @DeleteMapping("/games/{id}")
+    @SaCheckPermission("user:manage")
+    public ApiResponse<Map<String, Object>> deleteGameCascade(@PathVariable Long id) {
+        int articleCount = gameService.deleteGameCascade(id);
+        audit("delete_game_cascade", "game", id, "级联删除 " + articleCount + " 篇存档");
+        return ApiResponse.success("Game and all articles deleted", Map.of(
+                "gameId", id,
+                "articlesDeleted", articleCount
+        ));
     }
 
     // ==================== 失败存档清理 ====================
 
-    private volatile long lastManualTriggerTime = 0;
+    private final Object cleanupLock = new Object();
+    private long lastManualTriggerTime = 0;
 
     /** 手动触发清理 */
     @PostMapping("/cleanup/trigger")
@@ -423,13 +471,15 @@ public class AdminController {
     public ApiResponse<Map<String, Object>> triggerCleanup(
             @RequestParam(defaultValue = "all") String mode) {
 
-        // Rate limit: 60s between manual triggers
-        long now = System.currentTimeMillis();
-        long elapsed = now - lastManualTriggerTime;
-        if (elapsed < 60_000) {
-            throw new BadRequestException("清理间隔需大于 60 秒，请 " + (60 - elapsed / 1000) + " 秒后再试");
+        // 线程安全的速率限制：60s 间隔
+        synchronized (cleanupLock) {
+            long now = System.currentTimeMillis();
+            long elapsed = now - lastManualTriggerTime;
+            if (elapsed < 60_000) {
+                throw new BadRequestException("清理间隔需大于 60 秒，请 " + (60 - elapsed / 1000) + " 秒后再试");
+            }
+            lastManualTriggerTime = now;
         }
-        lastManualTriggerTime = now;
 
         if (!mode.equals("all") && !mode.equals("failed-only")) {
             throw new BadRequestException("无效的清理模式，仅支持 all 或 failed-only");

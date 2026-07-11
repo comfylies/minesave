@@ -29,4 +29,10 @@ public interface GameService {
     List<GameResponse> getTopGames(String sort, int limit);
 
     Map<String, Object> mergeGames(Long sourceId, Long targetId);
+
+    /**
+     * 级联删除游戏及其所有存档（含存储文件、评论、下载记录、别名、安全路径）。
+     * @return 删除的存档数量
+     */
+    int deleteGameCascade(Long id);
 }
