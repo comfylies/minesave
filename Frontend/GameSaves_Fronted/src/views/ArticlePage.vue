@@ -46,7 +46,7 @@
         <!-- 右侧信息栏 -->
         <ArticleSidebar :article="articleStore.currentArticle">
           <template v-if="isOwner || auth.isAdmin" #actions>
-            <el-button size="small" @click="showEditDialog = true">
+            <el-button size="small" @click="router.push(`/articles/${articleId}/edit`)">
               <el-icon><Edit /></el-icon>
               编辑
             </el-button>
@@ -97,25 +97,6 @@
       </div>
     </template>
 
-    <!-- 编辑对话框 -->
-    <el-dialog v-model="showEditDialog" title="编辑存档" width="500px">
-      <el-form :model="editForm" label-position="top">
-        <el-form-item label="标题">
-          <el-input v-model="editForm.title" />
-        </el-form-item>
-        <el-form-item label="版本">
-          <el-input v-model="editForm.version" />
-        </el-form-item>
-        <el-form-item label="描述">
-          <el-input v-model="editForm.description" type="textarea" :rows="3" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="showEditDialog = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="saveEdit">保存</el-button>
-      </template>
-    </el-dialog>
-
     <!-- 文件预览对话框 -->
     <el-dialog
       v-model="showPreview"
@@ -145,7 +126,6 @@ import hljs from 'highlight.js'
 import { useArticleStore } from '../stores/articles'
 import { useFileStore } from '../stores/files'
 import { useAuthStore } from '../stores/auth'
-import { articleApi } from '../api/articleApi'
 import { fileApi } from '../api/fileApi'
 import { thumbUrl } from '../utils/imageUrl'
 
@@ -242,11 +222,6 @@ function onPositionsUpdated({ positions, readmeContentTop: contentTop }) {
   readmeContentTop.value = contentTop || 0
 }
 
-// 编辑对话框
-const showEditDialog = ref(false)
-const saving = ref(false)
-const editForm = ref({ title: '', version: '', description: '' })
-
 // 文件预览
 const showPreview = ref(false)
 const previewTitle = ref('')
@@ -291,31 +266,6 @@ async function previewFile(file) {
     previewError.value = `加载文件失败: ${e.message}`
   } finally {
     previewLoading.value = false
-  }
-}
-
-// ---- 编辑 ----
-watch(showEditDialog, (val) => {
-  if (val && articleStore.currentArticle) {
-    editForm.value = {
-      title: articleStore.currentArticle.title,
-      version: articleStore.currentArticle.version,
-      description: articleStore.currentArticle.description || ''
-    }
-  }
-})
-
-async function saveEdit() {
-  saving.value = true
-  try {
-    await articleApi.update(articleId.value, editForm.value)
-    ElMessage.success('存档信息已更新')
-    showEditDialog.value = false
-    await articleStore.fetchArticle(articleId.value)
-  } catch (e) {
-    // 错误已在拦截器中提示
-  } finally {
-    saving.value = false
   }
 }
 

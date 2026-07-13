@@ -2,6 +2,7 @@ package com.gamesaves.gamesaves.service.impl;
 
 import com.gamesaves.gamesaves.dto.PageDTO;
 import com.gamesaves.gamesaves.dto.request.ArticleCreateRequest;
+import com.gamesaves.gamesaves.dto.request.ArticleFullUpdateRequest;
 import com.gamesaves.gamesaves.dto.request.ArticleUpdateRequest;
 import com.gamesaves.gamesaves.dto.response.ArticleDetailResponse;
 import com.gamesaves.gamesaves.dto.response.ArticleListItemResponse;
@@ -14,6 +15,7 @@ import com.gamesaves.gamesaves.exception.BadRequestException;
 import com.gamesaves.gamesaves.exception.FileProcessingException;
 import com.gamesaves.gamesaves.exception.ResourceNotFoundException;
 import com.gamesaves.gamesaves.repository.ArticleRepository;
+import com.gamesaves.gamesaves.repository.CommentRepository;
 import com.gamesaves.gamesaves.repository.GameRepository;
 import com.gamesaves.gamesaves.repository.SavingsRepository;
 import com.gamesaves.gamesaves.repository.TagRepository;
@@ -25,6 +27,7 @@ import com.gamesaves.gamesaves.service.ZipExtractionService;
 import com.gamesaves.gamesaves.util.ArchiveFormat;
 import com.gamesaves.gamesaves.util.ImageThumbnailService;
 import com.gamesaves.gamesaves.util.XssFilter;
+import cn.dev33.satoken.stp.StpUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -47,6 +50,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDate;
 import java.util.Enumeration;
 import java.util.HashSet;
 import java.util.List;
@@ -74,6 +78,7 @@ public class ArticleServiceImpl implements ArticleService {
     private final ZipExtractionService zipExtractionService;
     private final SearchSyncService searchSyncService;
     private final StorageService storageService;
+    private final CommentRepository commentRepository;
 
     // ── 提取限制（从配置文件注入，与 ZipExtractionService 保持一致）──
     @Value("${app.extraction.max-file-size:524288000}")
@@ -88,6 +93,9 @@ public class ArticleServiceImpl implements ArticleService {
     @Value("${app.extraction.max-entry-count:10000}")
     private int maxEntryCount;
 
+    @Value("${app.edit.max-daily-edits:2}")
+    private int maxDailyEdits;
+
     public ArticleServiceImpl(ArticleRepository articleRepository,
                                GameRepository gameRepository,
                                UserRepository userRepository,
@@ -95,7 +103,8 @@ public class ArticleServiceImpl implements ArticleService {
                                TagRepository tagRepository,
                                ZipExtractionService zipExtractionService,
                                SearchSyncService searchSyncService,
-                               StorageService storageService) {
+                               StorageService storageService,
+                               CommentRepository commentRepository) {
         this.articleRepository = articleRepository;
         this.gameRepository = gameRepository;
         this.userRepository = userRepository;
@@ -104,6 +113,7 @@ public class ArticleServiceImpl implements ArticleService {
         this.zipExtractionService = zipExtractionService;
         this.searchSyncService = searchSyncService;
         this.storageService = storageService;
+        this.commentRepository = commentRepository;
     }
 
     /**
@@ -302,6 +312,208 @@ public class ArticleServiceImpl implements ArticleService {
 
         article = articleRepository.save(article);
         return ArticleDetailResponse.fromEntity(article);
+    }
+
+    /**
+     * 完整编辑文章 — 支持 README 文件替换、封面图替换、每日编辑次数限制。
+     *
+     * <ol>
+     *   <li>所有权校验 — 只有文章作者本人可编辑</li>
+     *   <li>状态检查 — 只有 READY 状态可编辑</li>
+     *   <li>每日次数限制 — 每天最多 {@link #maxDailyEdits} 次</li>
+     *   <li>文本字段更新 — title, version, description</li>
+     *   <li>标签更新 — 如果提供了 tagIds</li>
+     *   <li>README 更新 — 文件上传模式替换内容并删除旧批注；手写模式只替换内容</li>
+     *   <li>封面替换 — 先上传新封面再删旧的（避免上传失败丢封面）</li>
+     * </ol>
+     */
+    @Override
+    public ArticleDetailResponse updateArticleFull(Long id, ArticleFullUpdateRequest request,
+                                                    MultipartFile readmeFile, MultipartFile coverFile) {
+        // 1. 查询文章
+        Article article = articleRepository.findByIdWithUserAndGame(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Article", id));
+
+        // 2. 所有权校验
+        Long currentUserId = StpUtil.getLoginIdAsLong();
+        if (!article.getUser().getId().equals(currentUserId)) {
+            throw new BadRequestException("只能编辑自己的存档");
+        }
+
+        // 3. 状态检查 — 只有 READY 状态可编辑
+        if (article.getStatus() != Article.ArticleStatus.READY) {
+            throw new BadRequestException("存档正在处理中，请等待处理完成后再编辑");
+        }
+
+        // 4. 每日编辑次数限制
+        checkAndIncrementEditCount(article);
+
+        // 5. 更新文本字段
+        if (request.getTitle() != null && !request.getTitle().isBlank()) {
+            article.setTitle(XssFilter.sanitize(request.getTitle()));
+        }
+        if (request.getVersion() != null && !request.getVersion().isBlank()) {
+            article.setVersion(XssFilter.sanitize(request.getVersion()));
+        }
+        if (request.getDescription() != null) {
+            article.setDescription(XssFilter.sanitize(request.getDescription()));
+        }
+
+        // 6. 更新标签
+        if (request.getTagIds() != null) {
+            List<Tag> tags = tagRepository.findAllById(request.getTagIds());
+            article.setTags(new HashSet<>(tags));
+        }
+
+        // 7. README 更新
+        boolean readmeReplaced = false;
+        if (readmeFile != null && !readmeFile.isEmpty()) {
+            // 上传文件模式 — 完全替换 README，删除旧批注
+            try {
+                String newReadme = new String(readmeFile.getBytes(), java.nio.charset.StandardCharsets.UTF_8);
+                article.setReadmeRaw(newReadme);
+                article.setReadmeContent(null); // 前端用 marked 实时渲染，不需要服务端 HTML
+                readmeReplaced = true;
+                log.info("Article {} README replaced via file upload ({} bytes)", id, readmeFile.getSize());
+            } catch (IOException e) {
+                throw new FileProcessingException("无法读取上传的 README 文件: " + e.getMessage(), e);
+            }
+        } else if (request.getReadmeRaw() != null) {
+            // 手写模式 — 只替换内容，不删除批注
+            article.setReadmeRaw(request.getReadmeRaw());
+            article.setReadmeContent(null);
+        }
+
+        // 如果 README 被文件完全替换，删除旧批注
+        if (readmeReplaced) {
+            long deletedComments = commentRepository.countByArticleId(id);
+            commentRepository.deleteByArticleId(id);
+            log.info("Article {} README replaced — {} existing comments deleted", id, deletedComments);
+        }
+
+        // 8. 封面替换
+        if (coverFile != null && !coverFile.isEmpty()) {
+            replaceCoverImage(article, coverFile);
+        }
+
+        // 9. 保存
+        article = articleRepository.save(article);
+
+        // 10. 同步搜索索引
+        try {
+            searchSyncService.indexArticle(article);
+        } catch (Exception e) {
+            log.warn("Failed to re-index article {} after edit: {}", id, e.getMessage());
+        }
+
+        // 11. 构建响应（需要解析 cover URL）
+        Savings savings = savingsRepository.findByArticleId(id).orElse(null);
+        ArticleDetailResponse response = ArticleDetailResponse.fromEntity(article, savings);
+        String coverKey = article.getCoverImage();
+        response.setCoverImage(resolveCoverUrl(coverKey));
+        response.setCoverThumbnail(resolveCoverThumbnailUrl(coverKey, 360));
+        response.setCoverThumbnail720(resolveCoverThumbnailUrl(coverKey, 720));
+        return response;
+    }
+
+    /**
+     * 检查并递增每日编辑次数。
+     * 如果上次编辑日期不是今天，重置计数器；如果已达上限则拒绝。
+     */
+    private void checkAndIncrementEditCount(Article article) {
+        LocalDate today = LocalDate.now();
+        if (article.getLastEditDate() == null || !article.getLastEditDate().equals(today)) {
+            article.setLastEditDate(today);
+            article.setDailyEditCount(1);
+            return;
+        }
+        if (article.getDailyEditCount() >= maxDailyEdits) {
+            throw new BadRequestException("今日编辑次数已用完（每天最多 " + maxDailyEdits + " 次）");
+        }
+        article.setDailyEditCount(article.getDailyEditCount() + 1);
+    }
+
+    /**
+     * 替换封面图 — 先上传新图再删除旧图，确保上传失败时不会丢失封面。
+     */
+    private void replaceCoverImage(Article article, MultipartFile coverFile) {
+        String oldCoverKey = article.getCoverImage();
+
+        // 1. 校验新封面格式
+        String newExt = validateAndGetImageExtension(coverFile);
+
+        // 2. 上传新封面 + 生成缩略图
+        Long userId = article.getUser().getId();
+        Long gameId = article.getGame().getId();
+        Long articleId = article.getId();
+        String coverFilename = "cover." + newExt;
+        String newCoverKey = storageService.articleKey(userId, gameId, articleId, coverFilename);
+
+        Path tempCover = null;
+        Path thumbDir = null;
+        try {
+            tempCover = Files.createTempFile("edit-cover-", "." + newExt);
+            coverFile.transferTo(tempCover.toFile());
+
+            // 上传原图
+            storageService.storeFromPath(newCoverKey, tempCover);
+            article.setCoverImage(newCoverKey);
+
+            // 生成并上传缩略图（270p/360p/720p）
+            thumbDir = Files.createTempDirectory("edit-thumbs-");
+            ImageThumbnailService.generateCoverThumbnails(tempCover, thumbDir);
+            for (int size : new int[]{270, 360, 720}) {
+                Path thumbPath = thumbDir.resolve("cover_thumb_" + size + ".jpg");
+                if (Files.exists(thumbPath)) {
+                    String thumbKey = storageService.articleKey(userId, gameId, articleId, "cover_thumb_" + size + ".jpg");
+                    storageService.storeFromPath(thumbKey, thumbPath);
+                }
+            }
+            log.info("Article {} cover replaced: {} → {}", articleId, oldCoverKey, newCoverKey);
+        } catch (BadRequestException e) {
+            throw e;
+        } catch (IOException e) {
+            log.error("Failed to replace cover for article {}: {}", articleId, e.toString());
+            throw new FileProcessingException("封面图替换失败: " + e.getMessage(), e);
+        } finally {
+            cleanupTempFile(tempCover);
+            if (thumbDir != null) {
+                try { deleteRecursively(thumbDir); } catch (IOException ignored) {}
+            }
+        }
+
+        // 3. 删除旧封面 + 旧缩略图（新图上传成功后）
+        deleteOldCoverArtifacts(oldCoverKey);
+    }
+
+    /**
+     * 删除旧封面图及其缩略图。
+     * 每个文件独立 try-catch，某个文件不存在不影响其他删除。
+     * 兼容存量数据中 coverImage 是 URL 的情况（跳过删除）。
+     */
+    private void deleteOldCoverArtifacts(String coverKey) {
+        if (coverKey == null || coverKey.isBlank()) return;
+        // 存量 URL 数据不删
+        if (coverKey.startsWith("http://") || coverKey.startsWith("https://")
+                || coverKey.startsWith("/storage/")) {
+            return;
+        }
+        // 删除原图
+        safeDelete(coverKey);
+        // 删除缩略图（派生 key：cover.png → cover_thumb_{size}.jpg）
+        String baseKey = coverKey.replaceAll("\\.[^.]+$", "");
+        for (int size : new int[]{270, 360, 720}) {
+            safeDelete(baseKey + "_thumb_" + size + ".jpg");
+        }
+    }
+
+    /** 安全删除存储对象，失败只记日志不抛异常 */
+    private void safeDelete(String key) {
+        try {
+            storageService.delete(key);
+        } catch (Exception e) {
+            log.warn("Failed to delete old cover artifact '{}': {}", key, e.getMessage());
+        }
     }
 
     @Override

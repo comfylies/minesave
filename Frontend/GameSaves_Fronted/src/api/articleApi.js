@@ -28,6 +28,13 @@ export const articleApi = {
   update: (id, data) =>
     client.put(`/articles/${id}`, data),
 
+  /** 完整编辑存档（Multipart: metadata + 可选 readmeFile + 可选 coverFile） */
+  updateFull: (id, formData) =>
+    client.post(`/articles/${id}/edit`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 60000
+    }),
+
   /** 删除存档 */
   delete: (id) =>
     client.delete(`/articles/${id}`)

@@ -2,6 +2,7 @@ package com.gamesaves.gamesaves.service;
 
 import com.gamesaves.gamesaves.dto.PageDTO;
 import com.gamesaves.gamesaves.dto.request.ArticleCreateRequest;
+import com.gamesaves.gamesaves.dto.request.ArticleFullUpdateRequest;
 import com.gamesaves.gamesaves.dto.request.ArticleUpdateRequest;
 import com.gamesaves.gamesaves.dto.response.ArticleDetailResponse;
 import com.gamesaves.gamesaves.dto.response.ArticleListItemResponse;
@@ -16,6 +17,10 @@ public interface ArticleService {
     ArticleDetailResponse getArticleDetail(Long id);
 
     ArticleDetailResponse updateArticle(Long id, ArticleUpdateRequest request);
+
+    /** 完整编辑文章（支持 README 文件替换、封面图替换、每日次数限制） */
+    ArticleDetailResponse updateArticleFull(Long id, ArticleFullUpdateRequest request,
+                                             MultipartFile readmeFile, MultipartFile coverFile);
 
     void deleteArticle(Long id);
 

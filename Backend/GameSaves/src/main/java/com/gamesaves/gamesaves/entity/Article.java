@@ -6,6 +6,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.HashSet;
 import java.util.Set;
@@ -71,6 +72,13 @@ public class Article {
 
     @Column(name = "error_message", length = 1000)
     private String errorMessage;
+
+    @Column(name = "last_edit_date")
+    private LocalDate lastEditDate;
+
+    @Column(name = "daily_edit_count", nullable = false)
+    @Builder.Default
+    private Integer dailyEditCount = 0;
 
     @Column(name = "cover_image", length = 500)
     private String coverImage;

@@ -3,6 +3,7 @@ package com.gamesaves.gamesaves.controller;
 import cn.dev33.satoken.stp.StpUtil;
 import com.gamesaves.gamesaves.dto.PageDTO;
 import com.gamesaves.gamesaves.dto.request.ArticleCreateRequest;
+import com.gamesaves.gamesaves.dto.request.ArticleFullUpdateRequest;
 import com.gamesaves.gamesaves.dto.request.ArticleUpdateRequest;
 import com.gamesaves.gamesaves.dto.response.ApiResponse;
 import com.gamesaves.gamesaves.dto.response.ArticleDetailResponse;
@@ -48,6 +49,17 @@ public class ArticleController {
             @RequestBody ArticleUpdateRequest request) {
         ArticleDetailResponse article = articleService.updateArticle(id, request);
         return ApiResponse.success(article);
+    }
+
+    /** 完整编辑存档（支持 README 文件替换、封面图替换） */
+    @PostMapping("/{id}/edit")
+    public ApiResponse<ArticleDetailResponse> updateArticleFull(
+            @PathVariable Long id,
+            @RequestPart("metadata") ArticleFullUpdateRequest request,
+            @RequestPart(value = "readmeFile", required = false) MultipartFile readmeFile,
+            @RequestPart(value = "coverFile", required = false) MultipartFile coverFile) {
+        ArticleDetailResponse article = articleService.updateArticleFull(id, request, readmeFile, coverFile);
+        return ApiResponse.success("Article updated", article);
     }
 
     @DeleteMapping("/{id}")

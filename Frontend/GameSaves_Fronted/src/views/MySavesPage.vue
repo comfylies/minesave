@@ -94,7 +94,7 @@
                   size="small"
                   text
                   type="primary"
-                  @click="openEdit(article)"
+                  @click="$router.push(`/articles/${article.id}/edit`)"
                 >
                   <el-icon><Edit /></el-icon>
                   编辑
@@ -142,24 +142,6 @@
       </EmptyState>
     </template>
 
-    <!-- 编辑对话框 -->
-    <el-dialog v-model="showEditDialog" title="编辑存档" width="500px">
-      <el-form :model="editForm" label-position="top">
-        <el-form-item label="标题">
-          <el-input v-model="editForm.title" />
-        </el-form-item>
-        <el-form-item label="版本">
-          <el-input v-model="editForm.version" />
-        </el-form-item>
-        <el-form-item label="描述">
-          <el-input v-model="editForm.description" type="textarea" :rows="3" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="showEditDialog = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="saveEdit">保存</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
@@ -169,7 +151,6 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useArticleStore } from '../stores/articles'
 import { useAuthStore } from '../stores/auth'
 import { useViewMode } from '../composables/useViewMode'
-import { articleApi } from '../api/articleApi'
 import EmptyState from '../components/common/EmptyState.vue'
 import LoadingSkeleton from '../components/common/LoadingSkeleton.vue'
 import ArticleCard from '../components/article/ArticleCard.vue'
@@ -181,39 +162,10 @@ const auth = useAuthStore()
 const { viewMode } = useViewMode()
 
 const currentPage = ref(1)
-const showEditDialog = ref(false)
-const saving = ref(false)
-const editForm = ref({ title: '', version: '', description: '' })
-const editingId = ref(null)
 
 function handlePageChange(page) {
   currentPage.value = page
   articleStore.fetchByUser(auth.userId, page - 1)
-}
-
-// ---- 编辑 ----
-function openEdit(article) {
-  editingId.value = article.id
-  editForm.value = {
-    title: article.title,
-    version: article.version,
-    description: article.description || ''
-  }
-  showEditDialog.value = true
-}
-
-async function saveEdit() {
-  saving.value = true
-  try {
-    await articleApi.update(editingId.value, editForm.value)
-    ElMessage.success('存档信息已更新')
-    showEditDialog.value = false
-    await articleStore.fetchByUser(auth.userId, currentPage.value - 1)
-  } catch (e) {
-    // 错误已在拦截器中提示
-  } finally {
-    saving.value = false
-  }
 }
 
 // ---- 删除 ----
