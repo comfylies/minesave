@@ -373,7 +373,7 @@ public class AdminController {
     @GetMapping("/site-settings")
     @SaCheckPermission("user:manage")
     public ApiResponse<Map<String, String>> getSiteSettings() {
-        return ApiResponse.success(siteSettingService.getPublicSettings());
+        return ApiResponse.success(siteSettingService.getResolvedPublicSettings());
     }
 
     /** 批量更新站点设置 */
@@ -414,9 +414,11 @@ public class AdminController {
             String key = "site/background_" + UUID.randomUUID().toString().substring(0, 8) + "." + ext;
             storageService.store(key, file.getBytes());
 
-            String publicUrl = storageService.getPublicUrl(key);
-            siteSettingService.updateSettings(Map.of("background_image_url", publicUrl));
+            // 数据库中存储原始 key（而非 URL），读取时由 SiteSettingService 实时解析为预签名 URL
+            siteSettingService.updateSettings(Map.of("background_image_url", key));
 
+            // 响应中返回预签名 URL 供管理员即时预览
+            String publicUrl = storageService.getPublicUrl(key);
             return ApiResponse.success("Background uploaded", Map.of(
                     "url", publicUrl,
                     "filename", key

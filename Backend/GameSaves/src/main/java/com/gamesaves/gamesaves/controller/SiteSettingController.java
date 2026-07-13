@@ -30,7 +30,7 @@ public class SiteSettingController {
      */
     @GetMapping
     public ApiResponse<Map<String, String>> getPublicSettings() {
-        Map<String, String> settings = siteSettingService.getPublicSettings();
+        Map<String, String> settings = siteSettingService.getResolvedPublicSettings();
         return ApiResponse.success(settings);
     }
 }

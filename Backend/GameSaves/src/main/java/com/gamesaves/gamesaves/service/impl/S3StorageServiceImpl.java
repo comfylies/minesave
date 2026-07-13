@@ -203,16 +203,8 @@ public class S3StorageServiceImpl implements StorageService {
 
     @Override
     public String getPublicUrl(String key) {
-        if (s3Config.isPathStyleAccess()) {
-            // MinIO / path-style: http://host:port/bucket/key
-            return String.format("%s/%s/%s",
-                    s3Config.getEndpoint().replaceFirst("/+$", ""),
-                    s3Config.getBucketName(), key);
-        } else {
-            // Tencent COS S3-compatible: https://{bucket}.cos.{region}.myqcloud.com/{key}
-            return String.format("https://%s.cos.%s.myqcloud.com/%s",
-                    s3Config.getBucketName(), s3Config.getRegion(), key);
-        }
+        // 返回预签名 URL 而非直接 COS URL——私有 bucket 的直接 URL 会返回 403
+        return generatePresignedUrl(key, s3Config.getPublicUrlExpirationMinutes());
     }
 
     @Override

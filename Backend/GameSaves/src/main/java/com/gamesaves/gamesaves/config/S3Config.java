@@ -35,6 +35,9 @@ public class S3Config {
     private boolean pathStyleAccess = true;
     private int presignedUrlExpirationMinutes = 5;
 
+    /** Public URL 预签名有效期（分钟），默认 7 天，匹配 JWT token 有效期 */
+    private int publicUrlExpirationMinutes = 10080;
+
     @Bean
     public S3Client s3Client() {
         log.info("Initializing S3 client — endpoint={}, region={}, bucket={}, pathStyle={}",
@@ -73,4 +76,7 @@ public class S3Config {
 
     public int getPresignedUrlExpirationMinutes() { return presignedUrlExpirationMinutes; }
     public void setPresignedUrlExpirationMinutes(int minutes) { this.presignedUrlExpirationMinutes = minutes; }
+
+    public int getPublicUrlExpirationMinutes() { return publicUrlExpirationMinutes; }
+    public void setPublicUrlExpirationMinutes(int minutes) { this.publicUrlExpirationMinutes = minutes; }
 }

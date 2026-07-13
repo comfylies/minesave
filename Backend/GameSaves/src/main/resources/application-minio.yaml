@@ -15,3 +15,4 @@ app:
       bucket-name: gamesaving
       path-style-access: true
       presigned-url-expiration-minutes: 5
+      public-url-expiration-minutes: 10080

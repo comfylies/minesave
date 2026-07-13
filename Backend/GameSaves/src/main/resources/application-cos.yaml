@@ -15,3 +15,4 @@ app:
       bucket-name: gamesaving-${COS_APPID:1234567890}
       path-style-access: false
       presigned-url-expiration-minutes: 15
+      public-url-expiration-minutes: 10080
