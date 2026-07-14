@@ -30,6 +30,10 @@
           <el-icon><Bell /></el-icon>
           <span>公告管理</span>
         </el-menu-item>
+        <el-menu-item index="/admin/contact-messages">
+          <el-icon><ChatDotSquare /></el-icon>
+          <span>联系留言</span>
+        </el-menu-item>
         <el-menu-item index="/admin/games">
           <el-icon><Platform /></el-icon>
           <span>游戏管理</span>

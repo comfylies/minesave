@@ -21,4 +21,5 @@ public class DashboardStatsResponse {
     // 待处理统计
     private long failedArticleCount;
     private long uploadingArticleCount;
+    private long pendingContactCount;
 }

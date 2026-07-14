@@ -74,6 +74,12 @@
               </el-tag>
               <span v-else class="stat-ok">0 篇</span>
             </el-descriptions-item>
+            <el-descriptions-item label="待处理联系留言">
+              <el-tag v-if="stats.pendingContactCount > 0" type="warning" size="small">
+                {{ stats.pendingContactCount }} 条
+              </el-tag>
+              <span v-else class="stat-ok">0 条</span>
+            </el-descriptions-item>
           </el-descriptions>
         </el-card>
       </el-col>
@@ -86,7 +92,7 @@ import { ref, computed, onMounted } from 'vue'
 import { adminApi } from '../../api/adminApi'
 import {
   User, Document, Monitor, ChatLineSquare, PictureFilled,
-  WarningFilled, CircleCloseFilled
+  WarningFilled, CircleCloseFilled, Message
 } from '@element-plus/icons-vue'
 import { formatSize } from '@/utils/format'
 
@@ -98,7 +104,8 @@ const stats = ref({
   downloadCount: 0,
   imageStorageBytes: 0,
   failedArticleCount: 0,
-  uploadingArticleCount: 0
+  uploadingArticleCount: 0,
+  pendingContactCount: 0
 })
 
 function formatStorage(bytes) {
@@ -116,7 +123,8 @@ const pendingCards = computed(() => [
   { label: '下载总次数', value: stats.value.downloadCount, icon: PictureFilled, color: '#8b5cf6', cssClass: '' },
   { label: '图片存储', value: formatStorage(stats.value.imageStorageBytes), icon: PictureFilled, color: '#6366f1', cssClass: '' },
   { label: '失败文章', value: stats.value.failedArticleCount, icon: CircleCloseFilled, color: '#ef4444', cssClass: stats.value.failedArticleCount > 0 ? 'admin-stat-card-warn' : '' },
-  { label: '上传中', value: stats.value.uploadingArticleCount, icon: WarningFilled, color: '#f59e0b', cssClass: stats.value.uploadingArticleCount > 0 ? 'admin-stat-card-warn' : '' }
+  { label: '上传中', value: stats.value.uploadingArticleCount, icon: WarningFilled, color: '#f59e0b', cssClass: stats.value.uploadingArticleCount > 0 ? 'admin-stat-card-warn' : '' },
+  { label: '待处理留言', value: stats.value.pendingContactCount, icon: Message, color: '#f97316', cssClass: stats.value.pendingContactCount > 0 ? 'admin-stat-card-warn' : '' }
 ])
 
 onMounted(async () => {

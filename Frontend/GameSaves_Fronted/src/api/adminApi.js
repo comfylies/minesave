@@ -95,5 +95,32 @@ export const adminApi = {
   /** 查询清理进度 */
   getCleanupStatus() {
     return client.get('/admin/cleanup/status')
+  },
+
+  // ==================== 联系留言管理 ====================
+
+  /** 获取联系留言列表 */
+  listContactMessages(page = 0, size = 20, status = '') {
+    return client.get('/admin/contact-messages', { params: { page, size, status } })
+  },
+
+  /** 获取单条联系留言详情 */
+  getContactMessage(id) {
+    return client.get(`/admin/contact-messages/${id}`)
+  },
+
+  /** 标记留言为已解决 */
+  resolveContactMessage(id) {
+    return client.put(`/admin/contact-messages/${id}/resolve`)
+  },
+
+  /** 关闭留言 */
+  closeContactMessage(id) {
+    return client.put(`/admin/contact-messages/${id}/close`)
+  },
+
+  /** 删除留言 */
+  deleteContactMessage(id) {
+    return client.delete(`/admin/contact-messages/${id}`)
   }
 }

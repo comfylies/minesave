@@ -13,6 +13,7 @@ import com.gamesaves.gamesaves.exception.BadRequestException;
 import com.gamesaves.gamesaves.exception.ResourceNotFoundException;
 import com.gamesaves.gamesaves.repository.ArticleRepository;
 import com.gamesaves.gamesaves.repository.CommentRepository;
+import com.gamesaves.gamesaves.repository.ContactMessageRepository;
 import com.gamesaves.gamesaves.repository.DownloadLogRepository;
 import com.gamesaves.gamesaves.repository.GameAliasRepository;
 import com.gamesaves.gamesaves.repository.GameRepository;
@@ -46,6 +47,7 @@ public class AdminServiceImpl implements AdminService {
     private final GameAliasRepository gameAliasRepository;
     private final CommentRepository commentRepository;
     private final DownloadLogRepository downloadLogRepository;
+    private final ContactMessageRepository contactMessageRepository;
     private final StorageService storageService;
     private final SearchSyncService searchSyncService;
 
@@ -55,6 +57,7 @@ public class AdminServiceImpl implements AdminService {
                             GameAliasRepository gameAliasRepository,
                             CommentRepository commentRepository,
                             DownloadLogRepository downloadLogRepository,
+                            ContactMessageRepository contactMessageRepository,
                             StorageService storageService,
                             SearchSyncService searchSyncService) {
         this.userRepository = userRepository;
@@ -63,6 +66,7 @@ public class AdminServiceImpl implements AdminService {
         this.gameAliasRepository = gameAliasRepository;
         this.commentRepository = commentRepository;
         this.downloadLogRepository = downloadLogRepository;
+        this.contactMessageRepository = contactMessageRepository;
         this.storageService = storageService;
         this.searchSyncService = searchSyncService;
     }
@@ -86,6 +90,7 @@ public class AdminServiceImpl implements AdminService {
                 .imageStorageBytes(imageBytes)
                 .failedArticleCount(articleRepository.countByStatus(Article.ArticleStatus.FAILED))
                 .uploadingArticleCount(articleRepository.countByStatus(Article.ArticleStatus.UPLOADING))
+                .pendingContactCount(contactMessageRepository.countByStatus("pending"))
                 .build();
     }
 

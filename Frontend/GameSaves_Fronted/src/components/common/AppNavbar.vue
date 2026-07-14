@@ -19,11 +19,13 @@
         <template v-if="auth.isLoggedIn">
           <!-- 用户下拉菜单 -->
           <el-dropdown trigger="click" popper-class="user-dropdown">
-            <span class="user-trigger">
-              <el-avatar :size="32" :src="auth.currentUser?.avatarUrl" icon="UserFilled" />
-              <span class="user-name">{{ auth.currentUser?.nickname || auth.currentUser?.username }}</span>
-              <el-icon class="dropdown-arrow"><ArrowDown /></el-icon>
-            </span>
+            <el-badge :value="pendingBadgeCount" :hidden="pendingBadgeCount === 0" :max="99">
+              <span class="user-trigger">
+                <el-avatar :size="32" :src="auth.currentUser?.avatarUrl" icon="UserFilled" />
+                <span class="user-name">{{ auth.currentUser?.nickname || auth.currentUser?.username }}</span>
+                <el-icon class="dropdown-arrow"><ArrowDown /></el-icon>
+              </span>
+            </el-badge>
             <template #dropdown>
               <el-dropdown-menu>
                 <el-dropdown-item @click="$router.push('/my-saves')">
@@ -31,6 +33,10 @@
                 </el-dropdown-item>
                 <el-dropdown-item @click="$router.push(`/users/${auth.userId}`)">
                   <el-icon><User /></el-icon> 个人主页
+                </el-dropdown-item>
+                <el-dropdown-item v-if="auth.isAdmin" @click="$router.push('/admin/contact-messages')">
+                  <el-icon><ChatDotSquare /></el-icon> 联系留言
+                  <el-badge v-if="pendingBadgeCount > 0" :value="pendingBadgeCount" style="margin-left: 8px" />
                 </el-dropdown-item>
                 <el-dropdown-item v-if="auth.isAdmin" divided @click="$router.push('/admin')">
                   <el-icon><Setting /></el-icon> 管理后台
@@ -55,11 +61,13 @@
 import { ref, computed, inject, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
+import { useContactBadge } from '../../composables/useContactBadge'
 import { ElMessage } from 'element-plus'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const { pendingCount: pendingBadgeCount, refresh: refreshBadge } = useContactBadge()
 const hidden = ref(false)
 const isAtTop = ref(true)
 
@@ -88,7 +96,13 @@ function onScroll() {
   lastScrollY = currentY
 }
 
-onMounted(() => window.addEventListener('scroll', onScroll, { passive: true }))
+onMounted(() => {
+  window.addEventListener('scroll', onScroll, { passive: true })
+  // 管理员时刷新待处理联系留言计数（红点）
+  if (auth.isAdmin) {
+    refreshBadge()
+  }
+})
 onUnmounted(() => window.removeEventListener('scroll', onScroll))
 
 /** 动态 navbar class */

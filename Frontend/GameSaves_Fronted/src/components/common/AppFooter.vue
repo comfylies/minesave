@@ -4,6 +4,7 @@
       <div class="footer-left">
         <span class="footer-logo">💾 MineSave</span>
         <span class="footer-text">© 2026 MineSave</span>
+        <router-link to="/contact" class="footer-link">联系我们</router-link>
       </div>
       <div class="footer-right">
         <a
@@ -79,5 +80,17 @@
   height: 14px;
   margin-right: 2px;
   vertical-align: text-bottom;
+}
+
+.footer-link {
+  font-size: var(--font-size-small);
+  color: var(--color-tertiary-text, #999);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.footer-link:hover {
+  color: var(--color-link);
+  text-decoration: underline;
 }
 </style>

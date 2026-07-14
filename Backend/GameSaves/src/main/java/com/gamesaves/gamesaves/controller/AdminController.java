@@ -11,6 +11,7 @@ import com.gamesaves.gamesaves.service.AdminAuditLogService;
 import com.gamesaves.gamesaves.service.AdminService;
 import com.gamesaves.gamesaves.service.AnnouncementService;
 import com.gamesaves.gamesaves.service.CleanupScheduler;
+import com.gamesaves.gamesaves.service.ContactService;
 import com.gamesaves.gamesaves.service.GameService;
 import com.gamesaves.gamesaves.service.SafePathService;
 import com.gamesaves.gamesaves.service.SearchSyncService;
@@ -46,6 +47,7 @@ public class AdminController {
     private final GameService gameService;
     private final SiteSettingService siteSettingService;
     private final AdminAuditLogService auditLogService;
+    private final ContactService contactService;
 
     public AdminController(AdminService adminService, AnnouncementService announcementService,
                            TagService tagService, SearchSyncService searchSyncService,
@@ -54,7 +56,8 @@ public class AdminController {
                            StorageService storageService,
                            GameService gameService,
                            SiteSettingService siteSettingService,
-                           AdminAuditLogService auditLogService) {
+                           AdminAuditLogService auditLogService,
+                           ContactService contactService) {
         this.adminService = adminService;
         this.announcementService = announcementService;
         this.tagService = tagService;
@@ -65,6 +68,7 @@ public class AdminController {
         this.gameService = gameService;
         this.siteSettingService = siteSettingService;
         this.auditLogService = auditLogService;
+        this.contactService = contactService;
     }
 
     // ── 审计日志辅助方法 ──
@@ -261,6 +265,49 @@ public class AdminController {
         } catch (IOException e) {
             throw new BadRequestException("图片上传失败: " + e.getMessage());
         }
+    }
+
+    // ==================== 联系留言管理 ====================
+
+    /** 获取联系留言列表（可按状态筛选） */
+    @GetMapping("/contact-messages")
+    public ApiResponse<Page<ContactResponse>> listContactMessages(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String status) {
+        Page<ContactResponse> result = contactService.listForAdmin(status,
+                PageRequest.of(page, size, Sort.by("createdAt").descending()));
+        return ApiResponse.success(result);
+    }
+
+    /** 获取单条联系留言详情 */
+    @GetMapping("/contact-messages/{id}")
+    public ApiResponse<ContactResponse> getContactMessage(@PathVariable Long id) {
+        return ApiResponse.success(contactService.getById(id));
+    }
+
+    /** 标记留言为已解决 */
+    @PutMapping("/contact-messages/{id}/resolve")
+    public ApiResponse<ContactResponse> resolveContactMessage(@PathVariable Long id) {
+        ContactResponse resolved = contactService.resolve(id);
+        audit("resolve", "contact_message", id, "标记联系留言为已解决");
+        return ApiResponse.success("已标记为已解决", resolved);
+    }
+
+    /** 关闭留言 */
+    @PutMapping("/contact-messages/{id}/close")
+    public ApiResponse<ContactResponse> closeContactMessage(@PathVariable Long id) {
+        ContactResponse closed = contactService.close(id);
+        audit("close", "contact_message", id, "关闭联系留言");
+        return ApiResponse.success("已关闭留言", closed);
+    }
+
+    /** 删除留言 */
+    @DeleteMapping("/contact-messages/{id}")
+    public ApiResponse<Void> deleteContactMessage(@PathVariable Long id) {
+        contactService.delete(id);
+        audit("delete", "contact_message", id, "删除联系留言");
+        return ApiResponse.success("留言已删除", null);
     }
 
     // ==================== 标签管理 ====================

@@ -12,7 +12,8 @@ const routes = [
       { path: 'my-saves', name: 'MySaves', component: () => import('../views/MySavesPage.vue'), meta: { requiresAuth: true } },
       { path: 'users/:userId', name: 'UserProfile', component: () => import('../views/UserProfilePage.vue') },
       { path: 'upload', name: 'Upload', component: () => import('../views/UploadPage.vue'), meta: { requiresAuth: true } },
-      { path: 'articles/:articleId/edit', name: 'EditArticle', component: () => import('../views/EditPage.vue'), meta: { requiresAuth: true } }
+      { path: 'articles/:articleId/edit', name: 'EditArticle', component: () => import('../views/EditPage.vue'), meta: { requiresAuth: true } },
+      { path: 'contact', name: 'Contact', component: () => import('../views/ContactPage.vue'), meta: { requiresAuth: true } }
     ]
   },
   {
@@ -43,6 +44,7 @@ const routes = [
       { path: 'users', name: 'AdminUsers', component: () => import('../views/admin/AdminUsers.vue'), meta: { title: '用户管理' } },
       { path: 'articles', name: 'AdminArticles', component: () => import('../views/admin/AdminArticles.vue'), meta: { title: '文章管理' } },
       { path: 'announcements', name: 'AdminAnnouncements', component: () => import('../views/admin/AdminAnnouncements.vue'), meta: { title: '公告管理' } },
+      { path: 'contact-messages', name: 'AdminContactMessages', component: () => import('../views/admin/AdminContactMessages.vue'), meta: { title: '联系留言' } },
       { path: 'games', name: 'AdminGames', component: () => import('../views/admin/AdminGames.vue'), meta: { title: '游戏管理' } },
       { path: 'cleanup', name: 'AdminCleanup', component: () => import('../views/admin/AdminCleanup.vue'), meta: { title: '存档清理' } },
       { path: 'ghosts', name: 'AdminGhosts', component: () => import('../views/admin/AdminGhosts.vue'), meta: { title: '幽灵文章' } },
