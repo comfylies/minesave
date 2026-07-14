@@ -35,6 +35,7 @@ public class SevenZExtractor {
     private final Path extractRoot;
     private final Long snapshotId;
     private final MagicNumberValidator magicNumberValidator;
+    private final ExtractionProgressListener progressListener;
 
     /**
      * @param archivePath              压缩包本地路径
@@ -44,10 +45,12 @@ public class SevenZExtractor {
      * @param maxEntrySize             单条目解压后最大字节数
      * @param maxTotalUncompressedSize 总解压后最大字节数
      * @param maxEntryCount            最大条目数
+     * @param progressListener         进度回调（可为 null）
      */
     public SevenZExtractor(Path archivePath, Path extractRoot, Long snapshotId,
                            MagicNumberValidator magicNumberValidator,
-                           long maxEntrySize, long maxTotalUncompressedSize, int maxEntryCount) {
+                           long maxEntrySize, long maxTotalUncompressedSize, int maxEntryCount,
+                           ExtractionProgressListener progressListener) {
         this.archivePath = archivePath;
         this.extractRoot = extractRoot;
         this.snapshotId = snapshotId;
@@ -55,6 +58,7 @@ public class SevenZExtractor {
         this.maxEntrySize = maxEntrySize;
         this.maxTotalUncompressedSize = maxTotalUncompressedSize;
         this.maxEntryCount = maxEntryCount;
+        this.progressListener = progressListener;
     }
 
     /**
@@ -89,6 +93,19 @@ public class SevenZExtractor {
         List<String> violations = new ArrayList<>();
         long totalUncompressed = 0;
 
+        // ── 预扫描：统计文件条目总数（7z getNextEntry 只读元数据，不读内容）──
+        int totalFiles = 0;
+        try (SevenZFile scanFile = SevenZFile.builder()
+                .setFile(archivePath.toFile())
+                .get()) {
+            SevenZArchiveEntry scanEntry;
+            while ((scanEntry = scanFile.getNextEntry()) != null) {
+                if (!scanEntry.isDirectory()) totalFiles++;
+            }
+        }
+
+        // ── 正式提取（重新打开）──
+        int processedCount = 0;
         try (SevenZFile sevenZFile = SevenZFile.builder()
                 .setFile(archivePath.toFile())
                 .get()) {
@@ -187,7 +204,24 @@ public class SevenZExtractor {
                 if (entryName.equalsIgnoreCase("README.md") || entryName.equalsIgnoreCase("readme.txt")) {
                     readmeContents.add(new String(entryData, java.nio.charset.StandardCharsets.UTF_8));
                 }
+
+                // ── 进度回调（每 5 个文件报告一次）──
+                processedCount++;
+                if (progressListener != null && processedCount % 5 == 0) {
+                    progressListener.onProgress("EXTRACTING",
+                            processedCount, totalFiles,
+                            totalUncompressed, -1,
+                            entryName);
+                }
             }
+        }
+
+        // ── 最后报告一次确保 100% ──
+        if (progressListener != null) {
+            progressListener.onProgress("EXTRACTING",
+                    processedCount, totalFiles,
+                    totalUncompressed, -1,
+                    "");
         }
 
         if (!violations.isEmpty()) {

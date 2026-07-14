@@ -216,13 +216,59 @@
           show-icon
           :closable="false"
         />
-        <el-progress
-          v-if="processingStatus === 'EXTRACTING'"
-          :percentage="100"
-          :indeterminate="true"
-          :duration="3"
-          style="margin-top: 12px;"
-        />
+        <!-- 进度条 — 上传和提取阶段共用 -->
+        <div v-if="showProgressBar" class="progress-section">
+          <div class="progress-bar-row">
+            <el-progress
+              :percentage="uploadInProgress ? uploadProgressPct : (progressPct >= 0 ? progressPct : 0)"
+              :indeterminate="!uploadInProgress && progressPct < 0"
+              :stroke-width="6"
+              :show-text="false"
+            />
+            <span class="progress-pct-text">{{ uploadInProgress ? uploadProgressPct + '%' : (progressPct >= 0 ? progressPct + '%' : '') }}</span>
+          </div>
+
+          <!-- HTTP 上传阶段 -->
+          <template v-if="uploadInProgress">
+            <div class="progress-detail">
+              <span>正在上传存档文件</span>
+              <span v-if="uploadTotal > 0">（{{ formatFileSize(uploadLoaded) }} / {{ formatFileSize(uploadTotal) }}）</span>
+            </div>
+            <div v-if="uploadSpeed > 0" class="progress-speed">
+              {{ formatSpeed(uploadSpeed) }}
+            </div>
+            <div class="progress-time">
+              <span v-if="uploadSpeed > 0 && uploadEta > 0" class="progress-eta">预计剩余 {{ formatElapsed(uploadEta) }}</span>
+            </div>
+          </template>
+
+          <!-- 提取/存储上传阶段 -->
+          <template v-else>
+            <div class="progress-detail">
+              <template v-if="progressPhase === 'EXTRACTING'">
+                <span>正在解压文件</span>
+                <span v-if="progressTotal > 0">（{{ progressProcessed }}/{{ progressTotal }}）</span>
+                <span v-else>（{{ progressProcessed }} 个文件）</span>
+              </template>
+              <template v-else-if="progressPhase === 'UPLOADING'">
+                <span>正在上传文件到存储</span>
+                <span v-if="progressTotal > 0">（{{ progressProcessed }}/{{ progressTotal }}）</span>
+                <span v-else>（{{ progressProcessed }} 个文件）</span>
+              </template>
+              <template v-else>
+                <span>正在处理中...</span>
+              </template>
+            </div>
+            <div v-if="progressCurrentFile" class="progress-file" :title="progressCurrentFile">
+              <el-icon><Document /></el-icon>
+              {{ progressCurrentFile }}
+            </div>
+            <div class="progress-time">
+              <span v-if="progressElapsed > 0">已用时 {{ formatElapsed(progressElapsed) }}</span>
+              <span v-if="progressEta > 0" class="progress-eta"> · 预计剩余 {{ formatElapsed(progressEta) }}</span>
+            </div>
+          </template>
+        </div>
       </div>
     </div>
 
@@ -274,7 +320,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Plus, InfoFilled, MagicStick } from '@element-plus/icons-vue'
+import { Plus, InfoFilled, MagicStick, Document } from '@element-plus/icons-vue'
 import { useGameStore } from '../stores/games'
 import { useAuthStore } from '../stores/auth'
 import { articleApi } from '../api/articleApi'
@@ -318,6 +364,28 @@ const processingType = ref('info')
 const processingTitle = ref('')
 const processingDesc = ref('')
 let pollingTimer = null
+
+// 进度数据
+const showProgressBar = ref(false)
+const progressPhase = ref('')
+const progressPct = ref(-1)
+const progressProcessed = ref(0)
+const progressTotal = ref(-1)
+const progressCurrentFile = ref('')
+const progressElapsed = ref(0)
+const progressEta = ref(-1)
+
+// 上传进度（HTTP 文件上传阶段，axios onUploadProgress）
+const uploadProgressPct = ref(0)
+const uploadSpeed = ref(0)       // bytes/s
+const uploadEta = ref(-1)        // 秒
+const uploadLoaded = ref(0)
+const uploadTotal = ref(0)
+let lastUploadLoaded = 0
+let lastUploadTime = 0
+
+// HTTP 文件上传是否正在进行（独立于 processingStatus，避免被后端轮询状态覆盖）
+const uploadInProgress = ref(false)
 
 const form = reactive({
   gameId: null,
@@ -471,10 +539,78 @@ function formatFileSize(bytes) {
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
 }
 
+function formatElapsed(seconds) {
+  if (!seconds || seconds < 0) return ''
+  if (seconds < 60) return Math.floor(seconds) + ' 秒'
+  const min = Math.floor(seconds / 60)
+  const sec = Math.floor(seconds % 60)
+  if (min < 60) return min + ' 分 ' + sec + ' 秒'
+  const hrs = Math.floor(min / 60)
+  const mins = min % 60
+  return hrs + ' 小时 ' + mins + ' 分'
+}
+
+function formatSpeed(bytesPerSec) {
+  if (!bytesPerSec || bytesPerSec <= 0) return ''
+  if (bytesPerSec < 1024) return bytesPerSec + ' B/s'
+  const kb = bytesPerSec / 1024
+  if (kb < 1024) return kb.toFixed(1) + ' KB/s'
+  const mb = kb / 1024
+  return mb.toFixed(1) + ' MB/s'
+}
+
 function openDetail(type) {
   drawerType.value = type
   drawerTitle.value = type === 'cover' ? '封面图要求' : 'README 文档要求'
   drawerVisible.value = true
+}
+
+function resetProgress() {
+  showProgressBar.value = false
+  uploadInProgress.value = false
+  progressPhase.value = ''
+  progressPct.value = -1
+  progressProcessed.value = 0
+  progressTotal.value = -1
+  progressCurrentFile.value = ''
+  progressElapsed.value = 0
+  progressEta.value = -1
+  // 上传进度
+  uploadProgressPct.value = 0
+  uploadSpeed.value = 0
+  uploadEta.value = -1
+  uploadLoaded.value = 0
+  uploadTotal.value = 0
+  lastUploadLoaded = 0
+  lastUploadTime = 0
+}
+
+function onUploadProgress(progressEvent) {
+  const now = Date.now()
+  uploadLoaded.value = progressEvent.loaded
+  uploadTotal.value = progressEvent.total
+
+  if (progressEvent.total > 0) {
+    uploadProgressPct.value = Math.round((progressEvent.loaded / progressEvent.total) * 100)
+  }
+
+  // 每秒计算一次上传速度
+  if (lastUploadTime > 0 && now - lastUploadTime >= 1000) {
+    const deltaBytes = progressEvent.loaded - lastUploadLoaded
+    const deltaSec = (now - lastUploadTime) / 1000
+    if (deltaSec > 0) {
+      uploadSpeed.value = Math.round(deltaBytes / deltaSec)
+    }
+    if (uploadSpeed.value > 0 && progressEvent.total > 0) {
+      const remaining = progressEvent.total - progressEvent.loaded
+      uploadEta.value = Math.round(remaining / uploadSpeed.value)
+    }
+    lastUploadLoaded = progressEvent.loaded
+    lastUploadTime = now
+  } else if (lastUploadTime === 0) {
+    lastUploadLoaded = progressEvent.loaded
+    lastUploadTime = now
+  }
 }
 
 function updateProcessing(status, errorMessage) {
@@ -501,9 +637,6 @@ function clearPolling() {
 }
 
 async function pollStatus(articleId) {
-  const startTime = Date.now()
-  const timeout = 30 * 1000
-
   clearPolling()
   pollingTimer = setInterval(async () => {
     try {
@@ -511,6 +644,19 @@ async function pollStatus(articleId) {
       const status = statusData.status || statusData
 
       updateProcessing(status, statusData.errorMessage)
+
+      // ── 解析进度数据 ──
+      if (statusData.progress) {
+        const p = statusData.progress
+        showProgressBar.value = true
+        progressPhase.value = p.phase || ''
+        progressPct.value = p.pct != null ? p.pct : -1
+        progressProcessed.value = p.processed || 0
+        progressTotal.value = p.total || -1
+        progressCurrentFile.value = p.currentFile || ''
+        progressElapsed.value = p.elapsedSec || 0
+        progressEta.value = p.etaSec || -1
+      }
 
       if (status === 'READY') {
         clearPolling()
@@ -522,12 +668,7 @@ async function pollStatus(articleId) {
         clearPolling()
         uploading.value = false
       }
-
-      if (Date.now() - startTime > timeout && status !== 'READY' && status !== 'FAILED') {
-        clearPolling()
-        updateProcessing('FAILED', '处理超时，请稍后在「我的存档」中查看状态')
-        uploading.value = false
-      }
+      // 不再超时 — 持续轮询直到 READY 或 FAILED
     } catch (e) {
       clearPolling()
       updateProcessing('FAILED', '无法获取处理状态')
@@ -546,7 +687,10 @@ async function handleUpload() {
   }
 
   uploading.value = true
+  resetProgress()
   updateProcessing('UPLOADING')
+  showProgressBar.value = true   // 立即显示进度条
+  uploadInProgress.value = true  // HTTP 上传阶段开始
 
   try {
     if (form.gameId === -1 && newGameName.value) {
@@ -559,6 +703,8 @@ async function handleUpload() {
       } catch (e) {
         ElMessage.error(e.message || '创建游戏失败，请重新选择游戏')
         uploading.value = false
+        showProgressBar.value = false
+        uploadInProgress.value = false
         return
       }
     }
@@ -572,6 +718,7 @@ async function handleUpload() {
     if (uid == null || isNaN(uid) || uid <= 0) {
       ElMessage.error('登录状态异常，请重新登录')
       uploading.value = false
+      showProgressBar.value = false
       return
     }
 
@@ -598,13 +745,16 @@ async function handleUpload() {
       formData.append('coverFile', selectedCoverFile.value)
     }
 
-    const article = await articleApi.create(formData)
+    const article = await articleApi.create(formData, onUploadProgress)
+    uploadInProgress.value = false  // HTTP 上传完成，切换到提取阶段
     updateProcessing('EXTRACTING')
 
     pollStatus(article.id)
   } catch (e) {
+    uploadInProgress.value = false
     updateProcessing('FAILED', e.message || '上传失败')
     uploading.value = false
+    showProgressBar.value = false
   }
 }
 
@@ -830,6 +980,66 @@ onUnmounted(() => {
 /* ---- 处理进度 ---- */
 .processing-status {
   margin-top: var(--spacing-md);
+}
+
+.progress-section {
+  margin-top: 12px;
+}
+
+.progress-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.progress-bar-row .el-progress {
+  flex: 1;
+}
+
+.progress-pct-text {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-body-text);
+  min-width: 40px;
+  text-align: right;
+}
+
+.progress-detail {
+  font-size: 13px;
+  color: var(--color-secondary-text);
+  margin-top: 6px;
+  text-align: center;
+}
+
+.progress-speed {
+  font-size: 13px;
+  color: var(--color-link, #409eff);
+  margin-top: 2px;
+  text-align: center;
+  font-weight: 500;
+}
+
+.progress-file {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--color-secondary-text);
+  margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.progress-time {
+  font-size: 12px;
+  color: var(--color-secondary-text);
+  margin-top: 4px;
+  text-align: center;
+}
+
+.progress-eta {
+  color: var(--el-color-warning);
 }
 
 /* ---- 详情抽屉 ---- */

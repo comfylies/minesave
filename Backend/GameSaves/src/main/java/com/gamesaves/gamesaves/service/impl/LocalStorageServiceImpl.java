@@ -93,19 +93,32 @@ public class LocalStorageServiceImpl implements StorageService {
             if (!Files.isDirectory(parent)) {
                 Files.createDirectories(parent);
             }
-            try {
-                Files.copy(localPath, target, StandardCopyOption.REPLACE_EXISTING);
-            } catch (java.nio.file.NoSuchFileException e) {
-                // Windows NTFS race: concurrent createDirectories may briefly hide
-                // an already-existing parent directory. Retry once after re-creating.
-                Files.createDirectories(parent);
-                Files.copy(localPath, target, StandardCopyOption.REPLACE_EXISTING);
-            }
+            copyWithRetry(localPath, target, parent);
             log.debug("Copied {} → {}", localPath, key);
         } catch (IOException e) {
             throw new StorageException("Failed to store " + key + " from " + localPath, e);
         }
         return key;
+    }
+
+    /**
+     * 带重试的文件复制，处理 Windows NTFS 下并行 createDirectories 的瞬时不可见问题。
+     */
+    private void copyWithRetry(Path source, Path target, Path parent) throws IOException {
+        for (int attempt = 0; attempt < 3; attempt++) {
+            try {
+                Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING);
+                return;
+            } catch (java.nio.file.NoSuchFileException e) {
+                // Windows NTFS: 其他线程刚创建的目录可能短暂不可见
+                if (attempt < 2) {
+                    Files.createDirectories(parent);
+                    try { Thread.sleep(10); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+                } else {
+                    throw e;
+                }
+            }
+        }
     }
 
     @Override

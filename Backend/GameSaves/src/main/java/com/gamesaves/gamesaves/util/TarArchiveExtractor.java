@@ -39,6 +39,7 @@ public class TarArchiveExtractor {
     private final Long snapshotId;
     private final ArchiveFormat format;
     private final MagicNumberValidator magicNumberValidator;
+    private final ExtractionProgressListener progressListener;
 
     /**
      * @param archivePath              压缩包本地路径
@@ -49,10 +50,12 @@ public class TarArchiveExtractor {
      * @param maxEntrySize             单条目解压后最大字节数
      * @param maxTotalUncompressedSize 总解压后最大字节数
      * @param maxEntryCount            最大条目数
+     * @param progressListener         进度回调（可为 null）
      */
     public TarArchiveExtractor(Path archivePath, Path extractRoot, Long snapshotId,
                                ArchiveFormat format, MagicNumberValidator magicNumberValidator,
-                               long maxEntrySize, long maxTotalUncompressedSize, int maxEntryCount) {
+                               long maxEntrySize, long maxTotalUncompressedSize, int maxEntryCount,
+                               ExtractionProgressListener progressListener) {
         if (format != ArchiveFormat.TAR_GZ && format != ArchiveFormat.TAR) {
             throw new IllegalArgumentException("TarArchiveExtractor only supports TAR and TAR_GZ, got: " + format);
         }
@@ -64,6 +67,7 @@ public class TarArchiveExtractor {
         this.maxEntrySize = maxEntrySize;
         this.maxTotalUncompressedSize = maxTotalUncompressedSize;
         this.maxEntryCount = maxEntryCount;
+        this.progressListener = progressListener;
     }
 
     /**
@@ -95,6 +99,7 @@ public class TarArchiveExtractor {
         List<ArchiveExtractionResult.ReadmeImageEntry> readmeImages = new ArrayList<>();
         List<String> violations = new ArrayList<>();
         long totalUncompressed = 0;
+        int processedCount = 0;
 
         // 构建输入流链：raw → buffered → [optional GZIP decompress] → TAR parser
         try (InputStream rawIn = Files.newInputStream(archivePath);
@@ -216,7 +221,24 @@ public class TarArchiveExtractor {
                 if (entryName.equalsIgnoreCase("README.md") || entryName.equalsIgnoreCase("readme.txt")) {
                     readmeContents.add(new String(entryData, java.nio.charset.StandardCharsets.UTF_8));
                 }
+
+                // ── 进度回调（每 10 个文件报告一次，TAR 总数未知 = -1）──
+                processedCount++;
+                if (progressListener != null && processedCount % 10 == 0) {
+                    progressListener.onProgress("EXTRACTING",
+                            processedCount, -1,
+                            totalUncompressed, -1,
+                            entryName);
+                }
             }
+        }
+
+        // ── 最后报告一次 ──
+        if (progressListener != null) {
+            progressListener.onProgress("EXTRACTING",
+                    processedCount, -1,
+                    totalUncompressed, -1,
+                    "");
         }
 
         if (!violations.isEmpty()) {

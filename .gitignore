@@ -25,6 +25,14 @@ Backend/GameSaves/.mvn/wrapper/maven-wrapper.jar
 .DS_Store
 Thumbs.db
 
+# Secrets & keys
+*.pem
+*SecretKey*
+
+# Test artifacts
+captcha.*
+*.bmp
+
 # Meilisearch
 meilisearch*.exe
 data.ms/

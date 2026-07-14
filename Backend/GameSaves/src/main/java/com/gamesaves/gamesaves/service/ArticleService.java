@@ -24,7 +24,7 @@ public interface ArticleService {
 
     void deleteArticle(Long id);
 
-    Map<String, String> getArticleStatus(Long id);
+    Map<String, Object> getArticleStatus(Long id);
 
     PageDTO<ArticleListItemResponse> getArticlesByGame(Long gameId, int page, int size);
 

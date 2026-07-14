@@ -17,10 +17,14 @@ export const articleApi = {
   getStatus: (id) =>
     client.get(`/articles/${id}/status`),
 
-  /** 上传存档（Multipart: metadata + file + 可选 readmeFile） */
-  create: (formData) =>
+  /** 上传存档（Multipart: metadata + file + 可选 readmeFile + 可选 coverFile）
+   *  @param {FormData} formData
+   *  @param {Function} onUploadProgress - axios progress callback ({loaded, total})
+   */
+  create: (formData, onUploadProgress) =>
     client.post('/articles', formData, {
-      timeout: 60000  // 上传大文件允许 60s
+      timeout: 0,  // 大文件上传不限时（1GB 慢速网络可能需要 10+ 分钟）
+      onUploadProgress
     }),
 
   /** 更新存档信息 */

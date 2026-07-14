@@ -69,8 +69,8 @@ public class ArticleController {
     }
 
     @GetMapping("/{id}/status")
-    public ApiResponse<Map<String, String>> getArticleStatus(@PathVariable Long id) {
-        Map<String, String> status = articleService.getArticleStatus(id);
+    public ApiResponse<Map<String, Object>> getArticleStatus(@PathVariable Long id) {
+        Map<String, Object> status = articleService.getArticleStatus(id);
         return ApiResponse.success(status);
     }
 

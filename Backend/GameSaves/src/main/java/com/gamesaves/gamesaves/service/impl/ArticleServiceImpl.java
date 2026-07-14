@@ -21,6 +21,7 @@ import com.gamesaves.gamesaves.repository.SavingsRepository;
 import com.gamesaves.gamesaves.repository.TagRepository;
 import com.gamesaves.gamesaves.repository.UserRepository;
 import com.gamesaves.gamesaves.service.ArticleService;
+import com.gamesaves.gamesaves.service.ExtractionProgressService;
 import com.gamesaves.gamesaves.service.SearchSyncService;
 import com.gamesaves.gamesaves.service.StorageService;
 import com.gamesaves.gamesaves.service.ZipExtractionService;
@@ -81,6 +82,7 @@ public class ArticleServiceImpl implements ArticleService {
     private final SearchSyncService searchSyncService;
     private final StorageService storageService;
     private final CommentRepository commentRepository;
+    private final ExtractionProgressService extractionProgressService;
 
     // ── 提取限制（从配置文件注入，与 ZipExtractionService 保持一致）──
     @Value("${app.extraction.max-file-size:524288000}")
@@ -116,7 +118,8 @@ public class ArticleServiceImpl implements ArticleService {
                                ZipExtractionService zipExtractionService,
                                SearchSyncService searchSyncService,
                                StorageService storageService,
-                               CommentRepository commentRepository) {
+                               CommentRepository commentRepository,
+                               ExtractionProgressService extractionProgressService) {
         this.articleRepository = articleRepository;
         this.gameRepository = gameRepository;
         this.userRepository = userRepository;
@@ -126,6 +129,7 @@ public class ArticleServiceImpl implements ArticleService {
         this.searchSyncService = searchSyncService;
         this.storageService = storageService;
         this.commentRepository = commentRepository;
+        this.extractionProgressService = extractionProgressService;
     }
 
     /**
@@ -557,13 +561,21 @@ public class ArticleServiceImpl implements ArticleService {
 
     @Override
     @Transactional(readOnly = true)
-    public Map<String, String> getArticleStatus(Long id) {
+    public Map<String, Object> getArticleStatus(Long id) {
         Article article = articleRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Article", id));
-        return Map.of(
-                "status", article.getStatus().name(),
-                "errorMessage", article.getErrorMessage() != null ? article.getErrorMessage() : ""
-        );
+
+        Map<String, Object> result = new java.util.HashMap<>();
+        result.put("status", article.getStatus().name());
+        result.put("errorMessage", article.getErrorMessage() != null ? article.getErrorMessage() : "");
+
+        // 如果在提取中 → 附加进度数据
+        ExtractionProgressService.Snapshot progress = extractionProgressService.getProgress(id);
+        if (progress != null) {
+            result.put("progress", progress.toProgressMap());
+        }
+
+        return result;
     }
 
     @Override

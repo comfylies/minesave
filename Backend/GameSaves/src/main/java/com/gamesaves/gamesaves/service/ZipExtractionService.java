@@ -3,13 +3,15 @@ package com.gamesaves.gamesaves.service;
 import com.gamesaves.gamesaves.entity.Article;
 import com.gamesaves.gamesaves.entity.Savings;
 import com.gamesaves.gamesaves.entity.SavingItem;
-import com.gamesaves.gamesaves.exception.ExtractionTimeoutException;
+import com.gamesaves.gamesaves.entity.User;
 import com.gamesaves.gamesaves.repository.ArticleRepository;
 import com.gamesaves.gamesaves.repository.SavingItemRepository;
 import com.gamesaves.gamesaves.repository.SavingsRepository;
+import com.gamesaves.gamesaves.repository.UserRepository;
 import com.gamesaves.gamesaves.util.ArchiveExtractionResult;
 import com.gamesaves.gamesaves.util.ArchiveFormat;
 import com.gamesaves.gamesaves.util.ArchiveUtils;
+import com.gamesaves.gamesaves.util.ExtractionProgressListener;
 import com.gamesaves.gamesaves.util.ImageThumbnailService;
 import com.gamesaves.gamesaves.util.MagicNumberValidator;
 import com.gamesaves.gamesaves.util.SevenZExtractor;
@@ -43,12 +45,11 @@ public class ZipExtractionService {
     private final ArticleRepository articleRepository;
     private final SavingsRepository savingsRepository;
     private final SavingItemRepository savingItemRepository;
+    private final UserRepository userRepository;
     private final SearchSyncService searchSyncService;
     private final MagicNumberValidator magicNumberValidator;
     private final StorageService storageService;
-
-    @Value("${app.extraction.timeout-seconds:30}")
-    private int timeoutSeconds;
+    private final ExtractionProgressService progressService;
 
     // 提取限制 — 从配置文件读取，与 ArticleServiceImpl 预检保持一致
     @Value("${app.extraction.max-entry-size:104857600}")
@@ -60,18 +61,26 @@ public class ZipExtractionService {
     @Value("${app.extraction.max-entry-count:10000}")
     private int maxEntryCount;
 
+    // ── 管理员提取限制 ──
+    @Value("${app.extraction.admin.max-total-uncompressed-size:1610612736}")
+    private long adminMaxTotalUncompressedSize;
+
     public ZipExtractionService(ArticleRepository articleRepository,
                                 SavingsRepository savingsRepository,
                                 SavingItemRepository savingItemRepository,
+                                UserRepository userRepository,
                                 SearchSyncService searchSyncService,
                                 MagicNumberValidator magicNumberValidator,
-                                StorageService storageService) {
+                                StorageService storageService,
+                                ExtractionProgressService progressService) {
         this.articleRepository = articleRepository;
         this.savingsRepository = savingsRepository;
         this.savingItemRepository = savingItemRepository;
+        this.userRepository = userRepository;
         this.searchSyncService = searchSyncService;
         this.magicNumberValidator = magicNumberValidator;
         this.storageService = storageService;
+        this.progressService = progressService;
     }
 
     /**
@@ -86,7 +95,14 @@ public class ZipExtractionService {
             return CompletableFuture.completedFuture(null);
         } catch (Exception e) {
             log.error("Extraction failed for article {}", articleId, e);
-            markFailed(articleId, e.getMessage());
+            progressService.clear(articleId);
+            // 包含 cause 链信息，便于前端定位
+            String detail = e.getMessage();
+            if (e.getCause() != null) {
+                detail += " [cause: " + e.getCause().getClass().getSimpleName()
+                        + ": " + e.getCause().getMessage() + "]";
+            }
+            markFailed(articleId, detail);
             return CompletableFuture.failedFuture(e);
         }
     }
@@ -104,6 +120,17 @@ public class ZipExtractionService {
                 .orElseThrow(() -> new RuntimeException("Article not found: " + articleId));
 
         updateArticleStatus(articleId, Article.ArticleStatus.EXTRACTING);
+
+        // ── 角色相关限制（管理员使用更高限额，与预检阶段保持一致）──
+        // extract() 在 @Async 线程运行，无 Hibernate session，不能触碰 User 懒加载代理。
+        // article.getUser().getId() 从代理上直接读 FK，不会触发 DB 查询。
+        User articleUser = userRepository.findById(article.getUser().getId())
+                .orElseThrow(() -> new RuntimeException("User not found: " + article.getUser().getId()));
+        boolean isAdmin = "admin".equals(articleUser.getRole());
+        long effectiveMaxTotalUncompressed = isAdmin ? adminMaxTotalUncompressedSize : maxTotalUncompressedSize;
+
+        // ── 创建进度监听器（每个提取独立一个 listener）──
+        ExtractionProgressListener listener = progressService.createListener(articleId);
 
         String cosPrefix = storageService.articleKey(
                 article.getUser().getId(), article.getGame().getId(), articleId, "");
@@ -153,17 +180,20 @@ public class ZipExtractionService {
             switch (fmt) {
                 case ZIP -> {
                     ZipExtractor extractor = new ZipExtractor(zipPath, extractRoot, savings.getId(),
-                            magicNumberValidator, maxEntrySize, maxTotalUncompressedSize, maxEntryCount);
+                            magicNumberValidator, maxEntrySize, effectiveMaxTotalUncompressed, maxEntryCount,
+                            listener);
                     result = extractor.extract();
                 }
                 case SEVEN_Z -> {
                     SevenZExtractor extractor = new SevenZExtractor(zipPath, extractRoot, savings.getId(),
-                            magicNumberValidator, maxEntrySize, maxTotalUncompressedSize, maxEntryCount);
+                            magicNumberValidator, maxEntrySize, effectiveMaxTotalUncompressed, maxEntryCount,
+                            listener);
                     result = extractor.extract();
                 }
                 case TAR_GZ, TAR -> {
                     TarArchiveExtractor extractor = new TarArchiveExtractor(zipPath, extractRoot, savings.getId(),
-                            fmt, magicNumberValidator, maxEntrySize, maxTotalUncompressedSize, maxEntryCount);
+                            fmt, magicNumberValidator, maxEntrySize, effectiveMaxTotalUncompressed, maxEntryCount,
+                            listener);
                     result = extractor.extract();
                 }
                 default -> throw new RuntimeException("Unexpected archive format: " + fmt);
@@ -173,17 +203,48 @@ public class ZipExtractionService {
             // Linux 不受影响，但一次调用成本为零
             storageService.store(cosPrefix + "extracted/.placeholder", new byte[0]);
 
-            // ── 并行上传提取的文件到存储（COS: N 并发网络往返 vs 顺序单线程）──
+            // ── 并行上传提取的文件到存储（按 physicalKey 去重，避免同文件并发拷贝冲突）──
             List<SavingItem> items = result.getItems();
-            items.parallelStream().forEach(item -> {
-                if (!item.getIsDirectory()) {
-                    Path localFile = extractRoot.resolve(item.getPhysicalKey());
-                    if (Files.exists(localFile)) {
-                        String fileKey = cosPrefix + "extracted/" + item.getPhysicalKey();
+            java.util.concurrent.atomic.AtomicInteger uploadedCount = new java.util.concurrent.atomic.AtomicInteger(0);
+            java.util.concurrent.ConcurrentLinkedQueue<String> uploadErrors = new java.util.concurrent.ConcurrentLinkedQueue<>();
+            // 收集所有需要上传的唯一条目（按 physicalKey 去重）
+            List<SavingItem> uniqueItems = items.stream()
+                    .filter(i -> !i.getIsDirectory())
+                    .collect(java.util.stream.Collectors.toMap(
+                            SavingItem::getPhysicalKey,
+                            item -> item,
+                            (a, b) -> a,
+                            java.util.LinkedHashMap::new))
+                    .values().stream()
+                    .toList();
+            int totalUploadItems = uniqueItems.size();
+            uniqueItems.parallelStream().forEach(item -> {
+                Path localFile = extractRoot.resolve(item.getPhysicalKey());
+                if (Files.exists(localFile)) {
+                    String fileKey = cosPrefix + "extracted/" + item.getPhysicalKey();
+                    try {
                         storageService.storeFromPath(fileKey, localFile);
+                    } catch (Exception e) {
+                        uploadErrors.add(item.getPhysicalKey() + ": " + e.getMessage());
+                        log.error("Upload failed for {}: {}", fileKey, e.getMessage());
                     }
                 }
+                int done = uploadedCount.incrementAndGet();
+                if (listener != null && (done % 10 == 0 || done == totalUploadItems)) {
+                    listener.onProgress("UPLOADING", done, totalUploadItems,
+                            0, -1, item.getPhysicalKey());
+                }
             });
+
+            // 上传完成时确保 100% 进度
+            if (listener != null && totalUploadItems > 0) {
+                listener.onProgress("UPLOADING", totalUploadItems, totalUploadItems, 0, -1, "");
+            }
+
+            if (!uploadErrors.isEmpty()) {
+                throw new RuntimeException("Upload failed for " + uploadErrors.size()
+                        + " files (first: " + uploadErrors.peek() + ")");
+            }
 
             // 批量写入 saving_items 数据库记录
             if (!items.isEmpty()) {
@@ -256,6 +317,7 @@ public class ZipExtractionService {
                 fileSize = Files.size(zipPath);
             }
             completeArticle(articleId, finalReadmeRaw, null, fileSize);
+            progressService.clear(articleId);
             log.info("Article {} extraction complete: {} files, {} bytes",
                     articleId, result.getFileCount(), result.getTotalSize());
 

@@ -45,6 +45,7 @@ public class ZipExtractor {
     private final Path extractRoot;
     private final Long snapshotId;
     private final MagicNumberValidator magicNumberValidator;
+    private final ExtractionProgressListener progressListener;
 
     /**
      * @param zipPath                   ZIP 文件本地路径
@@ -54,10 +55,12 @@ public class ZipExtractor {
      * @param maxEntrySize              单条目解压后最大字节数
      * @param maxTotalUncompressedSize  总解压后最大字节数
      * @param maxEntryCount             最大条目数
+     * @param progressListener          进度回调（可为 null）
      */
     public ZipExtractor(Path zipPath, Path extractRoot, Long snapshotId,
                         MagicNumberValidator magicNumberValidator,
-                        long maxEntrySize, long maxTotalUncompressedSize, int maxEntryCount) {
+                        long maxEntrySize, long maxTotalUncompressedSize, int maxEntryCount,
+                        ExtractionProgressListener progressListener) {
         this.zipPath = zipPath;
         this.extractRoot = extractRoot;
         this.snapshotId = snapshotId;
@@ -65,6 +68,7 @@ public class ZipExtractor {
         this.maxEntrySize = maxEntrySize;
         this.maxTotalUncompressedSize = maxTotalUncompressedSize;
         this.maxEntryCount = maxEntryCount;
+        this.progressListener = progressListener;
     }
 
     /**
@@ -117,7 +121,7 @@ public class ZipExtractor {
                 readmeImages.clear();
                 throw e;
             } catch (Exception e) {
-                log.warn("ZIP extraction failed with charset {}: {}", cs, e.getMessage());
+                log.warn("ZIP extraction failed with charset {}: {}", cs, e.toString());
                 lastError = e;
                 items.clear();
                 createdDirs.clear();
@@ -127,8 +131,11 @@ public class ZipExtractor {
         }
 
         if (!extracted) {
+            String cause = lastError != null
+                    ? lastError.getClass().getSimpleName() + ": " + lastError.getMessage()
+                    : "unknown";
             throw new FileProcessingException(
-                    "Failed to extract ZIP with any charset: UTF-8, GBK, default", lastError);
+                    "Failed to extract ZIP with any charset: " + cause, lastError);
         }
 
         // 统计文件数量和总大小
@@ -167,6 +174,9 @@ public class ZipExtractor {
 
             List<String> violations = new ArrayList<>();
             long totalUncompressedSize = 0;
+            int processedCount = 0;
+            // 不预扫描（ZIP 的 getInputStream 与枚举状态耦合），总数 = -1 表示未知
+            int totalFiles = -1;
             Enumeration<ZipArchiveEntry> entries = zipFile.getEntries();
             while (entries.hasMoreElements()) {
                 ZipArchiveEntry entry = entries.nextElement();
@@ -372,6 +382,23 @@ public class ZipExtractor {
                         || entryName.equalsIgnoreCase("readme.txt")) {
                     readmeContents.add(new String(entryData, StandardCharsets.UTF_8));
                 }
+
+                // ── 进度回调（每 5 个文件报告一次）──
+                processedCount++;
+                if (progressListener != null && processedCount % 5 == 0) {
+                    progressListener.onProgress("EXTRACTING",
+                            processedCount, totalFiles,
+                            totalUncompressedSize, -1,
+                            entryName);
+                }
+            }
+
+            // ── 最后报告一次确保 100% ──
+            if (progressListener != null) {
+                progressListener.onProgress("EXTRACTING",
+                        processedCount, totalFiles,
+                        totalUncompressedSize, -1,
+                        "");
             }
 
             // 存在任何伪装文件 → 拒绝整个压缩包

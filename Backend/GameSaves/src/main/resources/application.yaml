@@ -80,7 +80,6 @@ app:
     max-downloads-per-ip: 3
     window-seconds: 60
   extraction:
-    timeout-seconds: 30
     max-file-size: 524288000                 # 500 MB（普通用户上传文件大小上限）
     max-entry-size: 104857600                # 100 MB（单条目解压后上限）
     max-total-uncompressed-size: 524288000   # 500 MB（普通用户总解压后大小上限）
