@@ -72,13 +72,25 @@
     <div v-if="$slots.actions" class="sidebar-section">
       <slot name="actions" />
     </div>
+
+    <!-- 大文件下载验证码弹窗 -->
+    <DownloadCaptchaModal
+      v-model="showCaptchaModal"
+      :article-id="article.id"
+      :file-size="captchaFileSize"
+      :daily-remaining="captchaDailyRemaining"
+      @verified="handleCaptchaVerified"
+      @cancel="handleCaptchaCancelled"
+    />
   </aside>
 </template>
 
 <script setup>
 import { ref, computed } from 'vue'
+import { ElMessage } from 'element-plus'
 import { fileApi } from '../../api/fileApi'
 import TagDisplay from '../tag/TagDisplay.vue'
+import DownloadCaptchaModal from '../download/DownloadCaptchaModal.vue'
 import { formatSize, formatTime } from '@/utils/format'
 
 const props = defineProps({
@@ -87,13 +99,46 @@ const props = defineProps({
 
 const downloading = ref(false)
 
+// ── 大文件下载验证码 ──
+const showCaptchaModal = ref(false)
+const captchaFileSize = ref(0)
+const captchaDailyRemaining = ref(0)
+
 async function handleDownload() {
   downloading.value = true
   try {
-    await fileApi.download(props.article.id)
+    // 1. 查询是否需要验证码
+    const info = await fileApi.getDownloadInfo(props.article.id)
+
+    if (info.requiresCaptcha) {
+      // 需要验证码 — 弹窗
+      captchaFileSize.value = info.fileSize
+      captchaDailyRemaining.value = info.dailyRemaining
+      showCaptchaModal.value = true
+    } else {
+      // 小文件 — 直接下载
+      await fileApi.download(props.article.id)
+    }
+  } catch (e) {
+    // 错误已在拦截器提示
   } finally {
     downloading.value = false
   }
+}
+
+// 验证码验证成功
+async function handleCaptchaVerified({ downloadToken }) {
+  showCaptchaModal.value = false
+  try {
+    await fileApi.download(props.article.id, downloadToken)
+    ElMessage.success('下载已开始')
+  } catch (e) {
+    // 错误已在拦截器提示
+  }
+}
+
+function handleCaptchaCancelled() {
+  showCaptchaModal.value = false
 }
 
 const statusType = computed(() => {

@@ -16,3 +16,10 @@ app:
       path-style-access: true
       presigned-url-expiration-minutes: 5
       public-url-expiration-minutes: 10080
+  extraction:
+    admin:
+      max-file-size: 1073741824              # 1 GB（管理员上传文件大小上限）
+      max-total-uncompressed-size: 1610612736 # 1.5 GB（管理员总解压后大小上限）
+  download:
+    captcha-threshold: 524288000             # 500 MB — 超过此大小的下载需要验证码
+    max-large-downloads-per-day: 3           # 每人（IP）每日大文件下载次数上限

@@ -188,7 +188,7 @@
               <el-icon class="upload-icon"><UploadFilled /></el-icon>
               <div class="upload-text">
                 <p>将压缩包拖到此处，或 <em>点击选择</em></p>
-                <p class="upload-hint">支持 ZIP / 7z / tar.gz / tar / RAR 格式，最大 200 MB</p>
+                <p class="upload-hint">支持 ZIP / 7z / tar.gz / tar / RAR 格式，最大 {{ maxUploadSizeText }}</p>
               </div>
             </div>
           </el-upload>
@@ -271,7 +271,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Plus, InfoFilled, MagicStick } from '@element-plus/icons-vue'
@@ -284,6 +284,10 @@ import TagSelector from '../components/tag/TagSelector.vue'
 const router = useRouter()
 const gameStore = useGameStore()
 const auth = useAuthStore()
+
+// ── 管理员上传限制（1GB），普通用户 200MB ──
+const maxUploadSize = computed(() => auth.isAdmin ? 1024 * 1024 * 1024 : 200 * 1024 * 1024)
+const maxUploadSizeText = computed(() => auth.isAdmin ? '1 GB' : '200 MB')
 
 const formRef = ref(null)
 const uploadRef = ref(null)
@@ -406,8 +410,8 @@ function handleFileChange(file) {
       selectedFile.value = null
       return
     }
-    if (rawFile.size > 200 * 1024 * 1024) {
-      ElMessage.error('文件大小不能超过 200 MB')
+    if (rawFile.size > maxUploadSize.value) {
+      ElMessage.error('文件大小不能超过 ' + maxUploadSizeText.value)
       fileList.value = []
       selectedFile.value = null
       return

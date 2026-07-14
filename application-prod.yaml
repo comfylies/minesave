@@ -18,8 +18,8 @@ spring:
 
   servlet:
     multipart:
-      max-file-size: 200MB
-      max-request-size: 200MB
+      max-file-size: 1GB
+      max-request-size: 1GB
 
   mail:
     host: smtp.qq.com
@@ -70,7 +70,14 @@ app:
     window-seconds: 60
   extraction:
     timeout-seconds: 30
-    max-file-size: 209715200
+    max-file-size: 524288000                 # 500 MB（普通用户）
+    max-total-uncompressed-size: 524288000   # 500 MB（普通用户）
+    admin:
+      max-file-size: 1073741824              # 1 GB（管理员）
+      max-total-uncompressed-size: 1610612736 # 1.5 GB（管理员）
+  download:
+    captcha-threshold: 524288000
+    max-large-downloads-per-day: 3
   login:
     max-fail-count: 5
     lock-minutes: 30

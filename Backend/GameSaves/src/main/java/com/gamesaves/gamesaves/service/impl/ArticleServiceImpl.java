@@ -95,8 +95,18 @@ public class ArticleServiceImpl implements ArticleService {
     @Value("${app.extraction.max-entry-count:10000}")
     private int maxEntryCount;
 
+    // ── 管理员提取限制 ──
+    @Value("${app.extraction.admin.max-file-size:1073741824}")
+    private long adminMaxFileSize;
+
+    @Value("${app.extraction.admin.max-total-uncompressed-size:1610612736}")
+    private long adminMaxTotalUncompressedSize;
+
     @Value("${app.edit.max-daily-edits:2}")
     private int maxDailyEdits;
+
+    /** 提取限制参数（管理员 vs 普通用户） */
+    private record ExtractionLimits(long maxFileSize, long maxTotalUncompressedSize) {}
 
     public ArticleServiceImpl(ArticleRepository articleRepository,
                                GameRepository gameRepository,
@@ -146,6 +156,11 @@ public class ArticleServiceImpl implements ArticleService {
             throw new BadRequestException("ZIP file is required");
         }
 
+        boolean isAdmin = "admin".equals(user.getRole());
+        ExtractionLimits limits = isAdmin
+                ? new ExtractionLimits(adminMaxFileSize, adminMaxTotalUncompressedSize)
+                : new ExtractionLimits(maxFileSize, maxTotalUncompressedSize);
+
         // 2. README 解析（Priority: 手动输入 > 上传 .md > 从压缩包提取）
         String resolvedReadmeRaw = request.getReadmeRaw();
         if ((resolvedReadmeRaw == null || resolvedReadmeRaw.isBlank())
@@ -166,7 +181,7 @@ public class ArticleServiceImpl implements ArticleService {
             tempZip = Files.createTempFile("upload-", ".tmp");
             file.transferTo(tempZip.toFile());
             zipSize = Files.size(tempZip);
-            validateArchiveFile(tempZip, zipSize, file.getOriginalFilename());
+            validateArchiveFile(tempZip, zipSize, file.getOriginalFilename(), limits);
         } catch (BadRequestException e) {
             // 预检失败 → 清理 temp 文件，直接返回错误（DB 和 COS 完全未动）
             cleanupTempFile(tempZip);
@@ -729,15 +744,16 @@ public class ArticleServiceImpl implements ArticleService {
      * <p>所有限制从配置文件 {@code app.extraction.*} 读取，确保与异步提取阶段完全一致。
      * 在 DB 写入和 COS 上传之前调用——预检失败时二者完全未动。
      */
-    private void validateArchiveFile(Path tempZip, long zipSize, String originalFilename) {
+    private void validateArchiveFile(Path tempZip, long zipSize, String originalFilename,
+                                       ExtractionLimits limits) {
         // ── 文件大小检查 ──
         if (zipSize == 0) {
             throw new BadRequestException("Uploaded file is empty");
         }
-        if (zipSize > maxFileSize) {
+        if (zipSize > limits.maxFileSize()) {
             throw new BadRequestException(
                     "File too large (" + zipSize / 1024 / 1024 + "MB, max "
-                            + maxFileSize / 1024 / 1024 + "MB)");
+                            + limits.maxFileSize() / 1024 / 1024 + "MB)");
         }
 
         // ── 格式检测（magic bytes 优先，扩展名回退）──
@@ -761,9 +777,9 @@ public class ArticleServiceImpl implements ArticleService {
 
         // ── 格式对应的结构完整性扫描 ──
         switch (format) {
-            case ZIP -> validateZipStructure(tempZip, zipSize);
-            case SEVEN_Z -> validateSevenZStructure(tempZip);
-            case TAR_GZ, TAR -> validateTarStructure(tempZip, format);
+            case ZIP -> validateZipStructure(tempZip, zipSize, limits);
+            case SEVEN_Z -> validateSevenZStructure(tempZip, limits);
+            case TAR_GZ, TAR -> validateTarStructure(tempZip, format, limits);
         }
     }
 
@@ -771,7 +787,7 @@ public class ArticleServiceImpl implements ArticleService {
      * ZIP 结构完整性预检：Commons Compress 打开 + 条目扫描。
      * 检查条目数、路径穿越、单文件大小、解压总大小。
      */
-    private void validateZipStructure(Path tempZip, long zipSize) {
+    private void validateZipStructure(Path tempZip, long zipSize, ExtractionLimits limits) {
         try (ZipFile zipFile = ZipFile.builder().setPath(tempZip).get()) {
             Enumeration<ZipArchiveEntry> entries = zipFile.getEntries();
 
@@ -810,10 +826,10 @@ public class ArticleServiceImpl implements ArticleService {
                 // ── 解压总大小检查 ──
                 if (size > 0) {
                     totalUncompressed += size;
-                    if (totalUncompressed > maxTotalUncompressedSize) {
+                    if (totalUncompressed > limits.maxTotalUncompressedSize()) {
                         throw new BadRequestException(
                                 "Archive total uncompressed size exceeds "
-                                        + maxTotalUncompressedSize / 1024 / 1024 + "MB limit");
+                                        + limits.maxTotalUncompressedSize() / 1024 / 1024 + "MB limit");
                     }
                 }
             }
@@ -833,7 +849,7 @@ public class ArticleServiceImpl implements ArticleService {
      * 7z 不支持随机访问，此处只做元数据扫描（不读取条目内容）。
      * 检查条目数、路径穿越、条目大小限制。
      */
-    private void validateSevenZStructure(Path tempZip) {
+    private void validateSevenZStructure(Path tempZip, ExtractionLimits limits) {
         try (SevenZFile sevenZFile = SevenZFile.builder()
                 .setFile(tempZip.toFile())
                 .get()) {
@@ -871,10 +887,10 @@ public class ArticleServiceImpl implements ArticleService {
                 }
                 if (size > 0) {
                     totalUncompressed += size;
-                    if (totalUncompressed > maxTotalUncompressedSize) {
+                    if (totalUncompressed > limits.maxTotalUncompressedSize()) {
                         throw new BadRequestException(
                                 "7z total uncompressed size exceeds "
-                                        + maxTotalUncompressedSize / 1024 / 1024 + "MB limit");
+                                        + limits.maxTotalUncompressedSize() / 1024 / 1024 + "MB limit");
                     }
                 }
             }
@@ -897,7 +913,7 @@ public class ArticleServiceImpl implements ArticleService {
      * TAR / TAR.GZ 结构完整性预检：流式顺序扫描元数据（不读取条目内容）。
      * 检查条目数、路径穿越、条目大小限制。
      */
-    private void validateTarStructure(Path tempZip, ArchiveFormat format) {
+    private void validateTarStructure(Path tempZip, ArchiveFormat format, ExtractionLimits limits) {
         try (InputStream rawIn = Files.newInputStream(tempZip);
              InputStream bufIn = new BufferedInputStream(rawIn);
              InputStream decompIn = format == ArchiveFormat.TAR_GZ
@@ -939,10 +955,10 @@ public class ArticleServiceImpl implements ArticleService {
                 }
                 if (size > 0) {
                     totalUncompressed += size;
-                    if (totalUncompressed > maxTotalUncompressedSize) {
+                    if (totalUncompressed > limits.maxTotalUncompressedSize()) {
                         throw new BadRequestException(
                                 "Archive total uncompressed size exceeds "
-                                        + maxTotalUncompressedSize / 1024 / 1024 + "MB limit");
+                                        + limits.maxTotalUncompressedSize() / 1024 / 1024 + "MB limit");
                     }
                 }
             }

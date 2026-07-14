@@ -3,7 +3,9 @@ package com.gamesaves.gamesaves.controller;
 import com.gamesaves.gamesaves.dto.response.ApiResponse;
 import com.gamesaves.gamesaves.dto.response.DirectoryBrowseResponse;
 import com.gamesaves.gamesaves.dto.response.FileEntryResponse;
+import com.gamesaves.gamesaves.exception.BadRequestException;
 import com.gamesaves.gamesaves.service.DownloadService;
+import com.gamesaves.gamesaves.service.DownloadVerificationService;
 import com.gamesaves.gamesaves.service.FileExplorerService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
@@ -16,6 +18,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.util.UriUtils;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
 
 
 @RestController
@@ -26,11 +29,14 @@ public class FileController {
 
     private final FileExplorerService fileExplorerService;
     private final DownloadService downloadService;
+    private final DownloadVerificationService downloadVerificationService;
 
     public FileController(FileExplorerService fileExplorerService,
-                           DownloadService downloadService) {
+                           DownloadService downloadService,
+                           DownloadVerificationService downloadVerificationService) {
         this.fileExplorerService = fileExplorerService;
         this.downloadService = downloadService;
+        this.downloadVerificationService = downloadVerificationService;
     }
 
     /**
@@ -105,15 +111,61 @@ public class FileController {
     }
 
     /**
-     * Download the original ZIP archive (with rate limiting).
+     * 查询下载信息 — 是否需要验证码、文件大小、今日剩余次数。
+     * GET /api/files/{articleId}/download/info
+     */
+    @GetMapping("/{articleId}/download/info")
+    public ApiResponse<DownloadVerificationService.DownloadInfo> getDownloadInfo(
+            @PathVariable Long articleId,
+            HttpServletRequest request) {
+        String ip = getClientIp(request);
+        DownloadVerificationService.DownloadInfo info = downloadVerificationService.getDownloadInfo(articleId, ip);
+        return ApiResponse.success(info);
+    }
+
+    /**
+     * 验证图形验证码并获取下载 token（大文件下载）。
+     * POST /api/files/{articleId}/download/verify-captcha
+     */
+    @PostMapping("/{articleId}/download/verify-captcha")
+    public ApiResponse<DownloadVerificationService.VerifyResult> verifyDownloadCaptcha(
+            @PathVariable Long articleId,
+            @RequestBody Map<String, String> body,
+            HttpServletRequest request) {
+        String captchaKey = body.get("captchaKey");
+        String captchaCode = body.get("captchaCode");
+        if (captchaKey == null || captchaKey.isBlank() || captchaCode == null || captchaCode.isBlank()) {
+            throw new BadRequestException("验证码不能为空");
+        }
+        String ip = getClientIp(request);
+        DownloadVerificationService.VerifyResult result =
+                downloadVerificationService.verifyCaptchaAndGenerateToken(ip, articleId, captchaKey, captchaCode);
+        return ApiResponse.success(result);
+    }
+
+    /**
+     * Download the original ZIP archive (with rate limiting + captcha for large files).
      * Uses 302 redirect — local mode redirects to /storage/..., COS mode to pre-signed URL.
+     *
+     * <p>大文件（超过 captcha-threshold）需要先通过 /verify-captcha 获取 token，
+     * 然后携带 token 参数访问。
      */
     @GetMapping("/{articleId}/download")
     public ResponseEntity<Void> downloadZip(
             @PathVariable Long articleId,
+            @RequestParam(required = false) String token,
             HttpServletRequest request) {
 
         String ip = getClientIp(request);
+
+        // ── 大文件下载验证码检查 ──
+        if (downloadVerificationService.requiresCaptcha(articleId)) {
+            boolean tokenValid = downloadVerificationService.validateAndConsumeToken(token, ip, articleId);
+            if (!tokenValid) {
+                throw new BadRequestException(
+                        "本存档超过 500MB，需要验证码验证后才能下载。请先获取验证码并通过验证。");
+            }
+        }
 
         // Check rate limit
         downloadService.checkRateLimit(ip, articleId);

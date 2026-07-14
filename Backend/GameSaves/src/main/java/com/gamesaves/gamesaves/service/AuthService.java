@@ -85,7 +85,7 @@ public class AuthService {
         return Map.of("captchaKey", key, "captchaImage", result.base64Image());
     }
 
-    private void validateCaptcha(String captchaKey, String captchaCode) {
+    public void validateCaptcha(String captchaKey, String captchaCode) {
         // 生产环境始终强制验证码校验
         if (captchaKey == null || captchaCode == null || captchaCode.trim().isEmpty()) {
             throw new CaptchaValidationException("Captcha code is required");

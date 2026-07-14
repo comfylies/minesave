@@ -92,7 +92,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     @ResponseStatus(HttpStatus.PAYLOAD_TOO_LARGE)
     public ApiResponse<Void> handleMaxUploadSize(MaxUploadSizeExceededException e) {
-        return ApiResponse.error(413, "File too large. Maximum upload size is 200MB.");
+        return ApiResponse.error(413, "File too large. Maximum upload size is 1GB.");
     }
 
     @ExceptionHandler(MultipartException.class)
