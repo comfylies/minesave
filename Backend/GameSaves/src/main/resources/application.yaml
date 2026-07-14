@@ -109,4 +109,4 @@ app:
     batch-delay-ms: 2000
     delete-physical-files: true
   edit:
-    max-daily-edits: 2
+    max-daily-edits: 999999

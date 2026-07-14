@@ -32,9 +32,7 @@ export const adminApi = {
   uploadSafeStructure(gameId, file) {
     const formData = new FormData()
     formData.append('file', file)
-    return client.post(`/admin/games/${gameId}/safe-structure`, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
-    })
+    return client.post(`/admin/games/${gameId}/safe-structure`, formData)
   },
 
   /** 查询游戏标准结构状态 */

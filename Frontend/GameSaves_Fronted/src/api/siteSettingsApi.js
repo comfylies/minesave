@@ -14,8 +14,6 @@ export const siteSettingsApi = {
   uploadBackground: (file) => {
     const formData = new FormData()
     formData.append('file', file)
-    return client.post('/admin/site-settings/upload-background', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
-    })
+    return client.post('/admin/site-settings/upload-background', formData)
   }
 }

@@ -215,7 +215,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { InfoFilled, WarningFilled } from '@element-plus/icons-vue'
+import { InfoFilled, WarningFilled, Picture, Document } from '@element-plus/icons-vue'
 import { articleApi } from '../api/articleApi'
 import TagSelector from '../components/tag/TagSelector.vue'
 
@@ -292,8 +292,8 @@ function handleReadmeFileRemove() {
 
 // ── 封面图文件处理 ──
 function handleCoverChange(file) {
-  const rawFile = file.raw
-  if (rawFile) {
+  const rawFile = file.raw || file
+  if (rawFile && rawFile instanceof File) {
     selectedCoverFile.value = rawFile
     if (coverPreviewUrl.value) {
       URL.revokeObjectURL(coverPreviewUrl.value)

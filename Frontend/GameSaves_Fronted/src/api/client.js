@@ -3,10 +3,7 @@ import { ElMessage } from 'element-plus'
 
 const client = axios.create({
   baseURL: '/api',
-  timeout: 30000,
-  headers: {
-    'Content-Type': 'application/json'
-  }
+  timeout: 30000
 })
 
 // 请求拦截器：携带 Sa-Token

@@ -35,17 +35,13 @@ export const announcementApi = {
   uploadImage(file) {
     const formData = new FormData()
     formData.append('file', file)
-    return client.post('/admin/announcements/upload-image', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
-    })
+    return client.post('/admin/announcements/upload-image', formData)
   },
 
   /** 管理员：上传 .md 文件，返回内容 */
   uploadMd(file) {
     const formData = new FormData()
     formData.append('file', file)
-    return client.post('/admin/announcements/upload-md', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
-    })
+    return client.post('/admin/announcements/upload-md', formData)
   }
 }

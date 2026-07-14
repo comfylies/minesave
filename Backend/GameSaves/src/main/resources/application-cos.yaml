@@ -16,3 +16,5 @@ app:
       path-style-access: false
       presigned-url-expiration-minutes: 15
       public-url-expiration-minutes: 10080
+  edit:
+    max-daily-edits: 2

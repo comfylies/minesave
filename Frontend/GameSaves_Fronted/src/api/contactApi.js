@@ -10,9 +10,7 @@ export const contactApi = {
   uploadImage(file) {
     const formData = new FormData()
     formData.append('file', file)
-    return client.post('/contact/upload-image', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
-    })
+    return client.post('/contact/upload-image', formData)
   },
 
   /** 获取待处理留言数量（导航栏红点用） */

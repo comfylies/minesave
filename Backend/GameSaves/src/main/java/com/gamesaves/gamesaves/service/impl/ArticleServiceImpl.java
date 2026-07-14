@@ -51,6 +51,8 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Enumeration;
 import java.util.HashSet;
 import java.util.List;
@@ -288,11 +290,13 @@ public class ArticleServiceImpl implements ArticleService {
 
         Savings savings = savingsRepository.findByArticleId(id).orElse(null);
         ArticleDetailResponse response = ArticleDetailResponse.fromEntity(article, savings);
-        // 将 storage key 解析为可公开访问的 URL
+        // 将 storage key 解析为可公开访问的 URL（附加 updatedAt 作为缓存破坏参数，
+        // 避免封面/缩略图修改后浏览器仍显示缓存的旧图）
         String coverKey = article.getCoverImage();
-        response.setCoverImage(resolveCoverUrl(coverKey));
-        response.setCoverThumbnail(resolveCoverThumbnailUrl(coverKey, 360));
-        response.setCoverThumbnail720(resolveCoverThumbnailUrl(coverKey, 720));
+        String cacheBuster = buildCacheBuster(article.getUpdatedAt());
+        response.setCoverImage(appendCacheBuster(resolveCoverUrl(coverKey), cacheBuster));
+        response.setCoverThumbnail(appendCacheBuster(resolveCoverThumbnailUrl(coverKey, 360), cacheBuster));
+        response.setCoverThumbnail720(appendCacheBuster(resolveCoverThumbnailUrl(coverKey, 720), cacheBuster));
         return response;
     }
 
@@ -392,8 +396,15 @@ public class ArticleServiceImpl implements ArticleService {
         }
 
         // 8. 封面替换
+        log.info("Article {} edit — coverFile present: {}, isEmpty: {}, size: {}, originalFilename: {}",
+                id, coverFile != null, coverFile != null ? coverFile.isEmpty() : "N/A",
+                coverFile != null ? coverFile.getSize() : "N/A",
+                coverFile != null ? coverFile.getOriginalFilename() : "N/A");
         if (coverFile != null && !coverFile.isEmpty()) {
+            log.info("Article {} edit — replacing cover image...", id);
             replaceCoverImage(article, coverFile);
+        } else {
+            log.info("Article {} edit — no coverFile, skipping cover replacement", id);
         }
 
         // 9. 保存
@@ -406,13 +417,14 @@ public class ArticleServiceImpl implements ArticleService {
             log.warn("Failed to re-index article {} after edit: {}", id, e.getMessage());
         }
 
-        // 11. 构建响应（需要解析 cover URL）
+        // 11. 构建响应（需要解析 cover URL，附加缓存破坏参数避免浏览器缓存旧图）
         Savings savings = savingsRepository.findByArticleId(id).orElse(null);
         ArticleDetailResponse response = ArticleDetailResponse.fromEntity(article, savings);
         String coverKey = article.getCoverImage();
-        response.setCoverImage(resolveCoverUrl(coverKey));
-        response.setCoverThumbnail(resolveCoverThumbnailUrl(coverKey, 360));
-        response.setCoverThumbnail720(resolveCoverThumbnailUrl(coverKey, 720));
+        String cacheBuster = buildCacheBuster(article.getUpdatedAt());
+        response.setCoverImage(appendCacheBuster(resolveCoverUrl(coverKey), cacheBuster));
+        response.setCoverThumbnail(appendCacheBuster(resolveCoverThumbnailUrl(coverKey, 360), cacheBuster));
+        response.setCoverThumbnail720(appendCacheBuster(resolveCoverThumbnailUrl(coverKey, 720), cacheBuster));
         return response;
     }
 
@@ -462,14 +474,21 @@ public class ArticleServiceImpl implements ArticleService {
             // 生成并上传缩略图（270p/360p/720p）
             thumbDir = Files.createTempDirectory("edit-thumbs-");
             ImageThumbnailService.generateCoverThumbnails(tempCover, thumbDir);
+            int thumbCount = 0;
             for (int size : new int[]{270, 360, 720}) {
                 Path thumbPath = thumbDir.resolve("cover_thumb_" + size + ".jpg");
                 if (Files.exists(thumbPath)) {
                     String thumbKey = storageService.articleKey(userId, gameId, articleId, "cover_thumb_" + size + ".jpg");
                     storageService.storeFromPath(thumbKey, thumbPath);
+                    thumbCount++;
                 }
             }
-            log.info("Article {} cover replaced: {} → {}", articleId, oldCoverKey, newCoverKey);
+            if (thumbCount == 0) {
+                log.warn("Article {} cover edit — no thumbnails were generated (ImageIO may have failed to decode the image). "
+                        + "Original cover will be used for display.", articleId);
+            } else {
+                log.info("Article {} cover replaced: {} → {} ({} thumbnails)", articleId, oldCoverKey, newCoverKey, thumbCount);
+            }
         } catch (BadRequestException e) {
             throw e;
         } catch (IOException e) {
@@ -482,28 +501,16 @@ public class ArticleServiceImpl implements ArticleService {
             }
         }
 
-        // 3. 删除旧封面 + 旧缩略图（新图上传成功后）
-        deleteOldCoverArtifacts(oldCoverKey);
-    }
-
-    /**
-     * 删除旧封面图及其缩略图。
-     * 每个文件独立 try-catch，某个文件不存在不影响其他删除。
-     * 兼容存量数据中 coverImage 是 URL 的情况（跳过删除）。
-     */
-    private void deleteOldCoverArtifacts(String coverKey) {
-        if (coverKey == null || coverKey.isBlank()) return;
-        // 存量 URL 数据不删
-        if (coverKey.startsWith("http://") || coverKey.startsWith("https://")
-                || coverKey.startsWith("/storage/")) {
-            return;
-        }
-        // 删除原图
-        safeDelete(coverKey);
-        // 删除缩略图（派生 key：cover.png → cover_thumb_{size}.jpg）
-        String baseKey = coverKey.replaceAll("\\.[^.]+$", "");
-        for (int size : new int[]{270, 360, 720}) {
-            safeDelete(baseKey + "_thumb_" + size + ".jpg");
+        // 3. 删除旧封面图（仅当新旧 key 不同时 — 相同时已被 storeFromPath 覆盖）。
+        //    缩略图 key 始终为 cover_thumb_{size}.jpg，与封面扩展名无关，
+        //    已被上一步 storeFromPath（REPLACE_EXISTING）覆盖，无需删除。
+        if (oldCoverKey != null && !oldCoverKey.isBlank() && !oldCoverKey.equals(newCoverKey)) {
+            safeDelete(oldCoverKey);
+            String baseKey = oldCoverKey.replaceAll("\\.[^.]+$", "");
+            for (int size : new int[]{270, 360, 720}) {
+                safeDelete(baseKey + "_thumb_" + size + ".jpg");
+            }
+            log.info("Article {} old cover artifacts deleted: {}", articleId, oldCoverKey);
         }
     }
 
@@ -556,8 +563,9 @@ public class ArticleServiceImpl implements ArticleService {
                 .map(ArticleListItemResponse::fromEntity)
                 .peek(item -> {
                     String coverKey = item.getCoverImage();
-                    item.setCoverImage(resolveCoverUrl(coverKey));
-                    item.setCoverThumbnail(resolveCoverThumbnailUrl(coverKey, 360));
+                    String cacheBuster = buildCacheBuster(item.getUpdatedAt());
+                    item.setCoverImage(appendCacheBuster(resolveCoverUrl(coverKey), cacheBuster));
+                    item.setCoverThumbnail(appendCacheBuster(resolveCoverThumbnailUrl(coverKey, 360), cacheBuster));
                 })
                 .collect(Collectors.toList());
 
@@ -575,8 +583,9 @@ public class ArticleServiceImpl implements ArticleService {
                 .map(ArticleListItemResponse::fromEntity)
                 .peek(item -> {
                     String coverKey = item.getCoverImage();
-                    item.setCoverImage(resolveCoverUrl(coverKey));
-                    item.setCoverThumbnail(resolveCoverThumbnailUrl(coverKey, 360));
+                    String cacheBuster = buildCacheBuster(item.getUpdatedAt());
+                    item.setCoverImage(appendCacheBuster(resolveCoverUrl(coverKey), cacheBuster));
+                    item.setCoverThumbnail(appendCacheBuster(resolveCoverThumbnailUrl(coverKey, 360), cacheBuster));
                 })
                 .collect(Collectors.toList());
 
@@ -681,6 +690,27 @@ public class ArticleServiceImpl implements ArticleService {
             log.warn("Failed to resolve thumbnail URL for key {}: {}", thumbKey, e.getMessage());
         }
         return null;
+    }
+
+    /**
+     * 为 local 模式构建基于 {@code updatedAt} 的缓存破坏参数。
+     * S3/COS 模式返回空字符串（预签名 URL 自带过期时间，不需额外破坏缓存）。
+     */
+    private String buildCacheBuster(LocalDateTime updatedAt) {
+        if (updatedAt == null) return "";
+        return "t=" + updatedAt.toInstant(ZoneOffset.UTC).toEpochMilli();
+    }
+
+    /**
+     * 为 {@code /storage/} 路径附加缓存破坏查询参数。
+     * S3/COS 预签名 URL 和 http/https URL 保持不变。
+     */
+    private String appendCacheBuster(String url, String cacheBuster) {
+        if (url == null || cacheBuster == null || cacheBuster.isEmpty()) return url;
+        if (url.startsWith("/storage/")) {
+            return url + (url.contains("?") ? "&" : "?") + cacheBuster;
+        }
+        return url;
     }
 
     // ── 压缩包预检（本地 temp 文件，不访问网络）──

@@ -53,6 +53,8 @@ All file I/O goes through `StorageService` — never touch the filesystem direct
 | `local` (default) | `LocalStorageServiceImpl` | Local filesystem, maps keys → `Database/{userId}/{gameId}/{articleId}/` with path traversal guard |
 | `s3` | `S3StorageServiceImpl` | AWS S3-compatible (MinIO for test, Tencent COS for production). Uses AWS SDK v2. Production (COS) requires env vars: `COS_ACCESS_KEY`, `COS_SECRET_KEY`, `COS_APPID`. |
 
+`S3Config` (`@ConditionalOnProperty("app.storage.type=s3")`) wires the `S3Client` bean with `@ConfigurationProperties("app.storage.s3")` — supports path-style (MinIO) and virtual-hosted-style (COS) access. Presigned URL expiration: 5 min for private, 7 days for public (matches JWT token TTL).
+
 Key semantics:
 - All keys use forward-slash format: `articles/{userId}/{gameId}/{articleId}/{filename}`
 - `getLocalPath(key)` downloads remote files to temp when needed (e.g. archive extraction, ImageIO) — local mode returns the direct path
@@ -71,8 +73,12 @@ Token-based auth via Sa-Token with **JWT mode enabled** (`is-jwt: true`). Config
 - All other `/api/**` — requires login
 
 **Two login modes:**
-1. **Password + captcha**: username/email + password + graphical captcha image. 5 max failed attempts → 30min account lock (`login_fails` table).
-2. **Email verification code**: email + 6-digit code. Cooldown 60s between sends, TTL 5min, max 5 sends/day per email.
+1. **Password + captcha**: username/email + password + graphical captcha image. 5 max failed attempts → 30min account lock (`login_fails` table, tracked per-user with `locked_until` timestamp).
+2. **Email verification code**: email + 6-digit code. Sending the code itself requires passing a graphical captcha first (defense against automated spam). Cooldown 90s between sends, TTL 10min (600s), max 5 sends/day per email via in-memory `ConcurrentHashMap` (resets daily). Codes are one-time-use and tracked in `EmailCodeService`.
+
+**Registration**: username + password + email + 6-digit email verification code. Username/email/phone uniqueness validated before consuming the code. Field availability checking endpoint (`/api/auth/check-field`) provides real-time feedback with per-IP rate limiting (max 1 req/s).
+
+**App.vue bootstrap**: on mount, validates the stored JWT against the server via `checkLogin()`. If invalid (e.g. server restart cleared Sa-Token memory sessions), clears localStorage and redirects to login.
 
 ### Entity Design — CRITICAL
 
@@ -107,7 +113,7 @@ POST /api/articles (multipart: metadata JSON + archive file + optional README .m
 
 ### Archive Extraction — Multi-Format
 
-`ArchiveFormat` enum detects format via magic bytes (read order: ZIP → 7z → RAR → tar.gz → tar), with extension-based fallback. Supported formats:
+`ArchiveFormat` enum detects format via magic bytes (read order: ZIP → 7z → RAR → tar.gz → tar), with extension-based fallback. All extractors live in the `util/` package (not a separate `archive/` package). Supported formats:
 
 | Format | Extensions | Extraction | Extractor class |
 |--------|-----------|------------|-----------------|
@@ -145,7 +151,20 @@ Search engine for game + article discovery. Single index `saves` with two doc ty
 
 `FileExplorerService.getZipForDownload()` resolves the article's archive via 3-layer fallback: 1) dynamic path from config `storageBasePath` + userId/gameId/articleId, 2) `article.storageRoot` (legacy), 3) `savings.zipPath` (very old data). Paths resolved to absolute via `@PostConstruct` to avoid Tomcat temp dir drift.
 
-`DownloadService` tracks download counts and logs. `RateLimiter` enforces per-IP download rate limits (configurable via `app.rate-limit.*`).
+`DownloadService` tracks download counts and logs. Dual-layer rate limiting:
+- **Memory layer** (`RateLimiter`): per-IP+article windowed counter (default 3 per 60s), plus per-IP+action global limiting (e.g. game creation: 3/60s → 30min IP ban). IP banning with TTL, scheduled eviction every 60s.
+- **DB layer** (`DownloadLogRepository`): hard cap of 5 downloads per IP in 60s.
+- **Other rate-limited actions**: email code sending (per-email 90s cooldown, 5/day max), field availability checking (per-IP 1s cooldown), cleanup manual trigger (60s interval), article full edit (2/day).
+
+### Article Editing System
+
+`POST /api/articles/{id}/edit` (multipart: optional metadata JSON + optional README .md + optional cover image). Supports three independent update dimensions:
+
+- **Metadata**: title, version, description, tag associations (via `ArticleUpdateRequest`)
+- **README replacement**: upload a new `.md` file to replace the article's README
+- **Cover image replacement**: upload a new image; old thumbnails are deleted, new ones regenerated
+
+Daily edit limit: `app.edit.max-daily-edits` (default 2). Tracked via `article.lastEditDate` and `article.dailyEditCount` — resets at midnight. `ArticleFullUpdateRequest` combines metadata + file fields in one multipart request. Frontend: `EditPage.vue` at `/articles/:articleId/edit` (requires auth, article owner only).
 
 ### Cleanup System
 
@@ -164,6 +183,10 @@ Global tag pool via `Tag` entity. Articles have many-to-many association with ta
 
 `Announcement` entity with title/content/type/pinned fields. `AnnouncementService` provides CRUD. Frontend displays active announcements site-wide. Admin panel has full management UI.
 
+### Admin Audit Log
+
+`AdminAuditLog` entity records admin operations (action, target type/id, detail, admin username, IP address). Used for accountability — all admin panel modifications are logged. Pending migration SQL at `Backend/GameSaves/migration_add_audit_log.sql`.
+
 ### Ghost Article Diagnostics
 
 Ghost articles = storage files without corresponding DB records (orphaned from failed uploads or game merges). `AdminGhosts.vue` + backend endpoint scan storage directories against the `articles` table to find and report ghosts.
@@ -179,9 +202,47 @@ Key-value store for site-wide configuration (`SiteSetting` entity, `site_setting
 - Rebuilds the Meilisearch search index via `SearchSyncService.rebuildAll()`
 - Resets test user passwords on every startup to keep them in a known-good state regardless of SQL init file contents
 
+### CORS & Static Resources
+
+- **CORS**: `CorsConfig` reads `app.cors.allowed-origins` (default `*`). Uses `allowedOriginPatterns` with credentials enabled. Production should set a specific domain.
+- **Static resources**: `WebMvcConfig` maps `/storage/**` → `Database/` directory (resolved absolute). Relevant for local storage mode; in COS mode it serves cached files (thumbnails, covers).
+
+### Security Utilities
+
+- **`XssFilter`**: regex-based sanitization removing `<script>`, event handlers, `javascript:`, `<iframe>`, `<object>`, `<embed>`, `<link>`, `<meta>`. Applied to all user inputs during registration and profile updates.
+- **`MagicNumberValidator`**: checks file magic bytes against claimed extension. Blocked: MZ (`.exe`, `.dll`, `.sys`, etc.), ELF (`.so`, `.o`, etc.), SHEBANG (`.sh`, `.py`, `.rb`, etc.). Config at `app.security.magic-number.rules.*`.
+- **`PathTraversalValidator`**: rejects `../`, absolute paths, drive letters in archive entry names.
+- **`CaptchaUtil`**: pure JDK `java.awt` graphical captcha (130×48, 4 chars, rotation + noise + lines). No third-party library.
+
 ### API Convention
 
 All responses: `{ "code": 200, "message": "...", "data": {...} }`. Pagination: `PageDTO<T>` with `content/page/size/total`. Exceptions → `GlobalExceptionHandler` maps to HTTP status codes (see `exception/` package).
+
+### Service Implementation Pattern
+
+Mixed pattern — intentional, not accidental:
+- **Interface + impl**: `ArticleService`/`ArticleServiceImpl`, `GameService`/`GameServiceImpl`, `UserService`/`UserServiceImpl`, `CommentService`/`CommentServiceImpl`, `AnnouncementService`/`AnnouncementServiceImpl`, `TagService`/`TagServiceImpl`, `DownloadService`/`DownloadServiceImpl`, `FileExplorerService`/`FileExplorerServiceImpl`, `SavingsService`/`SavingsServiceImpl`, `AdminService`/`AdminServiceImpl`, `SiteSettingService`/`SiteSettingServiceImpl`, `AdminAuditLogService`/`AdminAuditLogServiceImpl`
+- **Concrete `@Service` only** (no interface): `AuthService`, `EmailCodeService`, `CleanupScheduler`, `SearchService`, `SearchSyncService`, `ZipExtractionService`, `SafePathService` — these are standalone services where only one implementation will ever exist
+
+### Test Infrastructure
+
+**Backend**: 11 test classes under `src/test/`. Uses Spring Boot Test + JUnit 5. Tests require MySQL + Meilisearch running. Key test files:
+
+| Test | What it covers |
+|------|---------------|
+| `AuthServiceTest` | Login, registration, captcha validation, account lockout |
+| `CommentServiceTest` | Comment CRUD, ownership checks |
+| `CleanupSchedulerTest` | Batch cleanup logic, transaction boundaries |
+| `FileExplorerServiceTest` | Directory browsing, ZIP download path resolution |
+| `TagServiceTest` | Tag CRUD, uniqueness enforcement |
+| `LocalStorageServiceImplTest` | Storage CRUD, path resolution, traversal guard |
+| `MagicNumberValidatorTest` | Magic byte detection, extension validation |
+| `PathTraversalValidatorTest` | `../` rejection, absolute path blocking |
+| `XssFilterTest` | Script/handler/iframe removal |
+| `ZipExtractorTest` | ZIP/7z extraction, charset handling |
+| `GameSavesApplicationTests` | Context loads |
+
+**Frontend**: No test setup (no vitest, jest, or cypress configured).
 
 ### Key Dependencies
 
@@ -251,10 +312,21 @@ Text files with extensions in `app.preview.allowed-extensions` (txt, md, json, x
 
 - **HomePage**: Google-style centered search hero with background image (configurable via Site Settings). `noHeaderOffset` meta — navbar overlays the hero.
 - **BrowsePage**: Wide-layout browse/discover page for exploring games and saves.
-- **ArticlePage**: 3-column GitHub-style layout — FileBrowser (tree) + ReadmeRenderer (Markdown with syntax highlighting via highlight.js) + AnnotationPanel
+- **ArticlePage**: 3-column GitHub-style layout — FileBrowser (tree) + ReadmeRenderer (Markdown with syntax highlighting via highlight.js) + ArticleSidebar (author, download button, tags, metadata). FileBrowser uses BreadcrumbNav for navigation and FileIcon for emoji-based file type icons.
 - **UploadPage**: Archive upload + README dual-mode (hand-written Markdown OR upload .md file). Game creation embedded inline with abuse prevention.
-- **GamePage**: Game detail + article list with gallery/cover views
+- **EditPage** (`/articles/:articleId/edit`): Edit article metadata (title, version, description, tags), replace README file, or replace cover image. Daily edit limit enforced.
+- **GamePage**: Game detail + article list with gallery/cover views (toggled via `useViewMode` composable, persisted to localStorage).
 - **Admin**: 8 management views — Dashboard, Users, Articles, Announcements, Games, Cleanup (failed archive cleanup trigger + status), Ghosts (orphaned storage diagnostics), Site Settings
+
+### Components
+
+| Category | Components |
+|----------|------------|
+| **Common** | `AppNavbar` (smart hide-on-scroll, transparent/glass on homepage via inject), `AppFooter`, `EmptyState`, `LoadingSkeleton` |
+| **Article** | `ArticleCard` (cover thumbnail + tags + download count), `ArticleMeta` (header bar), `ArticleSidebar` (right panel), `FileBrowser` (directory tree), `BreadcrumbNav`, `FileIcon` (emoji-based), `ReadmeRenderer` (Markdown → HTML + annotation integration), `AnnotationPanel` (sidebar comment list), `AnnotationPopup` (floating text selection popup) |
+| **Game** | `GameCard` (game thumbnail + article count) |
+| **Tag** | `TagDisplay` (inline chips with "+N" overflow), `TagSelector` (search/create multi-select) |
+| **Announcement** | `AnnouncementModal` (Markdown dialog with prev/next navigation) |
 
 ### Frontend Utilities
 
@@ -271,10 +343,16 @@ Vue 3.5, Vite 8, Element Plus 2.14, Pinia 3, Vue Router 4, Axios, marked (Markdo
 ## Known Limitations
 
 - No DB migration tool (manual SQL for schema changes). Migration SQL files live at project root or `Backend/GameSaves/` — apply with `mysql` CLI.
-- No full Spring Security — only Sa-Token for auth.
+- No full Spring Security — only Sa-Token for auth. No `SecurityFilterChain` or custom `AuthenticationEntryPoint`.
 - Meilisearch must be running separately for search to work (install + run `meilisearch` on port 7700 with master key matching config).
 - RAR archives are detected but not extracted (only ZIP, 7z, tar, tar.gz).
 - JWT mode means tokens can't be invalidated server-side before expiry — logout only clears client-side state.
 - No frontend test setup (no vitest/jest configured).
 - Frontend has no `.env` files — API base URL handled via Vite proxy (dev) or reverse proxy (production).
 - `Database/` directory (uploaded files) is gitignored — not part of this repo.
+- No Redis or distributed cache — all caching is in-memory `ConcurrentHashMap` (captchas, email codes, rate limit counters, site settings). Not suitable for multi-instance deployments.
+- No WebSocket or server-sent events — article status is polled via `GET /api/articles/{id}/status`.
+- No i18n — all UI text is hardcoded Chinese.
+- No error tracking or analytics (no Sentry, Google Analytics, etc.).
+- CORS defaults to `*` — must be configured for production.
+- Some services are direct `@Service` classes without interfaces (`AuthService`, `EmailCodeService`, `CleanupScheduler`, `SearchService`, `SearchSyncService`, `ZipExtractionService`, `SafePathService`). Others follow interface+impl pattern. Mix is intentional (interfaces only where multiple implementations exist or are planned).

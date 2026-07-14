@@ -20,7 +20,6 @@ export const articleApi = {
   /** 上传存档（Multipart: metadata + file + 可选 readmeFile） */
   create: (formData) =>
     client.post('/articles', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
       timeout: 60000  // 上传大文件允许 60s
     }),
 
@@ -31,7 +30,6 @@ export const articleApi = {
   /** 完整编辑存档（Multipart: metadata + 可选 readmeFile + 可选 coverFile） */
   updateFull: (id, formData) =>
     client.post(`/articles/${id}/edit`, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
       timeout: 60000
     }),
 
