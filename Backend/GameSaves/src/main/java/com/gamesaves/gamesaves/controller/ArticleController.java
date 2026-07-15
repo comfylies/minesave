@@ -8,7 +8,11 @@ import com.gamesaves.gamesaves.dto.request.ArticleUpdateRequest;
 import com.gamesaves.gamesaves.dto.response.ApiResponse;
 import com.gamesaves.gamesaves.dto.response.ArticleDetailResponse;
 import com.gamesaves.gamesaves.dto.response.ArticleListItemResponse;
+import com.gamesaves.gamesaves.dto.response.VoteResponse;
+import com.gamesaves.gamesaves.dto.request.VoteRequest;
 import com.gamesaves.gamesaves.service.ArticleService;
+import com.gamesaves.gamesaves.service.ArticleVoteService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -20,9 +24,12 @@ import java.util.Map;
 public class ArticleController {
 
     private final ArticleService articleService;
+    private final ArticleVoteService articleVoteService;
 
-    public ArticleController(ArticleService articleService) {
+    public ArticleController(ArticleService articleService,
+                              ArticleVoteService articleVoteService) {
         this.articleService = articleService;
+        this.articleVoteService = articleVoteService;
     }
 
     @PostMapping
@@ -97,5 +104,48 @@ public class ArticleController {
             @RequestParam(defaultValue = "20") int size) {
         PageDTO<ArticleListItemResponse> articles = articleService.getUserArticles(userId, page, size);
         return ApiResponse.success(articles);
+    }
+
+    // ── 好评/差评 ──────────────────────────────────────────────────────────
+
+    @PostMapping("/{id}/vote")
+    public ApiResponse<VoteResponse> voteArticle(
+            @PathVariable Long id,
+            @Valid @RequestBody VoteRequest request,
+            HttpServletRequest httpRequest) {
+        Long currentUserId = StpUtil.getLoginIdAsLong();
+        String ip = getClientIp(httpRequest);
+        VoteResponse response = articleVoteService.vote(id, request.getVoteType(), currentUserId, ip);
+        return ApiResponse.success(response);
+    }
+
+    private String getClientIp(HttpServletRequest request) {
+        String forwarded = request.getHeader("X-Forwarded-For");
+        if (forwarded != null && !forwarded.isEmpty()) {
+            String[] parts = forwarded.split(",");
+            for (int i = parts.length - 1; i >= 0; i--) {
+                String ip = parts[i].trim();
+                if (!ip.isEmpty()) {
+                    return ip;
+                }
+            }
+        }
+        String realIp = request.getHeader("X-Real-IP");
+        if (realIp != null && !realIp.isEmpty()) {
+            return realIp.trim();
+        }
+        return request.getRemoteAddr();
+    }
+
+    @GetMapping("/{id}/my-vote")
+    public ApiResponse<Map<String, Object>> getMyVote(@PathVariable Long id) {
+        Map<String, Object> result = new java.util.HashMap<>();
+        if (StpUtil.isLogin()) {
+            String userVote = articleVoteService.getCurrentUserVote(id, StpUtil.getLoginIdAsLong());
+            result.put("userVote", userVote);
+        } else {
+            result.put("userVote", null);
+        }
+        return ApiResponse.success(result);
     }
 }

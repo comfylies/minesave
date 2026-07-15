@@ -21,6 +21,7 @@ import com.gamesaves.gamesaves.repository.SavingsRepository;
 import com.gamesaves.gamesaves.repository.TagRepository;
 import com.gamesaves.gamesaves.repository.UserRepository;
 import com.gamesaves.gamesaves.service.ArticleService;
+import com.gamesaves.gamesaves.service.ArticleVoteService;
 import com.gamesaves.gamesaves.service.ExtractionProgressService;
 import com.gamesaves.gamesaves.service.SearchSyncService;
 import com.gamesaves.gamesaves.service.StorageService;
@@ -83,6 +84,7 @@ public class ArticleServiceImpl implements ArticleService {
     private final StorageService storageService;
     private final CommentRepository commentRepository;
     private final ExtractionProgressService extractionProgressService;
+    private final ArticleVoteService articleVoteService;
 
     // ── 提取限制（从配置文件注入，与 ZipExtractionService 保持一致）──
     @Value("${app.extraction.max-file-size:524288000}")
@@ -119,7 +121,8 @@ public class ArticleServiceImpl implements ArticleService {
                                SearchSyncService searchSyncService,
                                StorageService storageService,
                                CommentRepository commentRepository,
-                               ExtractionProgressService extractionProgressService) {
+                               ExtractionProgressService extractionProgressService,
+                               ArticleVoteService articleVoteService) {
         this.articleRepository = articleRepository;
         this.gameRepository = gameRepository;
         this.userRepository = userRepository;
@@ -130,6 +133,7 @@ public class ArticleServiceImpl implements ArticleService {
         this.storageService = storageService;
         this.commentRepository = commentRepository;
         this.extractionProgressService = extractionProgressService;
+        this.articleVoteService = articleVoteService;
     }
 
     /**
@@ -309,6 +313,15 @@ public class ArticleServiceImpl implements ArticleService {
 
         Savings savings = savingsRepository.findByArticleId(id).orElse(null);
         ArticleDetailResponse response = ArticleDetailResponse.fromEntity(article, savings);
+        // 填充当前登录用户的投票状态
+        try {
+            Long currentUserId = StpUtil.getLoginIdAsLong();
+            String userVote = articleVoteService.getCurrentUserVote(id, currentUserId);
+            response.setCurrentUserVote(userVote);
+        } catch (Exception e) {
+            // 未登录时 StpUtil.getLoginIdAsLong() 会抛异常，忽略即可
+            response.setCurrentUserVote(null);
+        }
         // 将 storage key 解析为可公开访问的 URL（附加 updatedAt 作为缓存破坏参数，
         // 避免封面/缩略图修改后浏览器仍显示缓存的旧图）
         String coverKey = article.getCoverImage();

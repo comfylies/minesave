@@ -30,6 +30,9 @@ public class ArticleDetailResponse {
     private String zipFilename;
     private Long fileSize;
     private Integer downloadCount;
+    private Integer upvoteCount;
+    private Integer downvoteCount;
+    private String currentUserVote;
     private String status;
     private String errorMessage;
     private String coverImage;
@@ -66,6 +69,8 @@ public class ArticleDetailResponse {
                 .zipFilename(article.getZipFilename())
                 .fileSize(article.getFileSize())
                 .downloadCount(article.getDownloadCount())
+                .upvoteCount(article.getUpvoteCount())
+                .downvoteCount(article.getDownvoteCount())
                 .status(article.getStatus().name())
                 .errorMessage(article.getErrorMessage())
                 .coverImage(article.getCoverImage())

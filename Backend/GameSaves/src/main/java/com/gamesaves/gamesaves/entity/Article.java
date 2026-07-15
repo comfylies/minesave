@@ -65,6 +65,14 @@ public class Article {
     @Builder.Default
     private Integer downloadCount = 0;
 
+    @Column(name = "upvote_count", nullable = false)
+    @Builder.Default
+    private Integer upvoteCount = 0;
+
+    @Column(name = "downvote_count", nullable = false)
+    @Builder.Default
+    private Integer downvoteCount = 0;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     @Builder.Default

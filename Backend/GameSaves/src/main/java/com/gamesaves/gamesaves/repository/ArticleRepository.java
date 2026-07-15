@@ -123,6 +123,16 @@ public interface ArticleRepository extends JpaRepository<Article, Long> {
            "AND a.updatedAt < :cutoff")
     long countStaleFailedOrUploading(@Param("cutoff") LocalDateTime cutoff);
 
+    // ── Vote counts (atomic updates) ──────────────────────────────────────
+
+    @Modifying
+    @Query("UPDATE Article a SET a.upvoteCount = a.upvoteCount + :delta WHERE a.id = :articleId")
+    int updateUpvoteCount(@Param("articleId") Long articleId, @Param("delta") int delta);
+
+    @Modifying
+    @Query("UPDATE Article a SET a.downvoteCount = a.downvoteCount + :delta WHERE a.id = :articleId")
+    int updateDownvoteCount(@Param("articleId") Long articleId, @Param("delta") int delta);
+
     // ── Cascade delete / admin ─────────────────────────────────────────
 
     /** Find all articles for a game (any status). */
