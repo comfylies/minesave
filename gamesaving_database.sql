@@ -1,5 +1,5 @@
 -- ============================================================
--- 游戏存档分享平台 (GameSaving) - 数据库设计与实现 v2.0
+-- 游戏存档分享平台 (GameSaving) - 数据库设计与实现 v2.2（已合并所有 migration）
 -- 数据库名称: gamesaving
 -- MySQL版本要求: 8.0+
 -- 引擎: InnoDB (事务、行级锁、外键约束)
@@ -121,11 +121,15 @@ CREATE TABLE article (
     zip_filename    VARCHAR(255)    NOT NULL                 COMMENT '原始ZIP文件名（存储在storage_root下）',
     file_size       BIGINT          NOT NULL DEFAULT 0       COMMENT 'ZIP文件大小（字节，最大200MB）',
     download_count  INT             NOT NULL DEFAULT 0       COMMENT '下载次数统计',
+    upvote_count    INT             NOT NULL DEFAULT 0       COMMENT '好评数',
+    downvote_count  INT             NOT NULL DEFAULT 0       COMMENT '差评数',
     -- 状态流转: UPLOADING → EXTRACTING → READY / FAILED
     status          VARCHAR(20)     NOT NULL DEFAULT 'UPLOADING'
                                     COMMENT '处理状态: UPLOADING(上传中), EXTRACTING(解压中), READY(就绪), FAILED(失败)',
     CONSTRAINT chk_article_status CHECK (status IN ('UPLOADING', 'EXTRACTING', 'READY', 'FAILED')),
     error_message   VARCHAR(1000)   DEFAULT NULL             COMMENT '处理失败时的错误详情',
+    last_edit_date  DATE            DEFAULT NULL             COMMENT '最近编辑日期（每日编辑次数重置判断依据）',
+    daily_edit_count INT            NOT NULL DEFAULT 0       COMMENT '当日编辑次数（每日上限限制）',
     cover_image     VARCHAR(500)    DEFAULT NULL             COMMENT '封面图相对路径，如 /storage/1/2/42/cover.png',
     created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '上传/创建时间',
     updated_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',
@@ -350,11 +354,88 @@ CREATE TABLE safe_paths (
 ) ENGINE=InnoDB COMMENT='游戏标准结构白名单 - 安全颜色标记基线';
 
 -- ============================================================
--- 12. 插入开发测试数据
+-- 12. 站点设置表 (site_settings)
+-- key-value 模式，可扩展任意站点级配置项
+-- ============================================================
+CREATE TABLE site_settings (
+    id            BIGINT          NOT NULL AUTO_INCREMENT  COMMENT '设置项唯一标识ID',
+    setting_key   VARCHAR(100)    NOT NULL                 COMMENT '设置键名（全局唯一，如 background_image_url）',
+    setting_value TEXT            DEFAULT NULL             COMMENT '设置值',
+    created_at    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_setting_key (setting_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='站点设置表 - key-value模式，可扩展任意设置项';
+
+-- ============================================================
+-- 13. 联系我们留言表 (contact_messages)
+-- 用户提交建议、Bug反馈、商务合作等
+-- ============================================================
+CREATE TABLE contact_messages (
+    id            BIGINT          NOT NULL AUTO_INCREMENT  COMMENT '留言唯一标识ID',
+    user_id       BIGINT          NOT NULL                 COMMENT '提交用户ID（必须登录） → users.id',
+    name          VARCHAR(100)    NOT NULL                 COMMENT '联系人姓名',
+    email         VARCHAR(200)    NOT NULL                 COMMENT '联系邮箱',
+    category      VARCHAR(50)     NOT NULL                 COMMENT '类别: suggestion=建议, bug=Bug反馈, business=商务合作, other=其他',
+    subject       VARCHAR(200)    NOT NULL                 COMMENT '留言主题',
+    message       MEDIUMTEXT      NOT NULL                 COMMENT 'MD格式留言内容（可含图片引用）',
+    status        VARCHAR(20)     NOT NULL DEFAULT 'pending' COMMENT '处理状态: pending=待处理, resolved=已解决, closed=已关闭',
+    admin_reply   TEXT            DEFAULT NULL             COMMENT '管理员回复内容',
+    ip_address    VARCHAR(45)     DEFAULT NULL             COMMENT '提交者IP地址',
+    created_at    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '提交时间',
+    updated_at    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',
+    PRIMARY KEY (id),
+    INDEX idx_cm_status (status),
+    INDEX idx_cm_category (category),
+    INDEX idx_cm_user_id (user_id),
+    INDEX idx_cm_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='联系我们留言表 - 用户建议/Bug反馈/商务合作';
+
+-- ============================================================
+-- 14. 文章投票表 (article_votes)
+-- 存档好评/差评功能，Bilibili风格
+-- ============================================================
+CREATE TABLE article_votes (
+    id          BIGINT          NOT NULL AUTO_INCREMENT  COMMENT '投票记录唯一标识ID',
+    article_id  BIGINT          NOT NULL                 COMMENT '被投票的存档文章ID → article.id',
+    user_id     BIGINT          NOT NULL                 COMMENT '投票用户ID → users.id',
+    vote_type   VARCHAR(4)      NOT NULL                 COMMENT '投票类型: UP=好评, DOWN=差评',
+    created_at  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '投票时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_article_user (article_id, user_id),    -- 每个用户对每篇文章只能投一次
+    INDEX idx_article_id (article_id),
+    INDEX idx_user_id (user_id),
+    CONSTRAINT fk_vote_article FOREIGN KEY (article_id) REFERENCES article(id)
+        ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT fk_vote_user FOREIGN KEY (user_id) REFERENCES users(id)
+        ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文章投票表 - 好评/差评，每用户每文章限一票';
+
+-- ============================================================
+-- 15. 管理员审计日志表 (admin_audit_logs)
+-- 记录管理员所有操作，用于安全审计和追溯
+-- ============================================================
+CREATE TABLE admin_audit_logs (
+    id            BIGINT          NOT NULL AUTO_INCREMENT  COMMENT '审计日志唯一标识ID',
+    admin_user_id BIGINT          NOT NULL                 COMMENT '执行操作的管理员用户ID → users.id',
+    admin_username VARCHAR(50)    NOT NULL                 COMMENT '执行操作的管理员用户名（冗余，便于查询）',
+    action        VARCHAR(50)     NOT NULL                 COMMENT '操作类型（如 DELETE_ARTICLE, BAN_USER 等）',
+    target_type   VARCHAR(50)     DEFAULT NULL             COMMENT '操作目标类型（如 article, user, game）',
+    target_id     BIGINT          DEFAULT NULL             COMMENT '操作目标ID',
+    detail        VARCHAR(500)    DEFAULT NULL             COMMENT '操作详情描述',
+    ip_address    VARCHAR(45)     DEFAULT NULL             COMMENT '操作者IP地址',
+    created_at    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '操作时间',
+    PRIMARY KEY (id),
+    INDEX idx_action (action),
+    INDEX idx_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='管理员审计日志表 - 管理员操作安全审计追溯';
+
+-- ============================================================
+-- 16. 插入开发测试数据
 -- 方便前后端联调和功能验证
 -- ============================================================
 
--- 12.1 示例游戏（normalized_name = 小写+去空格，search_text 初始 = name）
+-- 16.1 示例游戏（normalized_name = 小写+去空格，search_text 初始 = name）
 INSERT INTO games (name, normalized_name, description, search_text) VALUES
 ('艾尔登法环',           '艾尔登法环',           'FromSoftware开发的动作角色扮演游戏，开放世界魂系巅峰之作', '艾尔登法环'),
 ('Minecraft',            'minecraft',            'Mojang Studios开发的沙盒建造游戏，无限创造可能',          'Minecraft'),
@@ -362,7 +443,7 @@ INSERT INTO games (name, normalized_name, description, search_text) VALUES
 ('星露谷物语',           '星露谷物语',           'ConcernedApe开发的农场模拟经营游戏',                      '星露谷物语'),
 ('博德之门3',            '博德之门3',            'Larian Studios开发的CRPG，基于D&D第五版规则',             '博德之门3');
 
--- 12.1.5 游戏别名（缩写/翻译/同义词，搜索时折叠进索引）
+-- 16.1.5 游戏别名（缩写/翻译/同义词，搜索时折叠进索引）
 INSERT INTO game_aliases (game_id, alias_name, alias_normalized, source)
 SELECT id, 'MC', 'mc', 'admin'              FROM games WHERE name = 'Minecraft';
 INSERT INTO game_aliases (game_id, alias_name, alias_normalized, source)
@@ -386,7 +467,7 @@ SET g.search_text = CONCAT(
     )
 );
 
--- 12.2 示例用户（区分 admin 管理员 与 user 普通用户）
+-- 16.2 示例用户（区分 admin 管理员 与 user 普通用户）
 -- 密码均为 "password123" 的BCrypt哈希值（开发测试用，生产环境需更换）
 INSERT INTO users (username, password, nickname, phone, email, role, bio) VALUES
 ('admin',       '$2b$10$ZtCEAHK7COr0OC6KAfQA/eNcEJhtWqIfD2kaXRa4hix9peZFhQ4nu',
@@ -396,7 +477,7 @@ INSERT INTO users (username, password, nickname, phone, email, role, bio) VALUES
 ('speedrunner', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
  '速通达人',    '13800000003', 'speed@example.com',       'user',  '游戏速通爱好者，追求极限操作');
 
--- 12.3 示例标签（预设 + 用户）
+-- 16.3 示例标签（预设 + 用户）
 INSERT INTO tags (name, source) VALUES
 ('生存模式', 'admin'),
 ('创造模式', 'admin'),
@@ -408,18 +489,25 @@ INSERT INTO tags (name, source) VALUES
 ('猪灵交易', 'user'),
 ('全自动农场', 'user');
 
+-- 16.4 站点设置初始数据
+INSERT INTO site_settings (setting_key, setting_value) VALUES
+('background_image_url', '');
+
 -- ============================================================
--- 数据库设计完成 v2.1
+-- 数据库设计完成 v2.2
 -- ============================================================
 -- 实体关系总结 (ER):
---   game    1──N article    (一款游戏 ← 多个存档文章)
---   user    1──N article    (一个用户 ← 多个存档文章)
---   user    1──N comments   (一个用户 ← 多条批注)
---   article 1──1 savings    (一篇存档 ← 一份存储快照)
---   savings 1──N saving_items (一份快照 ← N个文件+目录条目)
---   article 1──N comments   (一篇存档 ← 多条批注)
+--   game    1──N article       (一款游戏 ← 多个存档文章)
+--   user    1──N article       (一个用户 ← 多个存档文章)
+--   user    1──N comments      (一个用户 ← 多条批注)
+--   user    1──N contact_messages (一个用户 ← 多条留言)
+--   article 1──1 savings       (一篇存档 ← 一份存储快照)
+--   savings 1──N saving_items  (一份快照 ← N个文件+目录条目)
+--   article 1──N comments      (一篇存档 ← 多条批注)
 --   article 1──N download_logs (一篇存档 ← 多条下载记录)
---   article M──N tags       (存档与标签多对多)
+--   article 1──N article_votes (一篇存档 ← 多条投票)
+--   article M──N tags          (存档与标签多对多)
+--   admin   1──N admin_audit_logs (管理员 ← 多条操作审计记录)
 --
 -- 混合存储物理布局:
 --   Database/

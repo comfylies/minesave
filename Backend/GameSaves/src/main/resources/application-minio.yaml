@@ -10,8 +10,8 @@ app:
     s3:
       endpoint: http://192.168.100.2:9000
       region: us-east-1
-      access-key: minioadmin
-      secret-key: minioadmin123
+      access-key: ${MINIO_ACCESS_KEY:minioadmin}
+      secret-key: ${MINIO_SECRET_KEY:minioadmin123}
       bucket-name: gamesaving
       path-style-access: true
       presigned-url-expiration-minutes: 5

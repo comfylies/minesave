@@ -29,6 +29,27 @@ Thumbs.db
 *.pem
 *SecretKey*
 
+# Production config (contains real credentials)
+application-prod.yaml
+
+# Environment config with local secrets
+.env
+.env.local
+
+# Personal / non-project docs
+公告.md
+公告*.md
+服务器相关内容.md
+简历*.md
+
+# Planning docs (temporary — specific files, not the whole directory)
+docs/annotation-popup-migration-plan.md
+docs/annotation-text-fragment-plan.md
+docs/user-profile-improvement-plan.md
+
+# Migration SQL (merged into gamesaving_database.sql)
+Backend/GameSaves/migration_*.sql
+
 # Test artifacts
 captcha.*
 *.bmp
