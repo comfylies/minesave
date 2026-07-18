@@ -25,11 +25,10 @@ IntelliJ run configurations are pre-made in `.run/` (GameSaves [local], [minio],
 
 ```bash
 # First time only, from project root:
-mysql -u root -p3256 gamesaving < gamesaving_database.sql
-mysql -u root -p3256 gamesaving < test_data_insert.sql
+mysql -u root -p gamesaving < gamesaving_database.sql
 ```
 
-MySQL 8.0, database `gamesaving`, user `root`, password `3256`. JPA `ddl-auto: validate` — entities MUST match table schema; all tables created manually via SQL scripts. Test users: `admin` / `player_one` / `speedrunner`, password `password123`.
+MySQL 8.0, database `gamesaving`. JPA `ddl-auto: validate` — entities MUST match table schema; all tables created manually via SQL scripts. Set credentials via `DB_PASSWORD` env var.
 
 **Migration SQL** files live either at the project root or in `Backend/GameSaves/` (e.g., `migration_add_site_settings.sql`). Apply them manually with `mysql` CLI.
 

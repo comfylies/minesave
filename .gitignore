@@ -41,6 +41,7 @@ application-prod.yaml
 公告*.md
 服务器相关内容.md
 简历*.md
+测试文档.md
 
 # Planning docs (temporary — specific files, not the whole directory)
 docs/annotation-popup-migration-plan.md
@@ -53,6 +54,8 @@ Backend/GameSaves/migration_*.sql
 # Test artifacts
 captcha.*
 *.bmp
+test_data_insert.sql
+update_readme.sql
 
 # Meilisearch
 meilisearch*.exe

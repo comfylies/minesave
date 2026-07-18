@@ -134,7 +134,7 @@ import { contactApi } from '../api/contactApi'
 const router = useRouter()
 const auth = useAuthStore()
 
-const contactEmail = '1834909995@qq.com'
+const contactEmail = import.meta.env.VITE_CONTACT_EMAIL || 'admin@minesave.cn'
 const formRef = ref(null)
 const imageInput = ref(null)
 const submitting = ref(false)

@@ -12,7 +12,7 @@ app:
       region: ap-shanghai
       access-key: ${COS_ACCESS_KEY:}
       secret-key: ${COS_SECRET_KEY:}
-      bucket-name: gamesaving-${COS_APPID:1234567890}
+      bucket-name: gamesaving-${COS_APPID:}
       path-style-access: false
       presigned-url-expiration-minutes: 15
       public-url-expiration-minutes: 10080

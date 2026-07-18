@@ -16,7 +16,7 @@ public class MeilisearchConfig {
     @Value("${meilisearch.host:http://localhost:7700}")
     private String host;
 
-    @Value("${meilisearch.api-key:gamesaving-master-key-2026}")
+    @Value("${meilisearch.api-key:}")
     private String apiKey;
 
     @Bean
