@@ -37,6 +37,11 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.setItem('currentUser', JSON.stringify(loginResponse.user))
   }
 
+  function updateCurrentUser(user) {
+    currentUser.value = user
+    localStorage.setItem('currentUser', JSON.stringify(user))
+  }
+
   /** 账号密码登录（带图形验证码） */
   async function login(login, password, captchaKey, captchaCode) {
     const result = await authApi.login({ login, password, captchaKey, captchaCode })
@@ -79,8 +84,7 @@ export const useAuthStore = defineStore('auth', () => {
     if (!token.value) return false
     try {
       const user = await authApi.checkLogin()
-      currentUser.value = user
-      localStorage.setItem('currentUser', JSON.stringify(user))
+      updateCurrentUser(user)
       return true
     } catch (e) {
       logout()
@@ -90,6 +94,6 @@ export const useAuthStore = defineStore('auth', () => {
 
   return {
     currentUser, token, isLoggedIn, userId, isAdmin,
-    login, loginWithEmail, register, logout, checkAuth, saveAuth
+    login, loginWithEmail, register, logout, checkAuth, saveAuth, updateCurrentUser
   }
 })

@@ -31,5 +31,7 @@ export const authApi = {
 
   /** 检查登录状态 */
   checkLogin: () =>
-    client.get('/auth/check')
+    client.get('/auth/check'),
+
+  changePassword: (data) => client.put('/account/password', data)
 }

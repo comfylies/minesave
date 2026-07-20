@@ -15,7 +15,11 @@
       <div class="profile-header">
         <el-avatar :size="80" :src="user.avatarUrl" icon="UserFilled" class="profile-avatar" />
         <div class="profile-info">
-          <h1 class="profile-name" :title="user.nickname || user.username">{{ user.nickname || user.username }}</h1>
+          <span v-if="isSelf" class="profile-center-label">个人中心</span>
+          <div class="profile-name-row">
+            <h1 class="profile-name" :title="user.nickname || user.username">{{ user.nickname || user.username }}</h1>
+            <el-button v-if="isSelf" text type="primary" @click="openProfileDialog">编辑个人资料</el-button>
+          </div>
           <p class="profile-username" :title="'@' + user.username">@{{ user.username }}</p>
           <p v-if="user.bio" class="profile-bio" :title="user.bio">{{ user.bio }}</p>
           <div class="profile-meta">
@@ -29,6 +33,20 @@
       </div>
 
       <div class="profile-divider" />
+
+      <section v-if="isSelf" class="account-center">
+        <div>
+          <h2 class="section-title">账户中心</h2>
+          <p>管理头像、公开资料和账户密码。</p>
+        </div>
+        <div class="account-actions">
+          <el-upload accept="image/jpeg,image/png,image/webp" :auto-upload="false" :show-file-list="false" :on-change="handleAvatarChange">
+            <el-button>更换头像</el-button>
+          </el-upload>
+          <el-button v-if="user.avatarUrl" @click="removeAvatar">恢复默认头像</el-button>
+          <el-button type="primary" plain @click="passwordDialogVisible = true">修改密码</el-button>
+        </div>
+      </section>
 
       <!-- 用户存档列表 -->
       <div class="section-header">
@@ -129,12 +147,30 @@
           <el-button v-if="isSelf" type="primary" @click="$router.push('/upload')">上传存档</el-button>
         </EmptyState>
       </template>
+
+      <el-dialog v-model="profileDialogVisible" title="编辑个人资料" width="480px">
+        <el-form :model="profileForm" label-position="top">
+          <el-form-item label="昵称"><el-input v-model="profileForm.nickname" maxlength="24" show-word-limit /></el-form-item>
+          <el-form-item label="个人简介"><el-input v-model="profileForm.bio" type="textarea" :rows="4" maxlength="500" show-word-limit /></el-form-item>
+          <el-form-item label="手机号"><el-input v-model="profileForm.phone" maxlength="11" /></el-form-item>
+        </el-form>
+        <template #footer><el-button @click="profileDialogVisible = false">取消</el-button><el-button type="primary" :loading="savingProfile" @click="saveProfile">保存</el-button></template>
+      </el-dialog>
+
+      <el-dialog v-model="passwordDialogVisible" title="修改密码" width="480px">
+        <el-form :model="passwordForm" label-position="top">
+          <el-form-item label="当前密码"><el-input v-model="passwordForm.currentPassword" type="password" show-password /></el-form-item>
+          <el-form-item label="新密码"><el-input v-model="passwordForm.newPassword" type="password" show-password /></el-form-item>
+          <el-form-item label="确认新密码"><el-input v-model="passwordForm.confirmPassword" type="password" show-password /></el-form-item>
+        </el-form>
+        <template #footer><el-button @click="passwordDialogVisible = false">取消</el-button><el-button type="primary" :loading="savingPassword" @click="changePassword">确认修改</el-button></template>
+      </el-dialog>
     </template>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, reactive } from 'vue'
 import { useRoute } from 'vue-router'
 import { userApi } from '../api/userApi'
 import { useArticleStore } from '../stores/articles'
@@ -145,6 +181,8 @@ import LoadingSkeleton from '../components/common/LoadingSkeleton.vue'
 import ArticleCard from '../components/article/ArticleCard.vue'
 import { thumbUrl } from '../utils/imageUrl'
 import { formatSize, formatTime } from '@/utils/format'
+import { authApi } from '../api/authApi'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 const route = useRoute()
 const articleStore = useArticleStore()
@@ -155,6 +193,12 @@ const user = ref(null)
 const loadingUser = ref(false)
 const userError = ref(null)
 const currentPage = ref(1)
+const profileDialogVisible = ref(false)
+const passwordDialogVisible = ref(false)
+const savingProfile = ref(false)
+const savingPassword = ref(false)
+const profileForm = reactive({ nickname: '', bio: '', phone: '' })
+const passwordForm = reactive({ currentPassword: '', newPassword: '', confirmPassword: '' })
 
 const userId = computed(() => Number(route.params.userId))
 const isSelf = computed(() => auth.userId === userId.value)
@@ -179,6 +223,65 @@ async function loadUserData() {
     userError.value = e.message
   } finally {
     loadingUser.value = false
+  }
+}
+
+function openProfileDialog() {
+  Object.assign(profileForm, {
+    nickname: user.value?.nickname || '',
+    bio: user.value?.bio || '',
+    phone: user.value?.phone || ''
+  })
+  profileDialogVisible.value = true
+}
+
+async function saveProfile() {
+  savingProfile.value = true
+  try {
+    const updated = await userApi.updateProfile({ ...profileForm, phone: profileForm.phone || null })
+    user.value = updated
+    auth.updateCurrentUser(updated)
+    profileDialogVisible.value = false
+    ElMessage.success('个人资料已更新')
+  } finally {
+    savingProfile.value = false
+  }
+}
+
+async function handleAvatarChange(uploadFile) {
+  if (!uploadFile.raw) return
+  if (uploadFile.raw.size > 2 * 1024 * 1024) {
+    ElMessage.error('头像不能超过 2 MiB')
+    return
+  }
+  const updated = await userApi.uploadAvatar(uploadFile.raw)
+  user.value = updated
+  auth.updateCurrentUser(updated)
+  ElMessage.success('头像已更新')
+}
+
+async function removeAvatar() {
+  await ElMessageBox.confirm('确定恢复为默认头像吗？', '恢复默认头像', { type: 'warning' })
+  const updated = await userApi.removeAvatar()
+  user.value = updated
+  auth.updateCurrentUser(updated)
+  ElMessage.success('头像已恢复默认')
+}
+
+async function changePassword() {
+  if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+    ElMessage.error('两次输入的新密码不一致')
+    return
+  }
+  savingPassword.value = true
+  try {
+    await authApi.changePassword(passwordForm)
+    ElMessage.success('密码已修改，请重新登录')
+    passwordDialogVisible.value = false
+    await auth.logout()
+    window.location.assign('/login')
+  } finally {
+    savingPassword.value = false
   }
 }
 
@@ -213,6 +316,19 @@ watch(() => route.params.userId, () => {
 
 .profile-info {
   flex: 1;
+}
+
+.profile-center-label {
+  display: block;
+  color: var(--color-secondary-text);
+  font-size: var(--font-size-small);
+  margin-bottom: var(--spacing-xs);
+}
+
+.profile-name-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
 }
 
 .profile-name {
@@ -272,6 +388,30 @@ watch(() => route.params.userId, () => {
 .profile-divider {
   border-top: 1px solid var(--color-border-primary);
   margin: var(--spacing-lg) 0;
+}
+
+.account-center {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--spacing-lg);
+  align-items: center;
+  padding: var(--spacing-lg);
+  margin-bottom: var(--spacing-lg);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+}
+
+.account-center p {
+  margin: var(--spacing-xs) 0 0;
+  color: var(--color-secondary-text);
+}
+
+.account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+  justify-content: flex-end;
 }
 
 /* ---- 存档列表 ---- */
@@ -375,6 +515,15 @@ watch(() => route.params.userId, () => {
 }
 
 @media (max-width: 640px) {
+  .account-center {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .account-actions {
+    justify-content: flex-start;
+  }
+
   .gallery-grid {
     grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
     gap: var(--spacing-md);
