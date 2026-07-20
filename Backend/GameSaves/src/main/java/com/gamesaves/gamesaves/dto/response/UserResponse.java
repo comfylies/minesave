@@ -19,6 +19,8 @@ public class UserResponse {
     private String email;
     private String role;
     private String avatarUrl;
+    private String avatarThumbnailUrl;
+    private String avatarSmallUrl;
     private String bio;
     private LocalDateTime lastLogin;
     private Boolean isActive;
@@ -34,6 +36,7 @@ public class UserResponse {
      * publicView=true 时对 phone/email 脱敏，防止 PII 泄露。
      */
     public static UserResponse fromEntity(User user, boolean publicView) {
+        String avatarUrl = user.getAvatarUrl();
         return UserResponse.builder()
                 .id(user.getId())
                 .username(user.getUsername())
@@ -41,13 +44,21 @@ public class UserResponse {
                 .phone(publicView ? maskPhone(user.getPhone()) : user.getPhone())
                 .email(publicView ? maskEmail(user.getEmail()) : user.getEmail())
                 .role(user.getRole())
-                .avatarUrl(user.getAvatarUrl())
+                .avatarUrl(avatarUrl)
+                .avatarThumbnailUrl(avatarVariantUrl(user.getAvatarKey(), avatarUrl, 90))
+                .avatarSmallUrl(avatarVariantUrl(user.getAvatarKey(), avatarUrl, 45))
                 .bio(user.getBio())
                 .lastLogin(publicView ? null : user.getLastLogin())
                 .isActive(user.getIsActive())
                 .createdAt(user.getCreatedAt())
                 .updatedAt(user.getUpdatedAt())
                 .build();
+    }
+
+    private static String avatarVariantUrl(String avatarKey, String avatarUrl, int size) {
+        if (avatarKey == null || avatarUrl == null
+                || !avatarKey.matches("avatars/\\d+/[a-f0-9-]+-180\\.jpg")) return null;
+        return avatarUrl.replace("-180.jpg", "-" + size + ".jpg");
     }
 
     /**

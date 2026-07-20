@@ -18,6 +18,8 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
@@ -27,6 +29,9 @@ public class AvatarServiceImpl implements AvatarService {
 
     private static final long MAX_AVATAR_BYTES = 2L * 1024 * 1024;
     private static final Set<String> ALLOWED_CONTENT_TYPES = Set.of("image/jpeg", "image/png", "image/webp");
+    private static final int AVATAR_SIZE = 180;
+    private static final int AVATAR_THUMBNAIL_SIZE = 90;
+    private static final int AVATAR_SMALL_SIZE = 45;
 
     private final UserRepository userRepository;
     private final StorageService storageService;
@@ -45,22 +50,26 @@ public class AvatarServiceImpl implements AvatarService {
         }
 
         User user = findUser(userId);
-        String newKey = "avatars/" + userId + "/" + UUID.randomUUID() + ".jpg";
+        String keyPrefix = "avatars/" + userId + "/" + UUID.randomUUID();
+        String primaryKey = keyPrefix + "-" + AVATAR_SIZE + ".jpg";
+        List<String> storedKeys = new ArrayList<>();
         try {
             BufferedImage source = ImageIO.read(new ByteArrayInputStream(file.getBytes()));
             if (source == null) throw new BadRequestException("Invalid image file");
-            byte[] normalizedImage = toSquareJpeg(source);
-            storageService.store(newKey, normalizedImage);
+            storeAvatarVariant(primaryKey, source, AVATAR_SIZE, storedKeys);
+            storeAvatarVariant(keyPrefix + "-" + AVATAR_THUMBNAIL_SIZE + ".jpg", source, AVATAR_THUMBNAIL_SIZE, storedKeys);
+            storeAvatarVariant(keyPrefix + "-" + AVATAR_SMALL_SIZE + ".jpg", source, AVATAR_SMALL_SIZE, storedKeys);
             String oldKey = user.getAvatarKey();
-            user.setAvatarKey(newKey);
-            user.setAvatarUrl(storageService.getPublicUrl(newKey));
+            user.setAvatarKey(primaryKey);
+            user.setAvatarUrl(storageService.getPublicUrl(primaryKey));
             userRepository.save(user);
-            if (oldKey != null && !oldKey.isBlank() && !oldKey.equals(newKey)) storageService.delete(oldKey);
+            if (oldKey != null && !oldKey.isBlank() && !oldKey.equals(primaryKey)) deleteManagedVariants(oldKey);
             return UserResponse.fromEntity(user);
         } catch (IOException e) {
+            deleteStoredVariants(storedKeys);
             throw new BadRequestException("Failed to process avatar image");
         } catch (RuntimeException e) {
-            if (storageService.exists(newKey)) storageService.delete(newKey);
+            deleteStoredVariants(storedKeys);
             throw e;
         }
     }
@@ -72,7 +81,7 @@ public class AvatarServiceImpl implements AvatarService {
         user.setAvatarKey(null);
         user.setAvatarUrl(null);
         userRepository.save(user);
-        if (oldKey != null && !oldKey.isBlank()) storageService.delete(oldKey);
+        if (oldKey != null && !oldKey.isBlank()) deleteManagedVariants(oldKey);
         return UserResponse.fromEntity(user);
     }
 
@@ -81,11 +90,32 @@ public class AvatarServiceImpl implements AvatarService {
                 .orElseThrow(() -> new ResourceNotFoundException("User", userId));
     }
 
-    private byte[] toSquareJpeg(BufferedImage source) throws IOException {
+    private void storeAvatarVariant(String key, BufferedImage source, int targetSide, List<String> storedKeys) throws IOException {
+        storageService.store(key, toSquareJpeg(source, targetSide));
+        storedKeys.add(key);
+    }
+
+    private void deleteStoredVariants(List<String> storedKeys) {
+        for (String key : storedKeys) {
+            try {
+                storageService.delete(key);
+            } catch (RuntimeException ignored) {
+                // Preserve the original storage exception while making a best-effort cleanup.
+            }
+        }
+    }
+
+    private void deleteManagedVariants(String primaryKey) {
+        storageService.delete(primaryKey);
+        if (!primaryKey.matches("avatars/\\d+/[a-f0-9-]+-180\\.jpg")) return;
+        storageService.delete(primaryKey.replace("-180.jpg", "-90.jpg"));
+        storageService.delete(primaryKey.replace("-180.jpg", "-45.jpg"));
+    }
+
+    private byte[] toSquareJpeg(BufferedImage source, int targetSide) throws IOException {
         int side = Math.min(source.getWidth(), source.getHeight());
         int x = (source.getWidth() - side) / 2;
         int y = (source.getHeight() - side) / 2;
-        int targetSide = Math.min(512, side);
         BufferedImage target = new BufferedImage(targetSide, targetSide, BufferedImage.TYPE_INT_RGB);
         Graphics2D graphics = target.createGraphics();
         graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);

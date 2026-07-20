@@ -11,6 +11,7 @@ const routes = [
       { path: 'articles/:articleId', name: 'Article', component: () => import('../views/ArticlePage.vue') },
       { path: 'my-saves', name: 'MySaves', component: () => import('../views/MySavesPage.vue'), meta: { requiresAuth: true } },
       { path: 'users/:userId', name: 'UserProfile', component: () => import('../views/UserProfilePage.vue') },
+      { path: 'account', name: 'AccountCenter', component: () => import('../views/AccountCenterPage.vue'), meta: { requiresAuth: true } },
       { path: 'upload', name: 'Upload', component: () => import('../views/UploadPage.vue'), meta: { requiresAuth: true } },
       { path: 'articles/:articleId/edit', name: 'EditArticle', component: () => import('../views/EditPage.vue'), meta: { requiresAuth: true } },
       { path: 'contact', name: 'Contact', component: () => import('../views/ContactPage.vue'), meta: { requiresAuth: true } }

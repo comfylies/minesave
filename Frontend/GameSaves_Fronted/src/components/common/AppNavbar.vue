@@ -21,7 +21,7 @@
           <el-dropdown trigger="click" popper-class="user-dropdown">
             <el-badge :value="pendingBadgeCount" :hidden="pendingBadgeCount === 0" :max="99">
               <span class="user-trigger">
-                <el-avatar :size="32" :src="auth.currentUser?.avatarUrl" icon="UserFilled" />
+                <el-avatar :size="32" :src="auth.currentUser?.avatarSmallUrl || auth.currentUser?.avatarUrl" icon="UserFilled" />
                 <span class="user-name">{{ auth.currentUser?.nickname || auth.currentUser?.username }}</span>
                 <el-icon class="dropdown-arrow"><ArrowDown /></el-icon>
               </span>
@@ -30,6 +30,9 @@
               <el-dropdown-menu>
                 <el-dropdown-item @click="$router.push('/my-saves')">
                   <el-icon><FolderOpened /></el-icon> 我的存档
+                </el-dropdown-item>
+                <el-dropdown-item @click="$router.push('/account')">
+                  <el-icon><Setting /></el-icon> 账户中心
                 </el-dropdown-item>
                 <el-dropdown-item @click="$router.push(`/users/${auth.userId}`)">
                   <el-icon><User /></el-icon> 个人主页
