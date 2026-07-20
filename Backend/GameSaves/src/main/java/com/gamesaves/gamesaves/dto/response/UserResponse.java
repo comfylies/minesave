@@ -1,6 +1,7 @@
 package com.gamesaves.gamesaves.dto.response;
 
 import com.gamesaves.gamesaves.entity.User;
+import com.gamesaves.gamesaves.service.StorageService;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -36,7 +37,6 @@ public class UserResponse {
      * publicView=true 时对 phone/email 脱敏，防止 PII 泄露。
      */
     public static UserResponse fromEntity(User user, boolean publicView) {
-        String avatarUrl = user.getAvatarUrl();
         return UserResponse.builder()
                 .id(user.getId())
                 .username(user.getUsername())
@@ -44,9 +44,7 @@ public class UserResponse {
                 .phone(publicView ? maskPhone(user.getPhone()) : user.getPhone())
                 .email(publicView ? maskEmail(user.getEmail()) : user.getEmail())
                 .role(user.getRole())
-                .avatarUrl(avatarUrl)
-                .avatarThumbnailUrl(avatarVariantUrl(user.getAvatarKey(), avatarUrl, 90))
-                .avatarSmallUrl(avatarVariantUrl(user.getAvatarKey(), avatarUrl, 45))
+                .avatarUrl(user.getAvatarUrl())
                 .bio(user.getBio())
                 .lastLogin(publicView ? null : user.getLastLogin())
                 .isActive(user.getIsActive())
@@ -55,10 +53,17 @@ public class UserResponse {
                 .build();
     }
 
-    private static String avatarVariantUrl(String avatarKey, String avatarUrl, int size) {
-        if (avatarKey == null || avatarUrl == null
-                || !avatarKey.matches("avatars/\\d+/[a-f0-9-]+-180\\.jpg")) return null;
-        return avatarUrl.replace("-180.jpg", "-" + size + ".jpg");
+    public static UserResponse fromEntity(User user, boolean publicView, StorageService storageService) {
+        UserResponse response = fromEntity(user, publicView);
+        String avatarKey = user.getAvatarKey();
+        if (avatarKey == null || avatarKey.isBlank()) return response;
+
+        response.setAvatarUrl(storageService.getPublicUrl(avatarKey));
+        if (avatarKey.matches("avatars/\\d+/[a-f0-9-]+-180\\.jpg")) {
+            response.setAvatarThumbnailUrl(storageService.getPublicUrl(avatarKey.replace("-180.jpg", "-90.jpg")));
+            response.setAvatarSmallUrl(storageService.getPublicUrl(avatarKey.replace("-180.jpg", "-45.jpg")));
+        }
+        return response;
     }
 
     /**

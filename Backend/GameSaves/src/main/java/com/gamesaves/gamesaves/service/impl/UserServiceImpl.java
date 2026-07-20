@@ -7,6 +7,7 @@ import com.gamesaves.gamesaves.exception.BadRequestException;
 import com.gamesaves.gamesaves.exception.ResourceNotFoundException;
 import com.gamesaves.gamesaves.repository.UserRepository;
 import com.gamesaves.gamesaves.service.UserService;
+import com.gamesaves.gamesaves.service.StorageService;
 import com.gamesaves.gamesaves.util.XssFilter;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -16,9 +17,11 @@ import org.springframework.transaction.annotation.Transactional;
 public class UserServiceImpl implements UserService {
 
     private final UserRepository userRepository;
+    private final StorageService storageService;
 
-    public UserServiceImpl(UserRepository userRepository) {
+    public UserServiceImpl(UserRepository userRepository, StorageService storageService) {
         this.userRepository = userRepository;
+        this.storageService = storageService;
     }
 
     @Override
@@ -27,7 +30,7 @@ public class UserServiceImpl implements UserService {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("User", id));
         boolean publicView = !UserResponse.canViewFullInfo(id);
-        return UserResponse.fromEntity(user, publicView);
+        return UserResponse.fromEntity(user, publicView, storageService);
     }
 
     @Override
@@ -49,6 +52,6 @@ public class UserServiceImpl implements UserService {
             user.setBio(XssFilter.sanitize(request.getBio()));
         }
 
-        return UserResponse.fromEntity(userRepository.save(user));
+        return UserResponse.fromEntity(userRepository.save(user), false, storageService);
     }
 }

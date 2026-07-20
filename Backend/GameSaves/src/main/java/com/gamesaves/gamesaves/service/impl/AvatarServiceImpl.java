@@ -64,7 +64,7 @@ public class AvatarServiceImpl implements AvatarService {
             user.setAvatarUrl(storageService.getPublicUrl(primaryKey));
             userRepository.save(user);
             if (oldKey != null && !oldKey.isBlank() && !oldKey.equals(primaryKey)) deleteManagedVariants(oldKey);
-            return UserResponse.fromEntity(user);
+            return UserResponse.fromEntity(user, false, storageService);
         } catch (IOException e) {
             deleteStoredVariants(storedKeys);
             throw new BadRequestException("Failed to process avatar image");
@@ -82,7 +82,7 @@ public class AvatarServiceImpl implements AvatarService {
         user.setAvatarUrl(null);
         userRepository.save(user);
         if (oldKey != null && !oldKey.isBlank()) deleteManagedVariants(oldKey);
-        return UserResponse.fromEntity(user);
+        return UserResponse.fromEntity(user, false, storageService);
     }
 
     private User findUser(Long userId) {

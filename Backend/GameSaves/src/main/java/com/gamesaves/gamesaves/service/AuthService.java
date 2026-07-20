@@ -52,6 +52,7 @@ public class AuthService {
     private final UserRepository userRepository;
     private final LoginFailRepository loginFailRepository;
     private final EmailCodeService emailCodeService;
+    private final StorageService storageService;
     private final BCryptPasswordEncoder passwordEncoder;
 
     @Value("${app.login.max-fail-count:5}")
@@ -62,10 +63,12 @@ public class AuthService {
 
     public AuthService(UserRepository userRepository,
                        LoginFailRepository loginFailRepository,
-                       EmailCodeService emailCodeService) {
+                       EmailCodeService emailCodeService,
+                       StorageService storageService) {
         this.userRepository = userRepository;
         this.loginFailRepository = loginFailRepository;
         this.emailCodeService = emailCodeService;
+        this.storageService = storageService;
         this.passwordEncoder = new BCryptPasswordEncoder();
     }
 
@@ -355,7 +358,7 @@ public class AuthService {
         return LoginResponse.builder()
                 .tokenName(tokenInfo.getTokenName())
                 .tokenValue(tokenInfo.getTokenValue())
-                .user(UserResponse.fromEntity(user))
+                .user(UserResponse.fromEntity(user, false, storageService))
                 .build();
     }
 
