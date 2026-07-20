@@ -40,9 +40,14 @@
           <p>管理头像、公开资料和账户密码。</p>
         </div>
         <div class="account-actions">
-          <el-upload accept="image/jpeg,image/png,image/webp" :auto-upload="false" :show-file-list="false" :on-change="handleAvatarChange">
-            <el-button>更换头像</el-button>
-          </el-upload>
+          <input
+            ref="avatarInput"
+            class="avatar-file-input"
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            @change="handleAvatarChange"
+          />
+          <el-button @click="chooseAvatar">更换头像</el-button>
           <el-button v-if="user.avatarUrl" @click="removeAvatar">恢复默认头像</el-button>
           <el-button type="primary" plain @click="passwordDialogVisible = true">修改密码</el-button>
         </div>
@@ -197,6 +202,7 @@ const profileDialogVisible = ref(false)
 const passwordDialogVisible = ref(false)
 const savingProfile = ref(false)
 const savingPassword = ref(false)
+const avatarInput = ref(null)
 const profileForm = reactive({ nickname: '', bio: '', phone: '' })
 const passwordForm = reactive({ currentPassword: '', newPassword: '', confirmPassword: '' })
 
@@ -248,16 +254,25 @@ async function saveProfile() {
   }
 }
 
-async function handleAvatarChange(uploadFile) {
-  if (!uploadFile.raw) return
-  if (uploadFile.raw.size > 2 * 1024 * 1024) {
+function chooseAvatar() {
+  avatarInput.value?.click()
+}
+
+async function handleAvatarChange(event) {
+  const file = event.target.files?.[0]
+  if (!file) return
+  if (file.size > 2 * 1024 * 1024) {
     ElMessage.error('头像不能超过 2 MiB')
     return
   }
-  const updated = await userApi.uploadAvatar(uploadFile.raw)
-  user.value = updated
-  auth.updateCurrentUser(updated)
-  ElMessage.success('头像已更新')
+  try {
+    const updated = await userApi.uploadAvatar(file)
+    user.value = updated
+    auth.updateCurrentUser(updated)
+    ElMessage.success('头像已更新')
+  } finally {
+    event.target.value = ''
+  }
 }
 
 async function removeAvatar() {
@@ -312,6 +327,10 @@ watch(() => route.params.userId, () => {
 .profile-avatar {
   flex-shrink: 0;
   border: 1px solid var(--color-border-primary);
+}
+
+.avatar-file-input {
+  display: none;
 }
 
 .profile-info {
