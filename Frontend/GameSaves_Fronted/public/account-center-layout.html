@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>账户中心布局草图</title>
+  <style>
+    :root { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1f2328; background: #f6f8fa; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    header { height: 64px; padding: 0 calc((100% - 1120px) / 2); display: flex; align-items: center; background: #fff; border-bottom: 1px solid #d0d7de; font-weight: 700; }
+    main { width: min(900px, calc(100% - 48px)); margin: 32px auto 72px; }
+    h1 { font-size: 24px; margin: 0 0 6px; letter-spacing: -0.2px; }
+    .intro { color: #57606a; margin: 0 0 22px; font-size: 14px; }
+    .shell { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 32px; align-items: start; }
+    .side { padding: 8px 0; }
+    .side h2 { font-size: 13px; color: #57606a; margin: 0 0 10px; font-weight: 600; }
+    .side button { width: 100%; text-align: left; padding: 8px 10px; margin: 2px 0; border: 0; border-radius: 6px; background: transparent; color: #24292f; cursor: pointer; font-size: 14px; }
+    .side button.active { background: #dbeafe; color: #0969da; font-weight: 600; }
+    .panel { background: #fff; border: 1px solid #d0d7de; border-radius: 8px; overflow: hidden; }
+    .section { padding: 20px 22px; border-bottom: 1px solid #d8dee4; }
+    .section:last-child { border-bottom: 0; }
+    .section-title { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+    h3 { margin: 0; font-size: 16px; }
+    .muted { color: #57606a; font-size: 14px; line-height: 1.55; }
+    .profile-row { display: flex; align-items: center; gap: 18px; margin-top: 16px; }
+    .avatar { width: 80px; height: 80px; border-radius: 50%; background: linear-gradient(135deg, #d0d7de, #8c959f); color: #fff; display: grid; place-items: center; font-size: 24px; font-weight: 700; border: 1px solid #afb8c1; }
+    .preview { display: flex; align-items: flex-end; gap: 12px; margin-left: auto; color: #57606a; font-size: 12px; text-align: center; }
+    .preview i { display: block; background: #afb8c1; border-radius: 50%; margin-bottom: 6px; }
+    .p180 { width: 44px; height: 44px; }.p90 { width: 30px; height: 30px; }.p45 { width: 18px; height: 18px; }
+    .btn { padding: 6px 12px; border: 1px solid #0969da; border-radius: 6px; background: #0969da; color: #fff; font-size: 14px; font-weight: 500; }
+    .btn.secondary { background: #fff; color: #24292f; border-color: #d0d7de; margin-left: 8px; }
+    .field { display: grid; grid-template-columns: 96px 1fr; gap: 14px; align-items: center; margin-top: 12px; font-size: 14px; }
+    .input { padding: 7px 9px; border: 1px solid #d0d7de; border-radius: 6px; color: #57606a; background: #fff; font-size: 14px; }
+    .notice { margin-top: 10px; font-size: 12px; color: #57606a; }
+    @media (max-width: 720px) { header { padding: 0 24px; } main { width: min(100% - 32px, 960px); margin-top: 24px; } .shell { grid-template-columns: 1fr; gap: 12px; } .side { display: flex; overflow: auto; gap: 6px; padding: 0; } .side h2 { display: none; } .side button { width: auto; white-space: nowrap; } .profile-row { flex-wrap: wrap; } .preview { margin-left: 0; } .field { grid-template-columns: 1fr; gap: 6px; } }
+  </style>
+</head>
+<body>
+  <header>🎮 MineSave</header>
+  <main>
+    <h1>账户中心</h1>
+    <p class="intro">集中管理公开资料、头像和登录凭据；页面宽度受前台内容容器限制，两侧保留留白。</p>
+    <div class="shell">
+      <aside class="side">
+        <h2>账户设置</h2>
+        <button class="active">个人资料</button>
+        <button>头像</button>
+        <button>登录与安全</button>
+      </aside>
+      <section class="panel">
+        <div class="section">
+          <div class="section-title"><h3>个人资料</h3><span class="muted">公开展示</span></div>
+          <p class="muted">昵称、个人简介和手机号均在这里维护。</p>
+          <div class="field"><strong>昵称</strong><div class="input">玩家昵称</div></div>
+          <div class="field"><strong>个人简介</strong><div class="input">分享我的游戏存档与心得。</div></div>
+          <div class="field"><strong>手机号</strong><div class="input">未设置</div></div>
+          <p><button class="btn">保存资料</button></p>
+        </div>
+        <div class="section">
+          <div class="section-title"><h3>头像</h3><span class="muted">JPEG、PNG 或 WebP，最大 2 MiB</span></div>
+          <div class="profile-row">
+            <div class="avatar">玩</div>
+            <div><button class="btn">选择新头像</button><button class="btn secondary">恢复默认</button><p class="notice">上传后从中心裁成正方形，保留 180×180 原图与 90×90、45×45 两个缩略图。</p></div>
+            <div class="preview"><span><i class="p180"></i>180</span><span><i class="p90"></i>90</span><span><i class="p45"></i>45</span></div>
+          </div>
+        </div>
+        <div class="section">
+          <div class="section-title"><h3>登录与安全</h3><span class="muted">修改后需重新登录</span></div>
+          <p class="muted">为保障账号安全，修改密码前需要验证当前密码。</p>
+          <button class="btn secondary">修改密码</button>
+        </div>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

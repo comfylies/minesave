@@ -29,8 +29,8 @@ Thumbs.db
 *.pem
 *SecretKey*
 
-# Production config (contains real credentials)
-application-prod.yaml
+# Production config with secrets (keep local copy, push clean version)
+# application-prod.yaml is now safe to commit — all secrets use ${ENV_VAR}
 
 # Environment config with local secrets
 .env

@@ -5,7 +5,7 @@ spring:
   application:
     name: GameSaves
   profiles:
-    active: local    # 默认本地存储；minio / cos 通过 VM option 覆盖
+    active: local    # 默认本地存储；minio / prod 通过 VM option 覆盖
 
   # ── MySQL 8.0 数据库 ──
   datasource:
@@ -19,6 +19,12 @@ spring:
       idle-timeout: 300000
       max-lifetime: 1200000
       connection-timeout: 30000
+
+  # ── Flyway 数据库版本化迁移 ──
+  flyway:
+    enabled: true
+    baseline-on-migrate: true    # 已有数据的库自动基线，不重跑 V1
+    baseline-version: 1
 
   # ── JPA ──
   jpa:

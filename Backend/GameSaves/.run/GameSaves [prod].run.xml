@@ -1,11 +1,11 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="GameSaves [cos]" type="SpringBootApplicationConfigurationType" factoryName="Spring Boot">
+  <configuration default="false" name="GameSaves [prod]" type="SpringBootApplicationConfigurationType" factoryName="Spring Boot">
     <module name="GameSaves" />
     <option name="SPRING_BOOT_MAIN_CLASS" value="com.gamesaves.gamesaves.GameSavesApplication" />
-    <option name="ACTIVE_PROFILES" value="cos" />
+    <option name="ACTIVE_PROFILES" value="prod" />
     <option name="SHORTEN_COMMAND_LINE" value="MANIFEST" />
     <envs>
-      <env name="COS_ACCESS_KEY" value="" />
+      <env name="COS_SECRET_ID" value="" />
       <env name="COS_SECRET_KEY" value="" />
       <env name="COS_APPID" value="" />
     </envs>
