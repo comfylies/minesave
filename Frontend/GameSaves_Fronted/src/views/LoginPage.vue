@@ -71,6 +71,12 @@
           </div>
         </el-form-item>
 
+        <el-form-item class="terms-item">
+          <el-checkbox v-model="loginAgreed">
+            <span class="terms-prefix">我已阅读并同意</span> <LegalDocuments />
+          </el-checkbox>
+        </el-form-item>
+
         <el-form-item>
           <el-button
             type="primary"
@@ -140,6 +146,12 @@
           </div>
         </el-form-item>
 
+        <el-form-item class="terms-item">
+          <el-checkbox v-model="loginAgreed">
+            <span class="terms-prefix">我已阅读并同意</span> <LegalDocuments />
+          </el-checkbox>
+        </el-form-item>
+
         <el-form-item>
           <el-button
             type="primary"
@@ -166,6 +178,7 @@ import { ElMessage } from 'element-plus'
 import { User, Lock, Key, Message } from '@element-plus/icons-vue'
 import { useAuthStore } from '../stores/auth'
 import { authApi } from '../api/authApi'
+import LegalDocuments from '../components/common/LegalDocuments.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -173,6 +186,7 @@ const auth = useAuthStore()
 
 const loading = ref(false)
 const loginMode = ref('password')
+const loginAgreed = ref(true)
 
 // ---- 图形验证码 ----
 const captchaImage = ref('')
@@ -208,6 +222,10 @@ const passwordRules = {
 }
 
 async function handlePasswordLogin() {
+  if (!loginAgreed.value) {
+    ElMessage.warning('请阅读并同意服务协议与隐私政策')
+    return
+  }
   const valid = await passwordFormRef.value.validate().catch(() => false)
   if (!valid) return
 
@@ -293,6 +311,10 @@ async function handleSendEmailCode() {
 }
 
 async function handleEmailLogin() {
+  if (!loginAgreed.value) {
+    ElMessage.warning('请阅读并同意服务协议与隐私政策')
+    return
+  }
   const valid = await emailFormRef.value.validate().catch(() => false)
   if (!valid) return
 
@@ -410,6 +432,19 @@ async function handleEmailLogin() {
 
 .auth-submit-btn {
   width: 100%;
+}
+
+.terms-item {
+  margin-top: -9px;
+  margin-bottom: 9px;
+}
+
+.terms-item :deep(.el-form-item__content) {
+  line-height: 1.5;
+}
+
+.terms-prefix {
+  color: var(--color-body-text);
 }
 
 .auth-footer {

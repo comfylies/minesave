@@ -35,6 +35,7 @@ public class ArticleDetailResponse {
     private String currentUserVote;
     private String status;
     private String errorMessage;
+    private String securityLevel;
     private String coverImage;
     private String coverThumbnail;    // 360p 缩略图 URL（用于卡片/列表展示）
     private String coverThumbnail720;  // 720p 缩略图 URL（用于详情页封面图）
@@ -73,6 +74,7 @@ public class ArticleDetailResponse {
                 .downvoteCount(article.getDownvoteCount())
                 .status(article.getStatus().name())
                 .errorMessage(article.getErrorMessage())
+                .securityLevel(article.getSecurityLevel().name())
                 .coverImage(article.getCoverImage())
                 .tags(tagList)
                 .createdAt(article.getCreatedAt())

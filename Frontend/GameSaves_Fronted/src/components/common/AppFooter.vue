@@ -5,6 +5,7 @@
         <span class="footer-logo">💾 MineSave</span>
         <span class="footer-text">© 2026 MineSave</span>
         <router-link to="/contact" class="footer-link">联系我们</router-link>
+        <LegalDocuments footer />
       </div>
       <div class="footer-right">
         <a
@@ -26,6 +27,10 @@
     </div>
   </footer>
 </template>
+
+<script setup>
+import LegalDocuments from './LegalDocuments.vue'
+</script>
 
 <style scoped>
 .app-footer {
@@ -93,4 +98,5 @@
   color: var(--color-link);
   text-decoration: underline;
 }
+
 </style>

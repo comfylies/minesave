@@ -24,6 +24,11 @@ public class Article {
         UPLOADING, EXTRACTING, READY, FAILED
     }
 
+    /** Download safety classification generated only for newly extracted archives. */
+    public enum SecurityLevel {
+        SAFE, WARNING
+    }
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -80,6 +85,11 @@ public class Article {
 
     @Column(name = "error_message", length = 1000)
     private String errorMessage;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "security_level", nullable = false, length = 20)
+    @Builder.Default
+    private SecurityLevel securityLevel = SecurityLevel.SAFE;
 
     @Column(name = "last_edit_date")
     private LocalDate lastEditDate;

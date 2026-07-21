@@ -210,6 +210,8 @@ public class AuthService {
                 .nickname(nickname)
                 .phone(request.getPhone() != null ? XssFilter.sanitize(request.getPhone()) : null)
                 .email(XssFilter.sanitize(request.getEmail().trim().toLowerCase()))
+                .termsVersion("2026-07-21")
+                .termsAcceptedAt(LocalDateTime.now())
                 .role("user")
                 .isActive(true)
                 .build();

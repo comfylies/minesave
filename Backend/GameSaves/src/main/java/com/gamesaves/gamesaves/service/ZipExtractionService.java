@@ -9,6 +9,7 @@ import com.gamesaves.gamesaves.repository.SavingItemRepository;
 import com.gamesaves.gamesaves.repository.SavingsRepository;
 import com.gamesaves.gamesaves.repository.UserRepository;
 import com.gamesaves.gamesaves.util.ArchiveExtractionResult;
+import com.gamesaves.gamesaves.util.ArchiveSecurityClassifier;
 import com.gamesaves.gamesaves.util.ArchiveFormat;
 import com.gamesaves.gamesaves.util.ArchiveUtils;
 import com.gamesaves.gamesaves.util.ExtractionProgressListener;
@@ -316,7 +317,8 @@ public class ZipExtractionService {
             if (fileSize <= 0) {
                 fileSize = Files.size(zipPath);
             }
-            completeArticle(articleId, finalReadmeRaw, null, fileSize);
+            completeArticle(articleId, finalReadmeRaw, null, fileSize,
+                    ArchiveSecurityClassifier.classify(items));
             progressService.clear(articleId);
             log.info("Article {} extraction complete: {} files, {} bytes",
                     articleId, result.getFileCount(), result.getTotalSize());
@@ -340,13 +342,15 @@ public class ZipExtractionService {
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void completeArticle(Long articleId, String readmeRaw, String readmeContent, long fileSize) {
+    public void completeArticle(Long articleId, String readmeRaw, String readmeContent, long fileSize,
+                                Article.SecurityLevel securityLevel) {
         Article article = articleRepository.findById(articleId)
                 .orElseThrow(() -> new RuntimeException("Article not found: " + articleId));
         article.setStatus(Article.ArticleStatus.READY);
         article.setReadmeRaw(readmeRaw);
         article.setReadmeContent(readmeContent);
         article.setFileSize(fileSize);
+        article.setSecurityLevel(securityLevel);
         article = articleRepository.save(article);
         log.info("Article {} completed: readmeRaw={} chars, fileSize={}",
                 articleId,

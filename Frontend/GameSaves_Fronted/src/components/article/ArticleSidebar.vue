@@ -116,6 +116,11 @@
       @verified="handleCaptchaVerified"
       @cancel="handleCaptchaCancelled"
     />
+    <DownloadNoticeDialog
+      v-model="showDownloadNotice"
+      :security-level="article.securityLevel"
+      @confirm="proceedDownload"
+    />
   </aside>
 </template>
 
@@ -128,6 +133,7 @@ import { voteApi } from '../../api/voteApi'
 import { useAuthStore } from '../../stores/auth'
 import TagDisplay from '../tag/TagDisplay.vue'
 import DownloadCaptchaModal from '../download/DownloadCaptchaModal.vue'
+import DownloadNoticeDialog from '../download/DownloadNoticeDialog.vue'
 import { formatSize, formatTime } from '@/utils/format'
 
 const props = defineProps({
@@ -138,6 +144,7 @@ const router = useRouter()
 const auth = useAuthStore()
 
 const downloading = ref(false)
+const showDownloadNotice = ref(false)
 
 // ── 投票状态 ──
 const currentUserVote = ref(null)
@@ -176,6 +183,10 @@ const captchaFileSize = ref(0)
 const captchaDailyRemaining = ref(0)
 
 async function handleDownload() {
+  showDownloadNotice.value = true
+}
+
+async function proceedDownload() {
   downloading.value = true
   try {
     // 1. 查询是否需要验证码

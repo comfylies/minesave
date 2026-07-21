@@ -119,6 +119,12 @@
           </div>
         </el-form-item>
 
+        <el-form-item prop="acceptedTerms" class="terms-item">
+          <el-checkbox v-model="form.acceptedTerms">
+            <span class="terms-prefix">我已阅读并同意</span> <LegalDocuments />
+          </el-checkbox>
+        </el-form-item>
+
         <el-form-item>
           <el-button
             type="primary"
@@ -145,6 +151,7 @@ import { ElMessage } from 'element-plus'
 import { User, Lock, Avatar, Phone, Message, Key } from '@element-plus/icons-vue'
 import { useAuthStore } from '../stores/auth'
 import { authApi } from '../api/authApi'
+import LegalDocuments from '../components/common/LegalDocuments.vue'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -161,6 +168,8 @@ const form = reactive({
   captchaCode: '',
   emailCode: ''
 })
+
+form.acceptedTerms = false
 
 const rules = {
   username: [
@@ -197,6 +206,10 @@ const rules = {
     { pattern: /^\d{6}$/, message: '邮箱验证码须为6位数字', trigger: 'blur' }
   ]
 }
+
+rules.acceptedTerms = [
+  { validator: (_, value, callback) => value ? callback() : callback(new Error('请阅读并同意服务协议与隐私政策')), trigger: 'change' }
+]
 
 // 字段实时校验状态：idle | checking | available | taken | error
 const fieldState = reactive({
@@ -386,7 +399,8 @@ async function handleRegister() {
       nickname: form.nickname || undefined,
       phone: form.phone || undefined,
       email: form.email,
-      emailCode: form.emailCode
+      emailCode: form.emailCode,
+      acceptedTerms: form.acceptedTerms
     })
     ElMessage.success('注册成功')
     router.push('/')
@@ -466,6 +480,19 @@ async function handleRegister() {
 
 .auth-submit-btn {
   width: 100%;
+}
+
+.terms-item {
+  margin-top: -9px;
+  margin-bottom: 9px;
+}
+
+.terms-item :deep(.el-form-item__content) {
+  line-height: 1.5;
+}
+
+.terms-prefix {
+  color: var(--color-body-text);
 }
 
 .auth-footer {

@@ -48,6 +48,12 @@ public class User {
     @Column(length = 500)
     private String bio;
 
+    @Column(name = "terms_version", length = 30)
+    private String termsVersion;
+
+    @Column(name = "terms_accepted_at")
+    private LocalDateTime termsAcceptedAt;
+
     @Column(name = "last_login")
     private LocalDateTime lastLogin;
 
