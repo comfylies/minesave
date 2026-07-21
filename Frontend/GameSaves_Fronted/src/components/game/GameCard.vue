@@ -46,6 +46,7 @@ function formatDate(dateStr) {
   text-decoration: none;
   color: inherit;
   min-height: 140px;
+  min-width: 0;
 }
 
 .game-card:hover {

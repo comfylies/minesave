@@ -142,17 +142,6 @@ function createRangeFromOffsets(container, start, end) {
 }
 
 /**
- * 获取容器 padding 偏移。
- * getBoundingClientRect 使用 border-box 坐标系，
- * 但绝对定位子元素从 padding edge 开始，
- * 所以需要减去 padding-top 补偿。
- */
-function getPaddingOffset(container) {
-  const style = window.getComputedStyle(container)
-  return parseFloat(style.paddingTop) || 0
-}
-
-/**
  * 渲染所有批注高亮（HighlightManager 背景+下划线 + BorderLayer 左边色条）
  */
 function renderAllHighlights(comments, container) {
@@ -161,7 +150,6 @@ function renderAllHighlights(comments, container) {
 
   const borderItems = []
   const containerRect = container.getBoundingClientRect()
-  const padTop = getPaddingOffset(container)
 
   for (const comment of comments) {
     const start = comment.quoteStart ?? 0
@@ -184,9 +172,8 @@ function renderAllHighlights(comments, container) {
       const last = rects[rects.length - 1]
       borderItems.push({
         id: comment.id,
-        // rects 和 containerRect 都是 viewport 坐标，差值得相对位置
-        // 减去 padding 补偿绝对定位的 padding edge 偏移
-        top: Math.round(first.top - containerRect.top - padTop),
+        // rects 和 containerRect 都是 viewport 坐标，差值得到相对容器内边缘的位置
+        top: Math.round(first.top - containerRect.top),
         height: Math.round(last.bottom - first.top),
         role
       })
@@ -217,12 +204,11 @@ function addHighlightForComment(comment, container) {
   const rects = range.getClientRects()
   if (rects.length > 0 && borderLayer.value) {
     const containerRect = container.getBoundingClientRect()
-    const padTop = getPaddingOffset(container)
     const first = rects[0]
     const last = rects[rects.length - 1]
     borderLayer.value.addBar(
       comment.id,
-      Math.round(first.top - containerRect.top - padTop),
+      Math.round(first.top - containerRect.top),
       Math.round(last.bottom - first.top),
       role
     )

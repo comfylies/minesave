@@ -284,7 +284,7 @@ onMounted(async () => {
 /* ---- 游戏卡片行（4 列 → 响应式） ---- */
 .game-row {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--spacing-md);
 }
 
