@@ -12,4 +12,13 @@ public class MessageEventResponse {
     private Long conversationId;
     private Long messageId;
     private long unreadCount;
+    private Long cursor;
+    private String epoch;
+
+    public MessageEventResponse(String type, Long conversationId, Long messageId, long unreadCount) {
+        this.type = type;
+        this.conversationId = conversationId;
+        this.messageId = messageId;
+        this.unreadCount = unreadCount;
+    }
 }

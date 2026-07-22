@@ -9,9 +9,56 @@ export const useMessageStore = defineStore('messages', () => {
   const unreadCount = ref(0)
   const loading = ref(false)
   const connectionState = ref('disconnected')
+  const eventCursor = ref(null)
+  const eventEpoch = ref(null)
+  let eventStateStorageKey = null
 
   const activeConversation = computed(() => conversations.value.find(item => item.id === activeConversationId.value) || null)
   const activeMessages = computed(() => messagesByConversation.value[activeConversationId.value] || [])
+
+  function currentEventStateStorageKey() {
+    try {
+      const user = JSON.parse(localStorage.getItem('currentUser') || 'null')
+      return user?.id ? `message-event-state:${user.id}` : null
+    } catch {
+      return null
+    }
+  }
+
+  function restoreEventState() {
+    const storageKey = currentEventStateStorageKey()
+    if (!storageKey || storageKey === eventStateStorageKey) return
+
+    eventStateStorageKey = storageKey
+    eventCursor.value = null
+    eventEpoch.value = null
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(storageKey) || 'null')
+      if (Number.isFinite(saved?.cursor) && typeof saved?.epoch === 'string') {
+        eventCursor.value = saved.cursor
+        eventEpoch.value = saved.epoch
+      }
+    } catch {
+      sessionStorage.removeItem(storageKey)
+    }
+  }
+
+  function advanceEventState(event) {
+    restoreEventState()
+    if (!Number.isFinite(event?.cursor) || typeof event?.epoch !== 'string') return
+
+    if (eventEpoch.value !== event.epoch) {
+      eventEpoch.value = event.epoch
+      eventCursor.value = event.cursor
+    } else if (event.cursor > (eventCursor.value || 0)) {
+      eventCursor.value = event.cursor
+    } else {
+      return
+    }
+    if (eventStateStorageKey) {
+      sessionStorage.setItem(eventStateStorageKey, JSON.stringify({ epoch: eventEpoch.value, cursor: eventCursor.value }))
+    }
+  }
 
   async function loadConversations() {
     const page = await messageApi.getConversations({ page: 0, size: 50 })
@@ -65,10 +112,12 @@ export const useMessageStore = defineStore('messages', () => {
     return message
   }
 
-  async function handleEvent() {
+  async function handleEvent(event) {
     await loadConversations()
     await refreshActive()
     await markActiveRead()
+    // A failed REST refresh leaves this event unacknowledged for the next long-poll request.
+    advanceEventState(event)
   }
 
   async function refreshUnread() {
@@ -81,9 +130,13 @@ export const useMessageStore = defineStore('messages', () => {
     messagesByConversation.value = {}
     unreadCount.value = 0
     connectionState.value = 'disconnected'
+    eventCursor.value = null
+    eventEpoch.value = null
+    if (eventStateStorageKey) sessionStorage.removeItem(eventStateStorageKey)
+    eventStateStorageKey = null
   }
 
-  return { conversations, activeConversationId, messagesByConversation, unreadCount, loading, connectionState,
+  return { conversations, activeConversationId, messagesByConversation, unreadCount, loading, connectionState, eventCursor, eventEpoch,
     activeConversation, activeMessages, loadConversations, selectConversation, refreshActive, loadOlder,
-    markActiveRead, send, handleEvent, refreshUnread, reset }
+    markActiveRead, send, handleEvent, refreshUnread, restoreEventState, reset }
 })

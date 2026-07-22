@@ -5,6 +5,7 @@ import com.gamesaves.gamesaves.dto.response.MessageEventResponse;
 import org.springframework.web.context.request.async.DeferredResult;
 
 public interface MessageLongPollService {
-    DeferredResult<ApiResponse<MessageEventResponse>> awaitEvent(Long userId, String clientId, Long cursor);
-    void complete(Long userId, MessageEventResponse event);
+    DeferredResult<ApiResponse<MessageEventResponse>> awaitEvent(Long userId, String clientId, String epoch, Long cursor);
+
+    MessageEventResponse complete(Long userId, MessageEventResponse event);
 }

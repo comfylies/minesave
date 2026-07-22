@@ -19,7 +19,7 @@ public class MessageEventDispatcherImpl implements MessageEventDispatcher {
 
     @Override
     public void publish(Long userId, MessageEventResponse event) {
-        messagingTemplate.convertAndSendToUser(String.valueOf(userId), "/queue/messages", event);
-        longPollService.complete(userId, event);
+        MessageEventResponse deliveredEvent = longPollService.complete(userId, event);
+        messagingTemplate.convertAndSendToUser(String.valueOf(userId), "/queue/messages", deliveredEvent);
     }
 }

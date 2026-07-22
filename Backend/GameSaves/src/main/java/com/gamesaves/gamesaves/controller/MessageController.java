@@ -72,8 +72,9 @@ public class MessageController {
 
     @GetMapping("/events")
     public DeferredResult<ApiResponse<MessageEventResponse>> events(@RequestParam String clientId,
+                                                                      @RequestParam(required = false) String epoch,
                                                                       @RequestParam(required = false) Long cursor) {
-        return longPollService.awaitEvent(StpUtil.getLoginIdAsLong(), clientId, cursor);
+        return longPollService.awaitEvent(StpUtil.getLoginIdAsLong(), clientId, epoch, cursor);
     }
 
     @GetMapping("/items/{messageId}/image")
