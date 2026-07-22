@@ -3,11 +3,14 @@ package com.gamesaves.gamesaves.service;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.sql.SQLException;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @SpringBootTest
@@ -28,9 +31,11 @@ class DirectMessageServiceTest {
 
         assertEquals(2, migrationCount);
 
-        assertThrows(DataIntegrityViolationException.class, () -> jdbcTemplate.update("""
+        DataAccessException exception = assertThrows(DataAccessException.class, () -> jdbcTemplate.update("""
                 INSERT INTO direct_conversations (user_one_id, user_two_id, created_at, updated_at)
                 VALUES (900001, 900001, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """));
+        SQLException sqlException = assertInstanceOf(SQLException.class, exception.getRootCause());
+        assertEquals(3819, sqlException.getErrorCode());
     }
 }
