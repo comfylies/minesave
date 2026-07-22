@@ -16,6 +16,7 @@
             <span v-if="user.role === 'admin'" class="meta-badge admin-badge">管理员</span>
           </div>
         </div>
+        <el-button v-if="auth.isLoggedIn && !isSelf" type="primary" plain @click="$router.push(`/messages?peer=${user.id}`)">私信</el-button>
       </div>
 
       <div class="profile-divider" />

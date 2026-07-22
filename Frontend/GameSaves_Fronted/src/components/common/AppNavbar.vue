@@ -10,6 +10,9 @@
         <nav class="navbar-nav">
           <router-link to="/" class="nav-link" active-class="nav-link--active" exact-active-class="nav-link--active">首页</router-link>
           <router-link to="/browse" class="nav-link" active-class="nav-link--active">浏览</router-link>
+          <el-badge v-if="auth.isLoggedIn" :value="messageStore.unreadCount" :hidden="messageStore.unreadCount === 0" :max="99">
+            <router-link to="/messages" class="nav-link" active-class="nav-link--active">消息</router-link>
+          </el-badge>
           <router-link v-if="auth.isLoggedIn" to="/upload" class="nav-link" active-class="nav-link--active">上传存档</router-link>
         </nav>
       </div>
@@ -65,11 +68,15 @@ import { ref, computed, inject, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
 import { useContactBadge } from '../../composables/useContactBadge'
+import { useMessageStore } from '../../stores/messages'
+import { useMessageRealtime } from '../../composables/useMessageRealtime'
 import { ElMessage } from 'element-plus'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const messageStore = useMessageStore()
+useMessageRealtime()
 const { pendingCount: pendingBadgeCount, refresh: refreshBadge } = useContactBadge()
 const hidden = ref(false)
 const isAtTop = ref(true)
@@ -105,6 +112,7 @@ onMounted(() => {
   if (auth.isAdmin) {
     refreshBadge()
   }
+  if (auth.isLoggedIn) messageStore.refreshUnread().catch(() => {})
 })
 onUnmounted(() => window.removeEventListener('scroll', onScroll))
 

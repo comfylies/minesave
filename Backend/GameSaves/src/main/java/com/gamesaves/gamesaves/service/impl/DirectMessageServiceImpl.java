@@ -3,7 +3,7 @@ package com.gamesaves.gamesaves.service.impl;
 import com.gamesaves.gamesaves.dto.PageDTO;
 import com.gamesaves.gamesaves.dto.response.ConversationResponse;
 import com.gamesaves.gamesaves.dto.response.DirectMessageResponse;
-import com.gamesaves.gamesaves.entity.ConversationReadState;
+import com.gamesaves.gamesaves.dto.response.MessageEventResponse;
 import com.gamesaves.gamesaves.entity.DirectConversation;
 import com.gamesaves.gamesaves.entity.DirectMessage;
 import com.gamesaves.gamesaves.entity.User;
@@ -15,11 +15,14 @@ import com.gamesaves.gamesaves.repository.DirectConversationRepository;
 import com.gamesaves.gamesaves.repository.DirectMessageRepository;
 import com.gamesaves.gamesaves.repository.UserRepository;
 import com.gamesaves.gamesaves.service.DirectMessageService;
-import org.springframework.dao.DataIntegrityViolationException;
+import com.gamesaves.gamesaves.service.ChatImageService;
+import com.gamesaves.gamesaves.service.MessageEventDispatcher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.ArrayList;
@@ -38,15 +41,21 @@ public class DirectMessageServiceImpl implements DirectMessageService {
     private final DirectMessageRepository messageRepository;
     private final ConversationReadStateRepository readStateRepository;
     private final UserRepository userRepository;
+    private final ChatImageService chatImageService;
+    private final MessageEventDispatcher eventDispatcher;
 
     public DirectMessageServiceImpl(DirectConversationRepository conversationRepository,
                                     DirectMessageRepository messageRepository,
                                     ConversationReadStateRepository readStateRepository,
-                                    UserRepository userRepository) {
+                                    UserRepository userRepository,
+                                    ChatImageService chatImageService,
+                                    MessageEventDispatcher eventDispatcher) {
         this.conversationRepository = conversationRepository;
         this.messageRepository = messageRepository;
         this.readStateRepository = readStateRepository;
         this.userRepository = userRepository;
+        this.chatImageService = chatImageService;
+        this.eventDispatcher = eventDispatcher;
     }
 
     @Override
@@ -67,6 +76,9 @@ public class DirectMessageServiceImpl implements DirectMessageService {
     @Transactional(readOnly = true)
     public PageDTO<DirectMessageResponse> getMessages(Long conversationId, Long beforeId, int size, Long userId) {
         DirectConversation conversation = getParticipantConversation(conversationId, userId);
+        if (beforeId != null && beforeId <= 0) {
+            throw new BadRequestException("History cursor must be a positive message id");
+        }
         PageRequest pageable = pageRequest(0, size);
         Page<DirectMessage> messages = beforeId == null
                 ? messageRepository.findByConversationIdOrderByIdDesc(conversation.getId(), pageable)
@@ -74,8 +86,11 @@ public class DirectMessageServiceImpl implements DirectMessageService {
 
         List<DirectMessage> chronological = new ArrayList<>(messages.getContent());
         Collections.reverse(chronological);
+        long totalElements = beforeId == null
+                ? messageRepository.countByConversationId(conversation.getId())
+                : messageRepository.countByConversationIdAndIdLessThan(conversation.getId(), beforeId);
         return PageDTO.of(chronological.stream().map(DirectMessageResponse::fromEntity).toList(),
-                0, messages.getSize(), messageRepository.countByConversationId(conversation.getId()));
+                0, messages.getSize(), totalElements);
     }
 
     @Override
@@ -97,6 +112,9 @@ public class DirectMessageServiceImpl implements DirectMessageService {
         if (content != null && content.length() > MAX_TEXT_LENGTH) {
             throw new BadRequestException("Message text cannot exceed " + MAX_TEXT_LENGTH + " characters");
         }
+        if (hasImage) {
+            chatImageService.validate(image);
+        }
 
         long userOneId = Math.min(senderId, targetUserId);
         long userTwoId = Math.max(senderId, targetUserId);
@@ -109,23 +127,28 @@ public class DirectMessageServiceImpl implements DirectMessageService {
                 .content(normalizedContent.isEmpty() ? null : normalizedContent)
                 .build());
 
-        conversation.setLastMessageId(message.getId());
-        conversation.setLastMessageAt(message.getCreatedAt());
-        conversationRepository.save(conversation);
+        if (hasImage) {
+            ChatImageService.ChatImageData storedImage = chatImageService.store(image, conversation.getId(), message.getId());
+            message.setImageOriginalKey(storedImage.originalKey());
+            message.setImageThumbnailKey(storedImage.thumbnailKey());
+            message.setImageWidth(storedImage.width());
+            message.setImageHeight(storedImage.height());
+        }
+
+        conversationRepository.advanceLastMessage(conversation.getId(), message.getId(), message.getCreatedAt());
         updateReadStates(conversation, senderId, targetUserId, message.getId());
+        publishAfterCommit(senderId, new MessageEventResponse("MESSAGE_UPDATED", conversation.getId(), message.getId(), getUnreadCount(senderId)));
+        publishAfterCommit(targetUserId, new MessageEventResponse("MESSAGE_UPDATED", conversation.getId(), message.getId(), getUnreadCount(targetUserId)));
         return DirectMessageResponse.fromEntity(message);
     }
 
     @Override
     public void markRead(Long conversationId, Long userId) {
         DirectConversation conversation = getParticipantConversation(conversationId, userId);
-        ConversationReadState state = readStateRepository.findByConversationIdAndUserId(conversation.getId(), userId)
-                .orElseGet(() -> ConversationReadState.builder()
-                        .conversationId(conversation.getId())
-                        .userId(userId)
-                        .build());
-        state.setLastReadMessageId(conversation.getLastMessageId());
-        readStateRepository.save(state);
+        readStateRepository.ensureReadState(conversation.getId(), userId);
+        messageRepository.findFirstByConversationIdOrderByIdDesc(conversation.getId())
+                .ifPresent(message -> readStateRepository.advanceReadState(conversation.getId(), userId, message.getId()));
+        publishAfterCommit(userId, new MessageEventResponse("MESSAGE_UPDATED", conversation.getId(), null, getUnreadCount(userId)));
     }
 
     @Override
@@ -135,39 +158,29 @@ public class DirectMessageServiceImpl implements DirectMessageService {
         return readStateRepository.countUnreadMessages(userId);
     }
 
-    private DirectConversation findOrCreateConversation(long userOneId, long userTwoId) {
-        return conversationRepository.findByUserOneIdAndUserTwoId(userOneId, userTwoId)
-                .orElseGet(() -> createConversationOrReread(userOneId, userTwoId));
+    @Override
+    @Transactional(readOnly = true)
+    public String getImageKey(Long messageId, boolean thumbnail, Long userId) {
+        DirectMessage message = messageRepository.findById(messageId)
+                .orElseThrow(() -> new ResourceNotFoundException("Direct message", messageId));
+        getParticipantConversation(message.getConversationId(), userId);
+        String key = thumbnail ? message.getImageThumbnailKey() : message.getImageOriginalKey();
+        if (key == null || key.isBlank()) throw new ResourceNotFoundException("Chat image", messageId);
+        return key;
     }
 
-    private DirectConversation createConversationOrReread(long userOneId, long userTwoId) {
-        try {
-            return conversationRepository.saveAndFlush(DirectConversation.builder()
-                    .userOneId(userOneId)
-                    .userTwoId(userTwoId)
-                    .build());
-        } catch (DataIntegrityViolationException exception) {
-            return conversationRepository.findByUserOneIdAndUserTwoId(userOneId, userTwoId)
-                    .orElseThrow(() -> exception);
-        }
+    private DirectConversation findOrCreateConversation(long userOneId, long userTwoId) {
+        conversationRepository.upsertPair(userOneId, userTwoId);
+        return conversationRepository.findPairForUpdate(userOneId, userTwoId)
+                .orElseThrow(() -> new IllegalStateException("Conversation upsert did not return a pair"));
     }
 
     private void updateReadStates(DirectConversation conversation, Long senderId, Long recipientId, Long messageId) {
-        ConversationReadState senderState = readStateRepository
-                .findByConversationIdAndUserId(conversation.getId(), senderId)
-                .orElseGet(() -> ConversationReadState.builder()
-                        .conversationId(conversation.getId())
-                        .userId(senderId)
-                        .build());
-        senderState.setLastReadMessageId(messageId);
-        readStateRepository.save(senderState);
-
-        readStateRepository.findByConversationIdAndUserId(conversation.getId(), recipientId)
-                .orElseGet(() -> readStateRepository.save(ConversationReadState.builder()
-                        .conversationId(conversation.getId())
-                        .userId(recipientId)
-                        .lastReadMessageId(null)
-                        .build()));
+        long firstUserId = Math.min(senderId, recipientId);
+        long secondUserId = Math.max(senderId, recipientId);
+        readStateRepository.ensureReadState(conversation.getId(), firstUserId);
+        readStateRepository.ensureReadState(conversation.getId(), secondUserId);
+        readStateRepository.advanceReadState(conversation.getId(), senderId, messageId);
     }
 
     private ConversationResponse toConversationResponse(DirectConversation conversation, Long userId) {
@@ -175,7 +188,8 @@ public class DirectMessageServiceImpl implements DirectMessageService {
                 ? conversation.getUserTwoId() : conversation.getUserOneId();
         User peer = userRepository.findById(peerId).orElse(null);
         DirectMessageResponse lastMessage = conversation.getLastMessageId() == null ? null
-                : messageRepository.findById(conversation.getLastMessageId()).map(DirectMessageResponse::fromEntity).orElse(null);
+                : messageRepository.findById(conversation.getLastMessageId())
+                .map(DirectMessageResponse::fromEntity).orElse(null);
 
         return ConversationResponse.builder()
                 .id(conversation.getId())
@@ -226,5 +240,18 @@ public class DirectMessageServiceImpl implements DirectMessageService {
             return DirectMessage.MessageType.TEXT;
         }
         return content.isEmpty() ? DirectMessage.MessageType.IMAGE : DirectMessage.MessageType.IMAGE_WITH_TEXT;
+    }
+
+    private void publishAfterCommit(Long userId, MessageEventResponse event) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            eventDispatcher.publish(userId, event);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                eventDispatcher.publish(userId, event);
+            }
+        });
     }
 }

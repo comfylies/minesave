@@ -2,6 +2,7 @@ package com.gamesaves.gamesaves.repository;
 
 import com.gamesaves.gamesaves.entity.ConversationReadState;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -12,6 +13,29 @@ import java.util.Optional;
 public interface ConversationReadStateRepository extends JpaRepository<ConversationReadState, Long> {
 
     Optional<ConversationReadState> findByConversationIdAndUserId(Long conversationId, Long userId);
+
+    @Modifying
+    @Query(value = """
+            INSERT INTO conversation_read_states
+                (conversation_id, user_id, last_read_message_id, created_at, updated_at)
+            VALUES (:conversationId, :userId, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON DUPLICATE KEY UPDATE id = id
+            """, nativeQuery = true)
+    int ensureReadState(@Param("conversationId") long conversationId, @Param("userId") long userId);
+
+    @Modifying
+    @Query(value = """
+            UPDATE conversation_read_states
+            SET last_read_message_id = CASE
+                    WHEN last_read_message_id IS NULL OR last_read_message_id < :messageId THEN :messageId
+                    ELSE last_read_message_id
+                END,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE conversation_id = :conversationId AND user_id = :userId
+            """, nativeQuery = true)
+    int advanceReadState(@Param("conversationId") long conversationId,
+                         @Param("userId") long userId,
+                         @Param("messageId") long messageId);
 
     @Query(value = """
             SELECT COUNT(*)

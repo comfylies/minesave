@@ -11,6 +11,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.mock.web.MockMultipartFile;
 
 import java.sql.SQLException;
 import java.util.List;
@@ -102,18 +103,42 @@ class DirectMessageServiceTest {
     }
 
     @Test
+    void rejectsImagesUntilChatImageStorageIsImplemented() {
+        MockMultipartFile image = new MockMultipartFile("image", "photo.png", "image/png", new byte[] {1, 2, 3});
+
+        assertThatThrownBy(() -> service.send(20L, "caption", image, 10L, "127.0.0.1"))
+                .isInstanceOf(BadRequestException.class);
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM direct_messages", Long.class)).isZero();
+    }
+
+    @Test
     void historyUsesBeforeIdCursorAndReturnsMessagesChronologically() {
         DirectMessageResponse first = service.send(20L, "one", null, 10L, "127.0.0.1");
         DirectMessageResponse second = service.send(20L, "two", null, 10L, "127.0.0.1");
         DirectMessageResponse third = service.send(20L, "three", null, 10L, "127.0.0.1");
+        DirectMessageResponse fourth = service.send(20L, "four", null, 10L, "127.0.0.1");
+        DirectMessageResponse fifth = service.send(20L, "five", null, 10L, "127.0.0.1");
 
-        PageDTO<DirectMessageResponse> recent = service.getMessages(third.getConversationId(), null, 2, 20L);
-        PageDTO<DirectMessageResponse> older = service.getMessages(third.getConversationId(), second.getId(), 2, 20L);
+        PageDTO<DirectMessageResponse> recent = service.getMessages(fifth.getConversationId(), null, 2, 20L);
+        PageDTO<DirectMessageResponse> older = service.getMessages(fifth.getConversationId(), fourth.getId(), 2, 20L);
 
         assertThat(recent.getContent()).extracting(DirectMessageResponse::getId)
-                .containsExactly(second.getId(), third.getId());
+                .containsExactly(fourth.getId(), fifth.getId());
+        assertThat(recent.getTotalElements()).isEqualTo(5L);
         assertThat(older.getContent()).extracting(DirectMessageResponse::getId)
+                .containsExactly(second.getId(), third.getId());
+        assertThat(older.getTotalElements()).isEqualTo(3L);
+        assertThat(service.getMessages(fifth.getConversationId(), second.getId(), 2, 20L).getContent())
+                .extracting(DirectMessageResponse::getId)
                 .containsExactly(first.getId());
+    }
+
+    @Test
+    void rejectsAnInvalidHistoryCursor() {
+        DirectMessageResponse sent = service.send(20L, "one", null, 10L, "127.0.0.1");
+
+        assertThatThrownBy(() -> service.getMessages(sent.getConversationId(), 0L, 20, 20L))
+                .isInstanceOf(BadRequestException.class);
     }
 
     @Test

@@ -213,6 +213,10 @@ Key-value store for site-wide configuration (`SiteSetting` entity, `site_setting
 - **CORS**: `CorsConfig` reads `app.cors.allowed-origins` (default `*`). Uses `allowedOriginPatterns` with credentials enabled. Production should set a specific domain.
 - **Static resources**: `WebMvcConfig` maps `/storage/**` → `Database/` directory (resolved absolute). Relevant for local storage mode; in COS mode it serves cached files (thumbnails, covers).
 
+### Direct-message production proxy
+
+The production reverse proxy must forward WebSocket Upgrade and Connection headers for `/ws/messages`, and preserve the `Authorization` STOMP CONNECT header. HTTP long polling at `/api/messages/events` remains the fallback when WebSocket delivery is unavailable.
+
 ### Security Utilities
 
 - **`XssFilter`**: regex-based sanitization removing `<script>`, event handlers, `javascript:`, `<iframe>`, `<object>`, `<embed>`, `<link>`, `<meta>`. Applied to all user inputs during registration and profile updates.

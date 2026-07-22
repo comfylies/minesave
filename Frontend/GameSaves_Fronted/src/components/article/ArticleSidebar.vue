@@ -8,6 +8,7 @@
         </el-avatar>
         <span class="author-name" :title="article.nickname">{{ article.nickname }}</span>
       </router-link>
+      <el-button v-if="auth.isLoggedIn && auth.userId !== article.userId" size="small" plain class="message-author" @click="router.push(`/messages?peer=${article.userId}`)">私信</el-button>
     </div>
 
     <!-- 下载按钮 -->
@@ -277,6 +278,11 @@ const statusText = computed(() => {
 
 .sidebar-author:hover .author-name {
   color: var(--color-link);
+}
+
+.message-author {
+  width: 100%;
+  margin-top: var(--spacing-sm);
 }
 
 /* 下载按钮 */

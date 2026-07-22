@@ -17,6 +17,8 @@ public class DirectMessageResponse {
     private String content;
     private String imageOriginalKey;
     private String imageThumbnailKey;
+    private String imageOriginalUrl;
+    private String imageThumbnailUrl;
     private Integer imageWidth;
     private Integer imageHeight;
     private LocalDateTime createdAt;
@@ -35,4 +37,5 @@ public class DirectMessageResponse {
                 .createdAt(message.getCreatedAt())
                 .build();
     }
+
 }

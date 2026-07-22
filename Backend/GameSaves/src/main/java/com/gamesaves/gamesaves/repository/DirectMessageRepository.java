@@ -15,4 +15,8 @@ public interface DirectMessageRepository extends JpaRepository<DirectMessage, Lo
             Long conversationId, Long beforeId, Pageable pageable);
 
     long countByConversationId(Long conversationId);
+
+    long countByConversationIdAndIdLessThan(Long conversationId, Long id);
+
+    java.util.Optional<DirectMessage> findFirstByConversationIdOrderByIdDesc(Long conversationId);
 }

@@ -16,4 +16,6 @@ public interface DirectMessageService {
     void markRead(Long conversationId, Long userId);
 
     long getUnreadCount(Long userId);
+
+    String getImageKey(Long messageId, boolean thumbnail, Long userId);
 }

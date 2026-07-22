@@ -11,6 +11,7 @@
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",
     "@recogito/text-annotator": "^4.2.5",
+    "@stomp/stompjs": "^7.3.0",
     "axios": "^1.18.0",
     "bcryptjs": "^3.0.3",
     "element-plus": "^2.14.2",
