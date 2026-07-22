@@ -24,6 +24,12 @@ test('chat layout hides the footer and constrains the page viewport', async () =
   assert.match(layout, /\.page-content--chat\s*\{[\s\S]*?overflow:\s*hidden/)
 })
 
+test('global layout reserves stable scrollbar space for the chat route', async () => {
+  const styles = await source('src/assets/styles/global.css')
+  assert.match(styles, /html\s*\{[\s\S]*?scrollbar-gutter:\s*stable\s*;/)
+  assert.match(styles, /@supports\s+not\s*\(scrollbar-gutter:\s*stable\)\s*\{\s*html\s*\{\s*overflow-y:\s*scroll\s*;/)
+})
+
 test('message page keeps only its panels scrollable and anchors the composer', async () => {
   const page = await source('src/views/MessagesPage.vue')
   const stream = await source('src/components/message/MessageStream.vue')
