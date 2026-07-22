@@ -1,5 +1,7 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
+import { isRequestCancellation } from '../utils/requestCancellation'
+import { createResponseErrorHandler } from '../utils/requestErrorHandler'
 
 const client = axios.create({
   baseURL: '/api',
@@ -61,16 +63,12 @@ client.interceptors.response.use(
 
     return data
   },
-  error => {
-    // HTTP 401 → 登录已过期（后端重启导致 Sa-Token 内存会话丢失）
-    if (error.response?.status === 401) {
-      clearAuthAndRedirect()
-      return Promise.reject(error)
-    }
-    const msg = error.response?.data?.message || error.message || '网络错误'
-    ElMessage.error(msg)
-    return Promise.reject(error)
-  }
+  createResponseErrorHandler({
+    // 路由切换、页面退后台与重连会主动中止长轮询，这不是用户可见错误。
+    isCancellation: error => isRequestCancellation(error, axios.isCancel),
+    onUnauthorized: clearAuthAndRedirect,
+    showError: ElMessage.error
+  })
 )
 
 export default client

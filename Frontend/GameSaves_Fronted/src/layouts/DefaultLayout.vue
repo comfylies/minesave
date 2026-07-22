@@ -1,15 +1,15 @@
 <template>
-  <div class="default-layout">
+  <div class="default-layout" :class="{ 'default-layout--chat': chatLayout }">
     <AppNavbar />
-    <main class="page-content" :class="{ 'page-content--full': noHeaderOffset }">
-      <template v-if="noHeaderOffset">
+    <main class="page-content" :class="{ 'page-content--full': noHeaderOffset, 'page-content--chat': chatLayout }">
+      <template v-if="noHeaderOffset || chatLayout">
         <router-view />
       </template>
       <div v-else :class="isWide ? 'container-wide' : 'container'">
         <router-view />
       </div>
     </main>
-    <AppFooter />
+    <AppFooter v-if="!chatLayout" />
     <Transition name="back-to-top-fade">
       <button
         v-if="showBackToTop"
@@ -32,6 +32,7 @@ import AppFooter from '../components/common/AppFooter.vue'
 const route = useRoute()
 const isWide = computed(() => route.meta?.wide === true)
 const noHeaderOffset = computed(() => route.meta?.noHeaderOffset === true)
+const chatLayout = computed(() => route.meta?.chatLayout === true)
 
 // 回到顶部按钮
 const showBackToTop = ref(false)
@@ -63,9 +64,22 @@ function scrollToTop() {
   padding-top: v-bind('noHeaderOffset ? "0" : "var(--header-height)"');
 }
 
+.default-layout--chat {
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+
 /* 首页全宽：移除 page-content 的默认 padding */
 .page-content--full {
   padding: 0 !important;
+}
+
+.page-content--chat {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
 }
 
 .back-to-top {

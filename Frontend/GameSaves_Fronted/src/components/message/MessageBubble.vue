@@ -11,7 +11,13 @@ const props = defineProps({ message: { type: Object, required: true }, mine: Boo
 const show = ref(false)
 const imageUrl = ref('')
 const originalUrl = ref('')
-const formattedTime = computed(() => new Date(props.message.createdAt).toLocaleString())
+const formattedTime = computed(() => {
+  const date = new Date(props.message.createdAt)
+  if (Number.isNaN(date.getTime())) return ''
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  const hours = String(date.getHours()).padStart(2, '0')
+  return `${date.getMonth() + 1}月${date.getDate()}日 ${hours}:${minutes}`
+})
 onMounted(async () => {
   if (!props.message.imageOriginalKey) return
   const [thumb, original] = await Promise.all([messageApi.getImage(props.message.id, true), messageApi.getImage(props.message.id, false)])

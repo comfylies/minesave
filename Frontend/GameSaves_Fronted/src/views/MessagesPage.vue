@@ -12,4 +12,10 @@ async function openPeer(){const id=Number(route.query.peer);if(!id||id===auth.us
 async function send({text,image}){const form=new FormData();if(text)form.append('content',text);if(image)form.append('image',image);const message=await store.send(targetUserId.value,form);await store.selectConversation(message.conversationId);router.replace({query:{}})}
 onMounted(async()=>{await store.loadConversations();await openPeer()});watch(()=>route.query.peer,openPeer)
 </script>
-<style scoped>.messages-page{display:grid;grid-template-columns:320px minmax(0,1fr);border:1px solid var(--color-border-primary);border-radius:var(--radius-md);overflow:hidden;background:var(--color-bg-primary);margin:var(--spacing-lg) 0}.thread{min-width:0;display:flex;flex-direction:column}.thread-header{padding:14px 16px;border-bottom:1px solid var(--color-border-primary);font-weight:600}@media(max-width:720px){.messages-page{grid-template-columns:1fr}.conversation-list{max-height:220px;overflow:auto;border-right:0!important;border-bottom:1px solid var(--color-border-primary)}} </style>
+<style scoped>
+.messages-page{height:100%;min-height:0;display:grid;grid-template-columns:320px minmax(0,1fr);border:1px solid var(--color-border-primary);overflow:hidden;background:var(--color-bg-primary)}
+.thread{min-width:0;min-height:0;display:flex;flex-direction:column}
+.thread-header{padding:14px 16px;border-bottom:1px solid var(--color-border-primary);font-weight:600;flex:0 0 auto}
+.thread :deep(.empty-state){flex:1;min-height:0;display:grid;place-content:center}
+@media(max-width:720px){.messages-page{grid-template-columns:1fr;grid-template-rows:minmax(0,42%) minmax(0,58%)}.conversation-list{border-right:0!important;border-bottom:1px solid var(--color-border-primary)}}
+</style>

@@ -10,9 +10,11 @@
         <nav class="navbar-nav">
           <router-link to="/" class="nav-link" active-class="nav-link--active" exact-active-class="nav-link--active">首页</router-link>
           <router-link to="/browse" class="nav-link" active-class="nav-link--active">浏览</router-link>
-          <el-badge v-if="auth.isLoggedIn" :value="messageStore.unreadCount" :hidden="messageStore.unreadCount === 0" :max="99">
-            <router-link to="/messages" class="nav-link" active-class="nav-link--active">消息</router-link>
-          </el-badge>
+          <span v-if="auth.isLoggedIn" class="nav-message-item">
+            <el-badge :value="messageStore.unreadCount" :hidden="messageStore.unreadCount === 0" :max="99">
+              <router-link to="/messages" class="nav-link" active-class="nav-link--active">消息</router-link>
+            </el-badge>
+          </span>
           <router-link v-if="auth.isLoggedIn" to="/upload" class="nav-link" active-class="nav-link--active">上传存档</router-link>
         </nav>
       </div>
@@ -237,7 +239,13 @@ function handleLogout() {
 /* ---- 导航链接 ---- */
 .navbar-nav {
   display: flex;
+  align-items: center;
   gap: var(--spacing-xs);
+}
+
+.nav-message-item {
+  display: flex;
+  align-items: center;
 }
 
 .nav-link {

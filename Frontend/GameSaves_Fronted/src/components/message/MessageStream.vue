@@ -6,4 +6,4 @@ defineProps({ messages: { type: Array, default: () => [] }, currentUserId: Numbe
 const emit = defineEmits(['older']); const stream = ref(null)
 function onScroll(){ if(stream.value?.scrollTop === 0) emit('older') }
 </script>
-<style scoped>.message-stream{min-height:380px;max-height:58vh;overflow:auto;padding:16px;background:var(--color-bg-secondary)}.older{display:block;margin:0 auto 12px;border:0;background:none;color:var(--color-link);cursor:pointer}</style>
+<style scoped>.message-stream{flex:1;min-height:0;overflow:auto;padding:16px;background:var(--color-bg-secondary)}.older{display:block;margin:0 auto 12px;border:0;background:none;color:var(--color-link);cursor:pointer}</style>
