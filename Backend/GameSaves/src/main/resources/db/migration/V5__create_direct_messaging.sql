@@ -7,6 +7,7 @@ CREATE TABLE direct_conversations (
     created_at      DATETIME NOT NULL,
     updated_at      DATETIME NOT NULL,
     PRIMARY KEY (id),
+    CONSTRAINT chk_direct_conversations_normalized_pair CHECK (user_one_id < user_two_id),
     UNIQUE KEY uk_direct_conversations_pair (user_one_id, user_two_id),
     KEY idx_direct_conversations_last_message_at (last_message_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
