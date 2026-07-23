@@ -13,8 +13,8 @@ Article covers, avatars, and the site background already use COS pre-signed URLs
 ## API and authorization
 
 - Message-list responses populate `imageThumbnailUrl` only for messages containing an image. The service generates it after it has verified that the caller is a conversation participant.
-- The thumbnail URL is a COS pre-signed URL with a five-minute lifetime, matching the existing private-download expiration.
-- Add an authenticated endpoint that returns a fresh pre-signed URL for one requested image variant. It validates the caller through the existing `getImageKey` authorization path before returning the URL.
+- The thumbnail URL is a COS pre-signed URL with a fifteen-minute lifetime, avoiding needless refreshes while a user keeps a conversation open.
+- Add an authenticated endpoint that returns a fresh pre-signed URL for one requested image variant. It validates the caller through the existing `getImageKey` authorization path before returning the URL; originals use a five-minute lifetime.
 - `imageOriginalUrl` remains absent from message-list responses. The frontend requests it only after the user clicks a thumbnail.
 - Local filesystem storage does not expose a private `/storage/messages/**` URL. It keeps the existing authenticated binary endpoint as a development-only fallback; it loads only a thumbnail on mount and fetches the original only after a click.
 - Keep `/storage/messages/**` blocked. A pre-signed URL is a short-lived bearer URL, but a participant can already save an image after viewing it; no unauthenticated application route is introduced.

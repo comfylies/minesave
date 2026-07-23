@@ -40,7 +40,8 @@ public class DirectMessageServiceImpl implements DirectMessageService {
 
     private static final int MAX_TEXT_LENGTH = 4_000;
     private static final int MAX_PAGE_SIZE = 100;
-    private static final int CHAT_IMAGE_URL_EXPIRATION_MINUTES = 5;
+    private static final int CHAT_IMAGE_THUMBNAIL_URL_EXPIRATION_MINUTES = 15;
+    private static final int CHAT_IMAGE_ORIGINAL_URL_EXPIRATION_MINUTES = 5;
 
     private final DirectConversationRepository conversationRepository;
     private final DirectMessageRepository messageRepository;
@@ -219,7 +220,7 @@ public class DirectMessageServiceImpl implements DirectMessageService {
             throw new BadRequestException("Direct chat image URLs require S3 storage");
         }
         return storageService.generatePresignedUrl(
-                getImageKey(messageId, thumbnail, userId), CHAT_IMAGE_URL_EXPIRATION_MINUTES);
+                getImageKey(messageId, thumbnail, userId), imageUrlExpirationMinutes(thumbnail));
     }
 
     private DirectMessageResponse toMessageResponse(DirectMessage message) {
@@ -227,13 +228,18 @@ public class DirectMessageServiceImpl implements DirectMessageService {
         String thumbnailKey = message.getImageThumbnailKey();
         if (usesDirectImageDelivery() && thumbnailKey != null && !thumbnailKey.isBlank()) {
             response.setImageThumbnailUrl(storageService.generatePresignedUrl(
-                    thumbnailKey, CHAT_IMAGE_URL_EXPIRATION_MINUTES));
+                    thumbnailKey, CHAT_IMAGE_THUMBNAIL_URL_EXPIRATION_MINUTES));
         }
         return response;
     }
 
     private boolean usesDirectImageDelivery() {
         return "s3".equalsIgnoreCase(storageType);
+    }
+
+    private int imageUrlExpirationMinutes(boolean thumbnail) {
+        return thumbnail ? CHAT_IMAGE_THUMBNAIL_URL_EXPIRATION_MINUTES
+                : CHAT_IMAGE_ORIGINAL_URL_EXPIRATION_MINUTES;
     }
 
     private DirectConversation findOrCreateConversation(long userOneId, long userTwoId) {

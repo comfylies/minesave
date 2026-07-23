@@ -109,7 +109,7 @@ class DirectMessageServiceImplTest {
         when(messageRepository.findByConversationIdOrderByIdDesc(anyLong(), any()))
                 .thenReturn(new PageImpl<>(List.of(image)));
         when(messageRepository.countByConversationId(42L)).thenReturn(1L);
-        when(storageService.generatePresignedUrl("messages/42/501/thumbnail.jpg", 5))
+        when(storageService.generatePresignedUrl("messages/42/501/thumbnail.jpg", 15))
                 .thenReturn("https://cos.example/thumbnail");
 
         PageDTO<DirectMessageResponse> page = service.getMessages(42L, null, 40, 10L);
