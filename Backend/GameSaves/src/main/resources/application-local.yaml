@@ -3,6 +3,13 @@
 # 启动: ./mvnw spring-boot:run
 # IDEA: 选择 "GameSaves [local]" 运行配置
 # ============================================================
+spring:
+  datasource:
+    password: "3256"
+
+sa-token:
+  jwt-secret-key: "gamesaves-local-dev-key-2024"
+
 app:
   login:
     captcha-required: false

@@ -9,12 +9,15 @@
           💬 {{ allComments.length }} 条批注
         </span>
       </div>
-      <div
-        ref="contentContainer"
-        class="readme-content markdown-body"
-        v-html="renderedContent"
-        @click="handleAnchorClick"
-      />
+      <div class="readme-content-shell">
+        <div
+          ref="contentContainer"
+          class="readme-content markdown-body"
+          v-html="renderedContent"
+          @click="handleAnchorClick"
+        />
+        <div ref="activeOverlayRef" class="active-annotation-overlay" aria-hidden="true" />
+      </div>
     </template>
 
     <EmptyState v-else description="此存档暂无 README" />
@@ -95,6 +98,32 @@ function handleAnchorClick(e) {
   }
 }
 
+let lastProgrammaticSelect = 0
+
+function onDocumentClick() {
+  // 如果是程序化选中（scrollTo 刚被调用），跳过取消检查。
+  // 否则 recogito 的 pointerdown 清空选中状态和 scrollTo 的 setSelected 会产生竞态。
+  if (Date.now() - lastProgrammaticSelect < 300) return
+
+  const activeIdBefore = highlightManager.getActiveAnnotationId()
+  if (activeIdBefore == null) return
+
+  // 用 rAF + setTimeout 确保 recogito 状态已稳定
+  requestAnimationFrame(() => {
+    setTimeout(() => {
+      const selected = annotator.value?.getSelected?.()
+      if (!selected || selected.length === 0) {
+        if (highlightManager.getActiveAnnotationId() != null) {
+          pendingActiveCommentId.value = null
+          highlightManager.clearActiveAnnotation()
+          clearActiveOverlay()
+          emit('select-comment', null)
+        }
+      }
+    }, 100)
+  })
+}
+
 // ---- 角色颜色 ----
 const articleStore = useArticleStore()
 
@@ -110,6 +139,63 @@ function resolveColorRole(comment) {
 const highlightManager = new HighlightManager()
 /** @type {import('vue').Ref<BorderLayer|null>} */
 const borderLayer = ref(null)
+const activeOverlayRef = ref(null)
+
+const ACTIVE_OVERLAY_STYLES = {
+  admin: { background: 'rgba(231, 76, 60, 0.42)', line: '#e74c3c' },
+  uploader: { background: 'rgba(52, 152, 219, 0.42)', line: '#3498db' },
+  user: { background: 'rgba(39, 174, 96, 0.42)', line: '#27ae60' }
+}
+
+function clearActiveOverlay() {
+  if (activeOverlayRef.value) activeOverlayRef.value.replaceChildren()
+}
+
+function renderActiveOverlay(commentId) {
+  const container = contentContainer.value
+  const overlay = activeOverlayRef.value
+  clearActiveOverlay()
+  if (!container || !overlay || commentId == null) {
+    console.debug('[ActiveOverlay] skip — container=%o overlay=%o commentId=%o', !!container, !!overlay, commentId)
+    return
+  }
+  const entry = highlightManager.getAnnotation(commentId)
+  if (!entry) {
+    console.debug('[ActiveOverlay] entry not found for commentId=%o. Known entries: %o', commentId, highlightManager.getEntryIds())
+    return
+  }
+
+  const containerRect = container.getBoundingClientRect()
+  const rects = entry.range.getClientRects()
+  const style = ACTIVE_OVERLAY_STYLES[entry.role] || ACTIVE_OVERLAY_STYLES.user
+  let blockCount = 0
+  let firstPos = null
+  for (const rect of rects) {
+    if (!rect.width || !rect.height) continue
+    const left = rect.left - containerRect.left
+    const top = rect.top - containerRect.top
+    if (!firstPos) firstPos = { left: Math.round(left), top: Math.round(top), w: Math.round(rect.width), h: Math.round(rect.height) }
+    const block = document.createElement('div')
+    Object.assign(block.style, {
+      position: 'absolute', left: `${left}px`, top: `${top}px`,
+      width: `${rect.width}px`, height: `${rect.height}px`, boxSizing: 'border-box',
+      backgroundColor: style.background,
+      outline: `2px dashed ${style.line}`,
+      outlineOffset: '1px',
+      borderRadius: '3px'
+    })
+    overlay.appendChild(block)
+    blockCount++
+  }
+  console.debug('[ActiveOverlay] commentId=%o role=%s rectCount=%d blocks=%d firstBlock=%o',
+    commentId, entry.role, rects.length, blockCount, firstPos)
+}
+
+function selectActiveAnnotation(commentId) {
+  if (!highlightManager.setActiveAnnotation(commentId)) return false
+  renderActiveOverlay(commentId)
+  return true
+}
 
 /**
  * 从字符偏移创建 DOM Range
@@ -147,9 +233,11 @@ function createRangeFromOffsets(container, start, end) {
 function renderAllHighlights(comments, container) {
   // 清空旧高亮
   highlightManager.clearAll()
+  clearActiveOverlay()
 
   const borderItems = []
   const containerRect = container.getBoundingClientRect()
+  let rangeFailCount = 0
 
   for (const comment of comments) {
     const start = comment.quoteStart ?? 0
@@ -157,7 +245,7 @@ function renderAllHighlights(comments, container) {
     if (end <= start) continue
 
     const range = createRangeFromOffsets(container, start, end)
-    if (!range) continue
+    if (!range) { rangeFailCount++; continue }
 
     const role = resolveColorRole(comment)
 
@@ -178,6 +266,11 @@ function renderAllHighlights(comments, container) {
         role
       })
     }
+  }
+
+  if (rangeFailCount > 0) {
+    console.debug('[HighlightManager] renderAllHighlights: %d/%d comments failed range creation',
+      rangeFailCount, comments.length)
   }
 
   // 批量渲染边框条
@@ -236,6 +329,16 @@ const {
 } = useTextAnnotator(contentContainer, computed(() => props.articleId))
 
 const allComments = ref([])
+const pendingActiveCommentId = ref(null)
+
+function activatePendingComment() {
+  const commentId = pendingActiveCommentId.value
+  if (commentId == null) return
+  scrollToComment(commentId)
+  if (selectActiveAnnotation(commentId)) {
+    pendingActiveCommentId.value = null
+  }
+}
 
 // Plan B: 本地 py 缓存 — 创建时直接测量存入，resize 时批量更新
 // 优先于 anchor.py，解决 DOM Range 重建的漂移问题
@@ -314,7 +417,20 @@ watch([renderedContent, contentContainer], async ([content, container]) => {
   // 初始化 recogito（仅用于选区管理）
   init(
     () => { showPopup.value = true },
-    (annotation) => { emit('select-comment', annotation) }
+    (annotation) => {
+      if (!selectActiveAnnotation(annotation?.id)) {
+        pendingActiveCommentId.value = annotation?.id ?? null
+      } else {
+        pendingActiveCommentId.value = null
+      }
+      emit('select-comment', annotation)
+    },
+    () => {
+      pendingActiveCommentId.value = null
+      highlightManager.clearActiveAnnotation()
+      clearActiveOverlay()
+      emit('select-comment', null)
+    }
   )
 
   // 初始化 BorderLayer
@@ -341,6 +457,7 @@ watch([renderedContent, contentContainer], async ([content, container]) => {
         await nextTick()
         // 自定义渲染（HighlightManager + BorderLayer）
         renderAllHighlights(comments, container)
+        activatePendingComment()
         // Plan B: 首次加载时，为所有没有 anchor.py 的老批注预填充 pyCache。
         // 此时 DOM 最干净，Range 测量最可靠。后续增量操作中不再依赖 fallback。
         await nextTick()
@@ -421,7 +538,17 @@ function onPopupCancel() {
 }
 
 // ---- 对外方法 ----
-function scrollTo(commentId) { scrollToComment(commentId) }
+function scrollTo(commentId) {
+  lastProgrammaticSelect = Date.now()
+  console.debug('[ActiveOverlay] scrollTo called with commentId=%o', commentId)
+  scrollToComment(commentId)
+  if (!selectActiveAnnotation(commentId)) {
+    pendingActiveCommentId.value = commentId ?? null
+    console.debug('[ActiveOverlay] selectActiveAnnotation failed — pendingActiveCommentId=%o', pendingActiveCommentId.value)
+  } else {
+    pendingActiveCommentId.value = null
+  }
+}
 
 function removeLocalComment(commentId) {
   // recogito 状态清理
@@ -463,7 +590,12 @@ async function refreshAnnotations() {
       loadComments(comments)
       await nextTick()
       if (contentContainer.value) {
+        const activeCommentId = highlightManager.getActiveAnnotationId()
+        if (pendingActiveCommentId.value == null && activeCommentId != null) {
+          pendingActiveCommentId.value = activeCommentId
+        }
         renderAllHighlights(comments, contentContainer.value)
+        activatePendingComment()
       }
       // Plan B: 为所有没有 anchor.py 的老批注预填充 pyCache
       await nextTick()
@@ -482,6 +614,12 @@ async function refreshAnnotations() {
         }
       }
       schedulePositionEmit()
+    } else {
+      pendingActiveCommentId.value = null
+      if (contentContainer.value) {
+        renderAllHighlights([], contentContainer.value)
+      }
+      schedulePositionEmit()
     }
   } catch { /* */ }
 }
@@ -492,6 +630,7 @@ async function refreshAnnotations() {
  */
 function setAnnotationsVisible(visible) {
   highlightManager.setVisible(visible)
+  if (activeOverlayRef.value) activeOverlayRef.value.style.display = visible ? '' : 'none'
   if (borderLayer.value) {
     borderLayer.value.setVisible(visible)
   }
@@ -519,11 +658,14 @@ function onResize() {
     }
   }
   schedulePositionEmit()
+  const activeCommentId = highlightManager.getActiveAnnotationId()
+  if (activeCommentId != null) renderActiveOverlay(activeCommentId)
   // BorderLayer 自动通过 ResizeObserver 处理
 }
 
 if (typeof window !== 'undefined') {
   window.addEventListener('resize', onResize, { passive: true })
+  document.addEventListener('click', onDocumentClick, { passive: true })
 }
 onBeforeUnmount(() => {
   destroy()
@@ -533,7 +675,10 @@ onBeforeUnmount(() => {
     borderLayer.value = null
   }
   if (rafId) cancelAnimationFrame(rafId)
-  if (typeof window !== 'undefined') window.removeEventListener('resize', onResize)
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('resize', onResize)
+    document.removeEventListener('click', onDocumentClick)
+  }
 })
 </script>
 
@@ -556,7 +701,9 @@ onBeforeUnmount(() => {
 }
 .readme-title { font-size: var(--font-size-normal); font-weight: 600; color: var(--color-body-text); }
 .annotation-indicator { font-size: 12px; color: var(--color-secondary-text); }
+.readme-content-shell { position: relative; }
 .readme-content { padding: var(--spacing-xl); }
+.active-annotation-overlay { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
 
 .readme-content :deep(img) { max-width: 100%; height: auto; border-radius: var(--radius-sm); margin: var(--spacing-sm) 0; }
 .readme-content :deep(pre) { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: var(--spacing-md); overflow-x: auto; margin: var(--spacing-md) 0; }

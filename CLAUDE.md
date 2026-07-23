@@ -86,11 +86,22 @@ Token-based auth via Sa-Token with **JWT mode enabled** (`is-jwt: true`). Config
 
 **App.vue bootstrap**: on mount, validates the stored JWT against the server via `checkLogin()`. If invalid (e.g. server restart cleared Sa-Token memory sessions), clears localStorage and redirects to login.
 
+### Account Center & Avatar
+
+`AccountController` (`/api/account`) provides endpoints scoped to the authenticated user:
+- `PATCH /api/account/profile` — update nickname, bio, phone
+- `POST /api/account/avatar` — upload avatar (JPEG/PNG/WebP, max 2 MiB)
+- `DELETE /api/account/avatar` — remove avatar (resets to default)
+- `PUT /api/account/password` — change password (requires current password)
+
+`AvatarServiceImpl` auto-crops to square center → generates 3 sizes (180px / 90px / 45px) as JPEG. Old avatar files are deleted on replacement. Password change logs out all sessions.
+
 ### Entity Design — CRITICAL
 
-- **Mixed FK strategy**: Article uses writable `@ManyToOne` to Game/User. ALL other entities use plain `Long` FK columns (e.g. `Savings.articleId`, `Comment.articleId`/`Comment.userId`) — avoids N+1 queries.
+- **Mixed FK strategy**: Article uses writable `@ManyToOne` to Game/User. ALL other entities use plain `Long` FK columns (e.g. `Savings.articleId`, `Comment.articleId`/`Comment.userId`, `DirectMessage.conversationId`/`DirectMessage.senderId`) — avoids N+1 queries.
 - **Read-only back-refs**: `@ManyToOne(insertable=false, updatable=false)` on Comment→User, Savings→Article, SavingItem→Savings — traversal convenience only, never the FK source.
 - Timestamps via `@PrePersist`/`@PreUpdate`, not DB defaults.
+- **User profile fields**: `nickname`, `phone` (unique, Chinese mobile regex), `bio` (max 500). `avatarKey` + `avatarUrl` managed by `AvatarService`. `termsVersion`/`termsAcceptedAt` for consent tracking.
 
 ### Game & Alias System
 
@@ -133,7 +144,8 @@ Key behaviors:
 - **Charset fallback**: UTF-8 → GBK → system default (Chinese Windows archives often use GBK). ZIP uses Apache Commons Compress `ZipFile`, not JDK `ZipInputStream`.
 - **Path traversal defense**: `PathTraversalValidator` rejects `../`, absolute paths, drive letters; `LocalStorageServiceImpl.resolvePath()` has containment guard.
 - **Content dedup**: same MD5 → same `{md5}.{ext}` physical file → write once.
-- **Magic number validation**: `MagicNumberValidator` checks file headers before extraction — blocks executables, DLLs, and other dangerous types. `SafePath` entity stores whitelisted paths per game for security color marking (files inside known safe paths get downgraded warnings).
+- **Magic number validation**: `MagicNumberValidator` checks file headers before extraction — blocks executables, DLLs, and other dangerous types. When dangerous files are detected, Article gets `securityLevel=WARNING` (default `SAFE`). `SafePath` entity stores whitelisted paths per game for security color marking (files inside known safe paths get downgraded warnings).
+- **Extraction progress**: `ExtractionProgressService` tracks per-article extraction phase/percentage/ETA in-memory (`ConcurrentHashMap`). Frontend polls `GET /api/articles/{id}/status` for real-time progress display.
 - **Parallel extraction**: extracted files uploaded to storage in parallel via `parallelStream()` — critical for COS where each upload is a network round-trip.
 
 ### Meilisearch Search
@@ -158,9 +170,56 @@ Search engine for game + article discovery. Single index `saves` with two doc ty
 `FileExplorerService.getZipForDownload()` resolves the article's archive via 3-layer fallback: 1) dynamic path from config `storageBasePath` + userId/gameId/articleId, 2) `article.storageRoot` (legacy), 3) `savings.zipPath` (very old data). Paths resolved to absolute via `@PostConstruct` to avoid Tomcat temp dir drift.
 
 `DownloadService` tracks download counts and logs. Dual-layer rate limiting:
-- **Memory layer** (`RateLimiter`): per-IP+article windowed counter (default 3 per 60s), plus per-IP+action global limiting (e.g. game creation: 3/60s → 30min IP ban). IP banning with TTL, scheduled eviction every 60s.
+- **Memory layer** (`RateLimiter`): per-IP+article windowed counter (default 3 per 60s), plus per-IP+action global limiting with optional IP banning. IP banning supports sub-minute durations (seconds-level). Scheduled eviction every 60s.
 - **DB layer** (`DownloadLogRepository`): hard cap of 5 downloads per IP in 60s.
-- **Other rate-limited actions**: email code sending (per-email 90s cooldown, 5/day max), field availability checking (per-IP 1s cooldown), cleanup manual trigger (60s interval), article full edit (2/day).
+
+**Large file download captcha** (`DownloadVerificationService`): downloads exceeding `app.download.captcha-threshold` (500 MB) require a graphical captcha. On verification, a one-time download token is issued (5 min TTL). Max 3 large downloads per IP per day (`app.download.max-large-downloads-per-day`).
+
+### Direct Messaging System
+
+Real-time 1-on-1 private messaging. Architecture: WebSocket/STOMP (primary) + HTTP long-polling (fallback for restrictive networks).
+
+**Backend — REST API** (`MessageController`, `/api/messages`, all require login):
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/messages/conversations` | List conversations (paginated) |
+| GET | `/api/messages/conversations/{id}/items?beforeId=` | Cursor-based message history |
+| POST | `/api/messages/conversations/{targetUserId}/items` | Send message (multipart: text + optional image) |
+| POST | `/api/messages/conversations/{id}/read` | Mark conversation read |
+| GET | `/api/messages/unread-count` | Total unread badge count |
+| GET | `/api/messages/events?clientId=&epoch=&cursor=` | HTTP long-poll for real-time events |
+
+**Backend — Real-time transport** (`MessageWebSocketConfig` + `MessageEventDispatcher`):
+- STOMP over WebSocket at `/ws/messages`, authenticated via `MessageStompAuthInterceptor` (reads JWT from `Authorization` header on CONNECT frame)
+- Simple broker: `/topic` (broadcast), `/queue` (user-specific via `/user` prefix)
+- `MessageEventDispatcher.publish()` fans out events to both STOMP (`convertAndSendToUser`) and long-poll (`DeferredResult`)
+- `MessageLongPollServiceImpl`: `ConcurrentHashMap<userId:clientId, DeferredResult>`, times out at `app.messaging.long-poll-timeout-ms` (25s); cursor + epoch state persisted in sessionStorage for connection resumption
+
+**Backend — Entities** (plain `Long` FK columns, consistent with the mixed-FK strategy):
+- `DirectConversation`: `userOneId`, `userTwoId` (canonical ordering: `userOneId < userTwoId`), `lastMessageId`, `lastMessageAt`
+- `DirectMessage`: `conversationId`, `senderId`, `messageType` (TEXT/IMAGE/IMAGE_WITH_TEXT), `content`, `imageOriginalKey`, `imageThumbnailKey`, `imageWidth`, `imageHeight`
+- `ConversationReadState`: `conversationId`, `userId`, `lastReadMessageId` — tracks per-user read position
+
+**Backend — Message rate limiting** (in `DirectMessageServiceImpl.send()`):
+
+| Layer | Scope | Limit | Penalty |
+|-------|-------|-------|---------|
+| Burst | Per IP | 5 msg / 5 sec | 30 sec IP ban |
+| Sustained | Per user | 20 msg / 60 sec | Reject (no ban) |
+
+Config at `app.messaging.send-*`. Uses `RateLimiter.tryAcquireGlobal()` for burst (IP-keyed) and sustained (userId-keyed).
+
+**Backend — Chat images** (`ChatImageServiceImpl`):
+- Validates: max size (`app.messaging.max-image-bytes`, default 5 MiB), magic bytes (JPEG/PNG/WebP), max 40M pixels
+- Generates 720px-edge JPEG thumbnails via `BufferedImage`
+- Storage key: `messages/{conversationId}/{messageId}/original.{ext}` + `thumbnail.jpg`
+
+**Frontend**:
+- `stores/messages.js` — conversations list, active thread messages (merged by id, sorted), unread count, event state restoration
+- `useMessageRealtime.js` — dual-transport composable: STOMP WebSocket (primary, subscribes `/user/queue/messages`) → long-poll fallback (activated on websocket failure or page background after 60s grace period)
+- Components: `ConversationList`, `MessageStream` (infinite scroll up), `MessageBubble` (text + image), `MessageComposer` (autosize textarea + image paste/drag, Enter send)
+- `MessagesPage.vue` at `/messages`, accessible from navbar avatar menu and user profile pages
 
 ### Article Editing System
 
@@ -184,6 +243,14 @@ Batch-processed with independent transactions + configurable sleep between batch
 ### Tag System
 
 Global tag pool via `Tag` entity. Articles have many-to-many association with tags. `TagService` provides CRUD and search. Tags are indexed in Meilisearch for article discovery.
+
+### Article Voting System
+
+Upvote/downvote on articles. `ArticleVoteServiceImpl` handles toggle logic: same vote clicked again → remove; opposite vote clicked → switch (UPDATE in-place to avoid UNIQUE constraint violation from DELETE+INSERT before flush); no existing vote → create. Rate limited via `RateLimiter.tryAcquireGlobal("vote", 30/60s per IP)`. Vote counts stored on `Article` entity (`upvoteCount`, `downvoteCount`) and updated atomically via `@Modifying` queries.
+
+### Contact/Feedback System
+
+`ContactController` (`POST /api/contact`, requires login) — site-wide feedback form with Markdown editor + image paste upload. `ContactServiceImpl.submit()` validates category (suggestion/bug/business/other), applies XSS sanitization, rate-limits per IP (3 per hour via `RateLimiter.tryAcquireGlobal`). Admin panel lists/views/resolves/closes messages with pending count badge.
 
 ### Announcement System
 
@@ -227,12 +294,12 @@ All responses: `{ "code": 200, "message": "...", "data": {...} }`. Pagination: `
 ### Service Implementation Pattern
 
 Mixed pattern — intentional, not accidental:
-- **Interface + impl**: `ArticleService`/`ArticleServiceImpl`, `GameService`/`GameServiceImpl`, `UserService`/`UserServiceImpl`, `CommentService`/`CommentServiceImpl`, `AnnouncementService`/`AnnouncementServiceImpl`, `TagService`/`TagServiceImpl`, `DownloadService`/`DownloadServiceImpl`, `FileExplorerService`/`FileExplorerServiceImpl`, `SavingsService`/`SavingsServiceImpl`, `AdminService`/`AdminServiceImpl`, `SiteSettingService`/`SiteSettingServiceImpl`, `AdminAuditLogService`/`AdminAuditLogServiceImpl`
-- **Concrete `@Service` only** (no interface): `AuthService`, `EmailCodeService`, `CleanupScheduler`, `SearchService`, `SearchSyncService`, `ZipExtractionService`, `SafePathService` — these are standalone services where only one implementation will ever exist
+- **Interface + impl**: `ArticleService`/`ArticleServiceImpl`, `GameService`/`GameServiceImpl`, `UserService`/`UserServiceImpl`, `CommentService`/`CommentServiceImpl`, `AnnouncementService`/`AnnouncementServiceImpl`, `TagService`/`TagServiceImpl`, `DownloadService`/`DownloadServiceImpl`, `FileExplorerService`/`FileExplorerServiceImpl`, `SavingsService`/`SavingsServiceImpl`, `AdminService`/`AdminServiceImpl`, `SiteSettingService`/`SiteSettingServiceImpl`, `AdminAuditLogService`/`AdminAuditLogServiceImpl`, `DirectMessageService`/`DirectMessageServiceImpl`, `ContactService`/`ContactServiceImpl`, `AvatarService`/`AvatarServiceImpl`, `ArticleVoteService`/`ArticleVoteServiceImpl`
+- **Concrete `@Service` only** (no interface): `AuthService`, `EmailCodeService`, `CleanupScheduler`, `SearchService`, `SearchSyncService`, `ZipExtractionService`, `SafePathService`, `ChatImageService`, `MessageEventDispatcher`, `MessageLongPollService`, `DownloadVerificationService`, `ExtractionProgressService` — these are standalone services where only one implementation will ever exist
 
 ### Test Infrastructure
 
-**Backend**: 11 test classes under `src/test/`. Uses Spring Boot Test + JUnit 5. Tests require MySQL + Meilisearch running. Key test files:
+**Backend**: 18 test classes under `src/test/`. Uses Spring Boot Test + JUnit 5. Tests require MySQL + Meilisearch running. Key test files:
 
 | Test | What it covers |
 |------|---------------|
@@ -246,13 +313,19 @@ Mixed pattern — intentional, not accidental:
 | `PathTraversalValidatorTest` | `../` rejection, absolute path blocking |
 | `XssFilterTest` | Script/handler/iframe removal |
 | `ZipExtractorTest` | ZIP/7z extraction, charset handling |
+| `DirectMessageServiceImplTest` | Message send with mock RateLimiter |
+| `DirectMessageServiceTest` | Conversation + message CRUD, read states, history cursor |
+| `DirectMessageConcurrencyTest` | Concurrent conversation upsert isolation |
+| `MessageLongPollServiceTest` | Long-poll subscribe, timeout, multi-user isolation |
+| `MessageControllerRouteTest` | Message endpoint routing validation |
+| `GlobalExceptionHandlerMvcTest` | Exception-to-HTTP-status mapping |
 | `GameSavesApplicationTests` | Context loads |
 
 **Frontend**: No test setup (no vitest, jest, or cypress configured).
 
 ### Key Dependencies
 
-Apache Commons Compress 1.26 (ZIP/7z/tar), CommonMark 0.22 + GFM extensions (Markdown → HTML), BCrypt (password only, no full Spring Security), HikariCP (connection pool), Flyway 11.7 (DB versioned migration), Meilisearch Java SDK 0.14.4, AWS S3 SDK v2 2.29.52, TwelveMonkeys ImageIO 3.12 (WebP/JPEG thumbnails), Sa-Token 1.44.0 + sa-token-jwt plugin, OkHttp 4.12 (Meilisearch SDK HTTP client), Lombok.
+Apache Commons Compress 1.26 (ZIP/7z/tar), CommonMark 0.22 + GFM extensions (Markdown → HTML), BCrypt (password only, no full Spring Security), HikariCP (connection pool), Flyway 11.7 (DB versioned migration), Meilisearch Java SDK 0.14.4, AWS S3 SDK v2 2.29.52, TwelveMonkeys ImageIO 3.12 (WebP/JPEG thumbnails), Sa-Token 1.44.0 + sa-token-jwt plugin, Spring WebSocket + STOMP (direct messaging real-time transport), OkHttp 4.12 (Meilisearch SDK HTTP client), Lombok.
 
 ## Frontend Architecture
 
@@ -284,16 +357,17 @@ JWT token stored as `satoken` in `localStorage`. User object also cached in `loc
 | `articles` | `currentArticle`, `articleList`, `pagination` | Article CRUD, game/user-specific listings |
 | `games` | Game list, search results | Game browsing and search |
 | `files` | File tree, current path, breadcrumbs | File browser state for article file trees |
+| `messages` | `conversations`, `activeMessages`, `unreadCount`, `connectionState` | Direct messaging state, real-time event handling |
 
 ### API Modules (`api/`)
 
-12 modules all using the shared Axios instance from `client.js`: `authApi`, `userApi`, `gameApi`, `articleApi`, `fileApi`, `commentApi`, `searchApi`, `tagApi`, `announcementApi`, `adminApi`, `siteSettingsApi`.
+13 modules all using the shared Axios instance from `client.js`: `authApi`, `userApi`, `gameApi`, `articleApi`, `fileApi`, `commentApi`, `searchApi`, `tagApi`, `announcementApi`, `adminApi`, `siteSettingsApi`, `messageApi`.
 
 ### Router & Layouts
 
 Two layouts:
-- **DefaultLayout** (`/`) — AppNavbar + AppFooter. Routes: Home (`/`, `noHeaderOffset` for hero), Browse (`/browse`, wide), Game (`/games/:gameId`, wide), Article (`/articles/:articleId`), Search (`/search`, wide), Upload (auth), MySaves (auth), UserProfile
-- **AdminLayout** (`/admin/*`) — separate admin shell with sidebar, 8 sub-routes: Dashboard, Users, Articles, Announcements, Games, Cleanup, Ghosts, Site Settings
+- **DefaultLayout** (`/`) — AppNavbar + AppFooter. Routes: Home (`/`, `noHeaderOffset` for hero), Browse (`/browse`, wide), Game (`/games/:gameId`, wide), Article (`/articles/:articleId`), Search (`/search`, wide), Upload (auth), MySaves (auth), Messages (`/messages`, auth), UserProfile
+- **AdminLayout** (`/admin/*`) — separate admin shell with sidebar, 9 sub-routes: Dashboard, Users, Articles, Announcements, Games, Cleanup, Ghosts, Site Settings, Contact Messages
 
 Router guard checks `satoken` in localStorage for `requiresAuth` routes, and `currentUser.role === 'admin'` for `requiresAdmin` routes. Redirects to login with `redirect` query param on missing auth.
 
@@ -321,16 +395,21 @@ Text files with extensions in `app.preview.allowed-extensions` (txt, md, json, x
 - **ArticlePage**: 3-column GitHub-style layout — FileBrowser (tree) + ReadmeRenderer (Markdown with syntax highlighting via highlight.js) + ArticleSidebar (author, download button, tags, metadata). FileBrowser uses BreadcrumbNav for navigation and FileIcon for emoji-based file type icons.
 - **UploadPage**: Archive upload + README dual-mode (hand-written Markdown OR upload .md file). Game creation embedded inline with abuse prevention.
 - **EditPage** (`/articles/:articleId/edit`): Edit article metadata (title, version, description, tags), replace README file, or replace cover image. Daily edit limit enforced.
+- **MessagesPage** (`/messages`): 2-panel chat layout — ConversationList sidebar + message thread with real-time updates (WebSocket+long-poll). Supports initiating conversations from user profiles via `?peer={id}`.
+- **AccountCenterPage** (`/account`): 3-tab profile management — Profile (nickname/bio/phone), Avatar (upload/crop/remove), Security (change password).
+- **ContactPage** (`/contact`): Feedback form with Markdown editor, image paste upload, category selection.
 - **GamePage**: Game detail + article list with gallery/cover views (toggled via `useViewMode` composable, persisted to localStorage).
-- **Admin**: 8 management views — Dashboard, Users, Articles, Announcements, Games, Cleanup (failed archive cleanup trigger + status), Ghosts (orphaned storage diagnostics), Site Settings
+- **Admin**: 9 management views — Dashboard, Users, Articles, Announcements, Games, Cleanup (failed archive cleanup trigger + status), Ghosts (orphaned storage diagnostics), Site Settings, Contact Messages
 
 ### Components
 
 | Category | Components |
 |----------|------------|
-| **Common** | `AppNavbar` (smart hide-on-scroll, transparent/glass on homepage via inject), `AppFooter`, `EmptyState`, `LoadingSkeleton` |
-| **Article** | `ArticleCard` (cover thumbnail + tags + download count), `ArticleMeta` (header bar), `ArticleSidebar` (right panel), `FileBrowser` (directory tree), `BreadcrumbNav`, `FileIcon` (emoji-based), `ReadmeRenderer` (Markdown → HTML + annotation integration), `AnnotationPanel` (sidebar comment list), `AnnotationPopup` (floating text selection popup) |
+| **Common** | `AppNavbar` (smart hide-on-scroll, transparent/glass on homepage via inject, unread message badge), `AppFooter`, `EmptyState`, `LoadingSkeleton` |
+| **Article** | `ArticleCard` (cover thumbnail + tags + download count), `ArticleMeta` (header bar), `ArticleSidebar` (right panel with vote buttons + download flow), `FileBrowser` (directory tree), `BreadcrumbNav`, `FileIcon` (emoji-based), `ReadmeRenderer` (Markdown → HTML + annotation integration), `AnnotationPanel` (sidebar comment list), `AnnotationPopup` (floating text selection popup) |
 | **Game** | `GameCard` (game thumbnail + article count) |
+| **Message** | `ConversationList` (sidebar with peer avatar + last message + unread badge), `MessageStream` (infinite scroll upward), `MessageBubble` (text + image with lightbox), `MessageComposer` (autosize textarea + image paste/drag, Enter to send) |
+| **Download** | `DownloadNoticeDialog` (security warning for dangerous archives), `DownloadCaptchaModal` (captcha verification for large files) |
 | **Tag** | `TagDisplay` (inline chips with "+N" overflow), `TagSelector` (search/create multi-select) |
 | **Announcement** | `AnnouncementModal` (Markdown dialog with prev/next navigation) |
 
@@ -344,7 +423,7 @@ Text files with extensions in `app.preview.allowed-extensions` (txt, md, json, x
 
 ### Key Dependencies
 
-Vue 3.5, Vite 8, Element Plus 2.14, Pinia 3, Vue Router 4, Axios, marked (Markdown), highlight.js (syntax highlighting), @recogito/text-annotator 4.2 (text selection/annotation), bcryptjs (frontend password hashing before sending).
+Vue 3.5, Vite 8, Element Plus 2.14, Pinia 3, Vue Router 4, Axios, marked (Markdown), highlight.js (syntax highlighting), @stomp/stompjs (WebSocket STOMP client for real-time messaging), @recogito/text-annotator 4.2 (text selection/annotation), bcryptjs (frontend password hashing before sending).
 
 ## Known Limitations
 
@@ -355,9 +434,8 @@ Vue 3.5, Vite 8, Element Plus 2.14, Pinia 3, Vue Router 4, Axios, marked (Markdo
 - No frontend test setup (no vitest/jest configured).
 - Frontend has no `.env` files — API base URL handled via Vite proxy (dev) or reverse proxy (production).
 - `Database/` directory (uploaded files) is gitignored — not part of this repo.
-- No Redis or distributed cache — all caching is in-memory `ConcurrentHashMap` (captchas, email codes, rate limit counters, site settings). Not suitable for multi-instance deployments.
-- No WebSocket or server-sent events — article status is polled via `GET /api/articles/{id}/status`.
+- No Redis or distributed cache — all caching is in-memory `ConcurrentHashMap` (captchas, email codes, rate limit counters, download tokens, site settings). Not suitable for multi-instance deployments.
 - No i18n — all UI text is hardcoded Chinese.
 - No error tracking or analytics (no Sentry, Google Analytics, etc.).
 - CORS defaults to `*` — must be configured for production.
-- Some services are direct `@Service` classes without interfaces (`AuthService`, `EmailCodeService`, `CleanupScheduler`, `SearchService`, `SearchSyncService`, `ZipExtractionService`, `SafePathService`). Others follow interface+impl pattern. Mix is intentional (interfaces only where multiple implementations exist or are planned).
+- Some services are direct `@Service` classes without interfaces. Others follow interface+impl pattern. Mix is intentional (interfaces only where multiple implementations exist or are planned).

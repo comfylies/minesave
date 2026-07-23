@@ -77,7 +77,7 @@ export function useTextAnnotator(containerRef, articleId) {
     }).filter(Boolean) // 过滤掉 null
   }
 
-  function init(onCreateComment, onSelectComment) {
+  function init(onCreateComment, onSelectComment, onCancelComment) {
     if (!containerRef.value) return
 
     if (annotator.value) {
@@ -106,15 +106,20 @@ export function useTextAnnotator(containerRef, articleId) {
       }
     })
 
-    anno.on('selectAnnotation', (v3annotation) => {
-      selectedAnnotation.value = v3annotation
-      if (onSelectComment) onSelectComment(v3annotation)
+    anno.on('clickAnnotation', (v3annotation) => {
+      // clickAnnotation 在重叠批注时可能返回数组，取第一个
+      const annotation = Array.isArray(v3annotation) ? v3annotation[0] : v3annotation
+      selectedAnnotation.value = annotation
+      if (onSelectComment) onSelectComment(annotation)
     })
 
-    anno.on('cancelSelected', () => {
-      selectedAnnotation.value = null
-      isSelecting.value = false
-      pendingSelector.value = null
+    anno.on('selectionChanged', (annotations) => {
+      if (!annotations || annotations.length === 0) {
+        selectedAnnotation.value = null
+        isSelecting.value = false
+        pendingSelector.value = null
+        if (onCancelComment) onCancelComment()
+      }
     })
 
     annotator.value = anno
@@ -153,8 +158,20 @@ export function useTextAnnotator(containerRef, articleId) {
   function scrollToComment(commentId) {
     if (!annotator.value) return
     const id = String(commentId)
-    annotator.value.scrollIntoView(id)
-    annotator.value.state.store.selectAnnotation(id)
+    try {
+      annotator.value.scrollIntoView(id)
+    } catch (e) {
+      console.debug('[useTextAnnotator] scrollIntoView failed for comment %s: %s', id, e.message)
+    }
+    // recogito v4: setSelected 替代已删除的 state.store.selectAnnotation
+    try {
+      const annotation = annotator.value.state.store.getAnnotation(id)
+      if (annotation) {
+        annotator.value.setSelected(annotation)
+      }
+    } catch (e) {
+      console.debug('[useTextAnnotator] setSelected failed for comment %s: %s', id, e.message)
+    }
   }
 
   function removePendingAnnotation(annotationId) {
