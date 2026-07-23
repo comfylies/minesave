@@ -76,15 +76,15 @@ public class RateLimiter {
     }
 
     /**
-     * Ban an IP for a specific action for {@code banMinutes} minutes.
+     * Ban an IP for a specific action for {@code banSeconds} seconds.
      */
-    public void banIp(String ip, String action, int banMinutes) {
+    public void banIp(String ip, String action, long banSeconds) {
         String key = "ban:" + action + ":" + ip;
-        long bannedUntil = System.currentTimeMillis() + banMinutes * 60_000L;
+        long bannedUntil = System.currentTimeMillis() + banSeconds * 1000L;
         ipBans.put(key, bannedUntil);
         // Also clear any existing counters for this IP+action so they start fresh after ban
         globalCounters.remove("global:" + action + ":" + ip);
-        log.warn("IP banned: ip={}, action={}, duration={}min", ip, action, banMinutes);
+        log.warn("IP banned: ip={}, action={}, duration={}s", ip, action, banSeconds);
     }
 
     /**

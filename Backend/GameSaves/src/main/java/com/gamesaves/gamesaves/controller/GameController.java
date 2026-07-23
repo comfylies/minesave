@@ -70,7 +70,7 @@ public class GameController {
 
         // IP 级别限流：每分钟最多 3 次，超限封禁 30 分钟
         if (!rateLimiter.tryAcquireGlobal(ip, "create-game", 3, 60)) {
-            rateLimiter.banIp(ip, "create-game", 30);
+            rateLimiter.banIp(ip, "create-game", 30 * 60);
             throw new RateLimitException("Too many game creation requests. IP banned for 30 minutes.");
         }
 

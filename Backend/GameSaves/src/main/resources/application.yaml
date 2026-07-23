@@ -123,8 +123,11 @@ app:
     max-daily-edits: 999999
   messaging:
     max-text-length: 4000
-    max-image-bytes: 10485760
+    max-image-bytes: 5242880
     long-poll-timeout-ms: 25000
     background-ws-grace-ms: 60000
-    send-rate-limit: 30
+    send-rate-limit: 20
     send-rate-window-seconds: 60
+    send-burst-limit: 5
+    send-burst-window-seconds: 5
+    send-burst-ban-seconds: 30

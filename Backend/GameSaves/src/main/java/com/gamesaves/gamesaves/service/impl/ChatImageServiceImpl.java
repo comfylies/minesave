@@ -3,6 +3,7 @@ package com.gamesaves.gamesaves.service.impl;
 import com.gamesaves.gamesaves.exception.BadRequestException;
 import com.gamesaves.gamesaves.service.ChatImageService;
 import com.gamesaves.gamesaves.service.StorageService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -19,12 +20,14 @@ import java.util.Set;
 @Service
 public class ChatImageServiceImpl implements ChatImageService {
 
-    private static final long MAX_IMAGE_BYTES = 10L * 1024 * 1024;
     private static final int MAX_PIXELS = 40_000_000;
     private static final int THUMBNAIL_MAX_EDGE = 720;
     private static final Set<String> SUPPORTED_EXTENSIONS = Set.of("jpg", "jpeg", "png", "webp");
 
     private final StorageService storageService;
+
+    @Value("${app.messaging.max-image-bytes:5242880}")
+    private long maxImageBytes;
 
     public ChatImageServiceImpl(StorageService storageService) {
         this.storageService = storageService;
@@ -33,7 +36,7 @@ public class ChatImageServiceImpl implements ChatImageService {
     @Override
     public void validate(MultipartFile image) {
         if (image == null || image.isEmpty()) throw new BadRequestException("Chat image is required");
-        if (image.getSize() > MAX_IMAGE_BYTES) throw new BadRequestException("Chat image must be 10 MiB or smaller");
+        if (image.getSize() > maxImageBytes) throw new BadRequestException("Chat image must be " + (maxImageBytes / 1024 / 1024) + " MiB or smaller");
 
         String extension = extensionOf(image.getOriginalFilename());
         if (!SUPPORTED_EXTENSIONS.contains(extension)) {

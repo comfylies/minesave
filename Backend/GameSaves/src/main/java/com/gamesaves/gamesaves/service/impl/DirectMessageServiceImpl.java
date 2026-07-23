@@ -9,6 +9,7 @@ import com.gamesaves.gamesaves.entity.DirectMessage;
 import com.gamesaves.gamesaves.entity.User;
 import com.gamesaves.gamesaves.exception.BadRequestException;
 import com.gamesaves.gamesaves.exception.ForbiddenException;
+import com.gamesaves.gamesaves.exception.RateLimitException;
 import com.gamesaves.gamesaves.exception.ResourceNotFoundException;
 import com.gamesaves.gamesaves.repository.ConversationReadStateRepository;
 import com.gamesaves.gamesaves.repository.DirectConversationRepository;
@@ -17,6 +18,8 @@ import com.gamesaves.gamesaves.repository.UserRepository;
 import com.gamesaves.gamesaves.service.DirectMessageService;
 import com.gamesaves.gamesaves.service.ChatImageService;
 import com.gamesaves.gamesaves.service.MessageEventDispatcher;
+import com.gamesaves.gamesaves.util.RateLimiter;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -43,19 +46,37 @@ public class DirectMessageServiceImpl implements DirectMessageService {
     private final UserRepository userRepository;
     private final ChatImageService chatImageService;
     private final MessageEventDispatcher eventDispatcher;
+    private final RateLimiter rateLimiter;
+
+    @Value("${app.messaging.send-rate-limit:20}")
+    private int sendRateLimit;
+
+    @Value("${app.messaging.send-rate-window-seconds:60}")
+    private int sendRateWindowSeconds;
+
+    @Value("${app.messaging.send-burst-limit:5}")
+    private int sendBurstLimit;
+
+    @Value("${app.messaging.send-burst-window-seconds:5}")
+    private int sendBurstWindowSeconds;
+
+    @Value("${app.messaging.send-burst-ban-seconds:30}")
+    private int sendBurstBanSeconds;
 
     public DirectMessageServiceImpl(DirectConversationRepository conversationRepository,
                                     DirectMessageRepository messageRepository,
                                     ConversationReadStateRepository readStateRepository,
                                     UserRepository userRepository,
                                     ChatImageService chatImageService,
-                                    MessageEventDispatcher eventDispatcher) {
+                                    MessageEventDispatcher eventDispatcher,
+                                    RateLimiter rateLimiter) {
         this.conversationRepository = conversationRepository;
         this.messageRepository = messageRepository;
         this.readStateRepository = readStateRepository;
         this.userRepository = userRepository;
         this.chatImageService = chatImageService;
         this.eventDispatcher = eventDispatcher;
+        this.rateLimiter = rateLimiter;
     }
 
     @Override
@@ -114,6 +135,20 @@ public class DirectMessageServiceImpl implements DirectMessageService {
         }
         if (hasImage) {
             chatImageService.validate(image);
+        }
+
+        // 秒级突发限流：5秒内最多5条，超限封禁30秒
+        if (rateLimiter.isIpBanned(ip, "send-message-burst")) {
+            throw new RateLimitException("发送过于频繁，请稍后再试");
+        }
+        if (!rateLimiter.tryAcquireGlobal(ip, "send-message-burst", sendBurstLimit, sendBurstWindowSeconds)) {
+            rateLimiter.banIp(ip, "send-message-burst", sendBurstBanSeconds);
+            throw new RateLimitException("发送过于频繁，已被限制" + sendBurstBanSeconds + "秒");
+        }
+
+        // 分钟级全局限流：每分钟最多 N 条
+        if (!rateLimiter.tryAcquireGlobal(String.valueOf(senderId), "send-message", sendRateLimit, sendRateWindowSeconds)) {
+            throw new RateLimitException("发送消息太频繁，请稍后再试");
         }
 
         long userOneId = Math.min(senderId, targetUserId);

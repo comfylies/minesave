@@ -11,6 +11,7 @@ import com.gamesaves.gamesaves.repository.DirectMessageRepository;
 import com.gamesaves.gamesaves.repository.UserRepository;
 import com.gamesaves.gamesaves.service.ChatImageService;
 import com.gamesaves.gamesaves.service.MessageEventDispatcher;
+import com.gamesaves.gamesaves.util.RateLimiter;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -22,6 +23,9 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -41,6 +45,8 @@ class DirectMessageServiceImplTest {
     private ChatImageService chatImageService;
     @Mock
     private MessageEventDispatcher eventDispatcher;
+    @Mock
+    private RateLimiter rateLimiter;
     @InjectMocks
     private DirectMessageServiceImpl service;
 
@@ -61,6 +67,8 @@ class DirectMessageServiceImplTest {
 
         when(userRepository.findById(10L)).thenReturn(Optional.of(sender));
         when(userRepository.findById(20L)).thenReturn(Optional.of(recipient));
+        when(rateLimiter.isIpBanned(anyString(), anyString())).thenReturn(false);
+        when(rateLimiter.tryAcquireGlobal(anyString(), anyString(), anyInt(), anyInt())).thenReturn(true);
         when(conversationRepository.findPairForUpdate(10L, 20L)).thenReturn(Optional.of(existingConversation));
         when(conversationRepository.upsertPair(10L, 20L)).thenReturn(1);
         when(messageRepository.save(any(DirectMessage.class))).thenReturn(persistedMessage);
