@@ -2,7 +2,7 @@
 
 ## Goal
 
-Eliminate the application-server image relay for direct messages. The browser must load chat thumbnails and expanded originals directly from COS after the application verifies that the viewer belongs to the conversation.
+Eliminate the application-server image relay for production direct messages. With COS/S3 storage, the browser must load chat thumbnails and expanded originals directly from COS after the application verifies that the viewer belongs to the conversation.
 
 ## Current cause
 
@@ -16,6 +16,7 @@ Article covers, avatars, and the site background already use COS pre-signed URLs
 - The thumbnail URL is a COS pre-signed URL with a five-minute lifetime, matching the existing private-download expiration.
 - Add an authenticated endpoint that returns a fresh pre-signed URL for one requested image variant. It validates the caller through the existing `getImageKey` authorization path before returning the URL.
 - `imageOriginalUrl` remains absent from message-list responses. The frontend requests it only after the user clicks a thumbnail.
+- Local filesystem storage does not expose a private `/storage/messages/**` URL. It keeps the existing authenticated binary endpoint as a development-only fallback; it loads only a thumbnail on mount and fetches the original only after a click.
 - Keep `/storage/messages/**` blocked. A pre-signed URL is a short-lived bearer URL, but a participant can already save an image after viewing it; no unauthenticated application route is introduced.
 
 ## Frontend behavior
@@ -24,6 +25,7 @@ Article covers, avatars, and the site background already use COS pre-signed URLs
 - Clicking a thumbnail requests a fresh original-image URL, then opens the existing image viewer with that URL.
 - If a thumbnail URL expires before the browser uses it, the bubble requests a refreshed thumbnail URL once and retries. Other image failures retain the ordinary broken-image behavior.
 - The component does not create Blob object URLs for COS images, so it no longer needs to keep decoded originals alive for every rendered message.
+- In local storage mode, the component creates a Blob URL only for the requested thumbnail or clicked original, then revokes it when the message bubble or viewer closes.
 
 ## Scope boundaries
 

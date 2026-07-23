@@ -77,8 +77,16 @@ public class MessageController {
         return longPollService.awaitEvent(StpUtil.getLoginIdAsLong(), clientId, epoch, cursor);
     }
 
+    @GetMapping("/items/{messageId}/image-url")
+    public ApiResponse<String> imageUrl(@PathVariable Long messageId,
+                                        @RequestParam(defaultValue = "true") boolean thumbnail) {
+        return ApiResponse.success(messageService.getImageUrl(
+                messageId, thumbnail, StpUtil.getLoginIdAsLong()));
+    }
+
     @GetMapping("/items/{messageId}/image")
-    public ResponseEntity<byte[]> image(@PathVariable Long messageId, @RequestParam(defaultValue = "true") boolean thumbnail) {
+    public ResponseEntity<byte[]> image(@PathVariable Long messageId,
+                                        @RequestParam(defaultValue = "true") boolean thumbnail) {
         String key = messageService.getImageKey(messageId, thumbnail, StpUtil.getLoginIdAsLong());
         MediaType type = key.endsWith(".png") ? MediaType.IMAGE_PNG : key.endsWith(".webp")
                 ? MediaType.parseMediaType("image/webp") : MediaType.IMAGE_JPEG;

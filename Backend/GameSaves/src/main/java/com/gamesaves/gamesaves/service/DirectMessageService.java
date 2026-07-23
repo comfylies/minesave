@@ -18,4 +18,6 @@ public interface DirectMessageService {
     long getUnreadCount(Long userId);
 
     String getImageKey(Long messageId, boolean thumbnail, Long userId);
+
+    String getImageUrl(Long messageId, boolean thumbnail, Long userId);
 }

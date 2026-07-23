@@ -18,6 +18,7 @@ import com.gamesaves.gamesaves.repository.UserRepository;
 import com.gamesaves.gamesaves.service.DirectMessageService;
 import com.gamesaves.gamesaves.service.ChatImageService;
 import com.gamesaves.gamesaves.service.MessageEventDispatcher;
+import com.gamesaves.gamesaves.service.StorageService;
 import com.gamesaves.gamesaves.util.RateLimiter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
@@ -39,6 +40,7 @@ public class DirectMessageServiceImpl implements DirectMessageService {
 
     private static final int MAX_TEXT_LENGTH = 4_000;
     private static final int MAX_PAGE_SIZE = 100;
+    private static final int CHAT_IMAGE_URL_EXPIRATION_MINUTES = 5;
 
     private final DirectConversationRepository conversationRepository;
     private final DirectMessageRepository messageRepository;
@@ -47,6 +49,7 @@ public class DirectMessageServiceImpl implements DirectMessageService {
     private final ChatImageService chatImageService;
     private final MessageEventDispatcher eventDispatcher;
     private final RateLimiter rateLimiter;
+    private final StorageService storageService;
 
     @Value("${app.messaging.send-rate-limit:20}")
     private int sendRateLimit;
@@ -63,13 +66,17 @@ public class DirectMessageServiceImpl implements DirectMessageService {
     @Value("${app.messaging.send-burst-ban-seconds:30}")
     private int sendBurstBanSeconds;
 
+    @Value("${app.storage.type:local}")
+    private String storageType;
+
     public DirectMessageServiceImpl(DirectConversationRepository conversationRepository,
                                     DirectMessageRepository messageRepository,
                                     ConversationReadStateRepository readStateRepository,
                                     UserRepository userRepository,
                                     ChatImageService chatImageService,
                                     MessageEventDispatcher eventDispatcher,
-                                    RateLimiter rateLimiter) {
+                                    RateLimiter rateLimiter,
+                                    StorageService storageService) {
         this.conversationRepository = conversationRepository;
         this.messageRepository = messageRepository;
         this.readStateRepository = readStateRepository;
@@ -77,6 +84,7 @@ public class DirectMessageServiceImpl implements DirectMessageService {
         this.chatImageService = chatImageService;
         this.eventDispatcher = eventDispatcher;
         this.rateLimiter = rateLimiter;
+        this.storageService = storageService;
     }
 
     @Override
@@ -110,7 +118,7 @@ public class DirectMessageServiceImpl implements DirectMessageService {
         long totalElements = beforeId == null
                 ? messageRepository.countByConversationId(conversation.getId())
                 : messageRepository.countByConversationIdAndIdLessThan(conversation.getId(), beforeId);
-        return PageDTO.of(chronological.stream().map(DirectMessageResponse::fromEntity).toList(),
+        return PageDTO.of(chronological.stream().map(this::toMessageResponse).toList(),
                 0, messages.getSize(), totalElements);
     }
 
@@ -202,6 +210,30 @@ public class DirectMessageServiceImpl implements DirectMessageService {
         String key = thumbnail ? message.getImageThumbnailKey() : message.getImageOriginalKey();
         if (key == null || key.isBlank()) throw new ResourceNotFoundException("Chat image", messageId);
         return key;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public String getImageUrl(Long messageId, boolean thumbnail, Long userId) {
+        if (!usesDirectImageDelivery()) {
+            throw new BadRequestException("Direct chat image URLs require S3 storage");
+        }
+        return storageService.generatePresignedUrl(
+                getImageKey(messageId, thumbnail, userId), CHAT_IMAGE_URL_EXPIRATION_MINUTES);
+    }
+
+    private DirectMessageResponse toMessageResponse(DirectMessage message) {
+        DirectMessageResponse response = DirectMessageResponse.fromEntity(message);
+        String thumbnailKey = message.getImageThumbnailKey();
+        if (usesDirectImageDelivery() && thumbnailKey != null && !thumbnailKey.isBlank()) {
+            response.setImageThumbnailUrl(storageService.generatePresignedUrl(
+                    thumbnailKey, CHAT_IMAGE_URL_EXPIRATION_MINUTES));
+        }
+        return response;
+    }
+
+    private boolean usesDirectImageDelivery() {
+        return "s3".equalsIgnoreCase(storageType);
     }
 
     private DirectConversation findOrCreateConversation(long userOneId, long userTwoId) {

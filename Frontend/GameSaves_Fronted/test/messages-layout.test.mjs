@@ -162,3 +162,20 @@ test('message history loading prevents duplicate requests and reveals newly load
   assert.match(page, /@older="loadOlder"/)
   assert.match(page, /messageStream\.value\?\.scrollToTop\(\)/)
 })
+
+test('chat image API requests signed URLs instead of binary relays', async () => {
+  const api = await source('src/api/messageApi.js')
+
+  assert.match(api, /items\/\$\{id\}\/image-url/)
+})
+
+test('chat image bubbles load originals only after a thumbnail click', async () => {
+  const bubble = await source('src/components/message/MessageBubble.vue')
+
+  assert.match(bubble, /message\.imageThumbnailUrl/)
+  assert.match(bubble, /async function openImage\(\)/)
+  assert.match(bubble, /messageApi\.getImageUrl\(props\.message\.id, false\)/)
+  assert.match(bubble, /async function loadLocalThumbnail\(\)/)
+  assert.match(bubble, /messageApi\.getImage\(props\.message\.id, true\)/)
+  assert.doesNotMatch(bubble, /Promise\.all\(\[messageApi\.getImage/)
+})
