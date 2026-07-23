@@ -4,6 +4,8 @@
 # IDEA: 选择 "GameSaves [local]" 运行配置
 # ============================================================
 app:
+  login:
+    captcha-required: false
   storage:
     type: local
     database-path: ../../Database

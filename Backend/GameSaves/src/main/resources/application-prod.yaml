@@ -84,6 +84,7 @@ app:
     captcha-threshold: 524288000
     max-large-downloads-per-day: 3
   login:
+    captcha-required: true
     max-fail-count: 5
     lock-minutes: 30
     email-code-cooldown: 90

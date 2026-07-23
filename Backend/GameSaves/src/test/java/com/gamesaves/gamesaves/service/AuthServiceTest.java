@@ -7,6 +7,7 @@ import com.gamesaves.gamesaves.dto.response.LoginResponse;
 import com.gamesaves.gamesaves.exception.AccountLockedException;
 import com.gamesaves.gamesaves.exception.BadRequestException;
 import com.gamesaves.gamesaves.exception.CaptchaValidationException;
+import com.gamesaves.gamesaves.config.DataInitializer;
 import com.gamesaves.gamesaves.repository.LoginFailRepository;
 import com.gamesaves.gamesaves.repository.UserRepository;
 import org.junit.jupiter.api.AfterEach;
@@ -14,6 +15,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * AuthService 集成测试 — 登录/注册/锁定/验证码/邮箱码。
  * 使用真实 MySQL + @Transactional 回滚。
  */
-@SpringBootTest
+@SpringBootTest(properties = "app.login.captcha-required=true")
 @Transactional
 class AuthServiceTest {
 
@@ -40,6 +42,12 @@ class AuthServiceTest {
 
     @Autowired
     private LoginFailRepository loginFailRepository;
+
+    @MockBean
+    private CleanupScheduler cleanupScheduler;
+
+    @MockBean
+    private DataInitializer dataInitializer;
 
     private MockHttpServletRequest httpRequest;
 

@@ -127,3 +127,38 @@ test('response error handler shows one toast for an ordinary error and retains 4
 test('package test command runs the Node source-inspection suite', () => {
   assert.equal(packageJson.scripts.test, 'node --test test/*.test.mjs')
 })
+
+test('authentication pages adapt graphical captcha controls to the server requirement signal', async () => {
+  const login = await source('src/views/LoginPage.vue')
+  const register = await source('src/views/RegisterPage.vue')
+
+  assert.match(login, /const captchaRequired = ref\(true\)/)
+  assert.match(login, /captchaRequired\.value = data\.captchaRequired !== 'false'/)
+  assert.match(login, /v-if="captchaRequired"/)
+  assert.match(login, /if \(captchaRequired\.value && !emailForm\.emailCaptchaCode\)/)
+
+  assert.match(register, /const captchaRequired = ref\(true\)/)
+  assert.match(register, /captchaRequired\.value = data\.captchaRequired !== 'false'/)
+  assert.match(register, /v-if="captchaRequired[^\"]*"/)
+  assert.match(register, /if \(captchaRequired\.value && !form\.captchaCode\)/)
+})
+
+test('message history loading prevents duplicate requests and reveals newly loaded messages', async () => {
+  const stream = await source('src/components/message/MessageStream.vue')
+  const page = await source('src/views/MessagesPage.vue')
+  const store = await source('src/stores/messages.js')
+
+  assert.match(store, /const loadingOlder = ref\(false\)/)
+  assert.match(store, /const hasOlderMessages = ref\(false\)/)
+  assert.match(store, /if \(!activeConversationId\.value \|\| !items\.length \|\| loadingOlder\.value \|\| !hasOlderMessages\.value\) return 0/)
+  assert.match(store, /loadingOlder\.value = true/)
+  assert.match(store, /loadingOlder\.value = false/)
+
+  assert.doesNotMatch(stream, /@scroll=/)
+  assert.match(stream, /:disabled="loadingOlder"/)
+  assert.match(stream, /defineExpose\(\{ scrollToTop \}\)/)
+
+  assert.match(page, /ref="messageStream"/)
+  assert.match(page, /@older="loadOlder"/)
+  assert.match(page, /messageStream\.value\?\.scrollToTop\(\)/)
+})

@@ -74,7 +74,7 @@
         </el-form-item>
 
         <!-- 图形验证码（发送邮箱码后隐藏） -->
-        <el-form-item v-if="!captchaVerified">
+        <el-form-item v-if="captchaRequired && !captchaVerified">
           <div class="captcha-row">
             <el-input
               v-model="form.captchaCode"
@@ -94,7 +94,7 @@
         </el-form-item>
 
         <!-- 验证码已发送提示 -->
-        <div v-else class="email-sent-hint">
+        <div v-else-if="captchaVerified" class="email-sent-hint">
           📧 验证码已发送至 <strong>{{ form.email }}</strong>
         </div>
 
@@ -277,12 +277,14 @@ async function checkPhone() {
 const captchaVerified = ref(false)
 const captchaImage = ref('')
 const captchaKey = ref('')
+const captchaRequired = ref(true)
 
 async function refreshCaptcha() {
   try {
     const data = await authApi.getCaptcha()
-    captchaImage.value = data.captchaImage
-    captchaKey.value = data.captchaKey
+    captchaRequired.value = data.captchaRequired !== 'false'
+    captchaImage.value = captchaRequired.value ? data.captchaImage : ''
+    captchaKey.value = captchaRequired.value ? data.captchaKey : ''
   } catch (e) {
     // error shown by interceptor
   }
@@ -295,7 +297,7 @@ let cooldownTimer = null
 const emailCodeBtnDisabled = computed(() => {
   if (emailCodeCooldown.value > 0) return true
   if (!form.email) return true
-  if (!captchaVerified.value && !form.captchaCode) return true
+  if (captchaRequired.value && !captchaVerified.value && !form.captchaCode) return true
   return false
 })
 
@@ -326,7 +328,7 @@ const sendingEmailCode = ref(false)
 
 async function handleEmailCodeBtnClick() {
   // 重发模式：先展示图形验证码
-  if (captchaVerified.value && emailCodeCooldown.value <= 0) {
+  if (captchaRequired.value && captchaVerified.value && emailCodeCooldown.value <= 0) {
     captchaVerified.value = false
     form.captchaCode = ''
     await nextTick()
@@ -341,7 +343,7 @@ async function sendEmailCode() {
     ElMessage.warning('请先填写邮箱')
     return
   }
-  if (!form.captchaCode) {
+  if (captchaRequired.value && !form.captchaCode) {
     ElMessage.warning('请先填写图形验证码')
     return
   }

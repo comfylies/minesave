@@ -61,6 +61,9 @@ public class AuthService {
     @Value("${app.login.lock-minutes:30}")
     private int lockMinutes;
 
+    @Value("${app.login.captcha-required:true}")
+    private boolean captchaRequired;
+
     public AuthService(UserRepository userRepository,
                        LoginFailRepository loginFailRepository,
                        EmailCodeService emailCodeService,
@@ -78,6 +81,9 @@ public class AuthService {
      * 生成图形验证码，返回 {captchaKey, captchaImage(base64)}
      */
     public Map<String, String> generateCaptcha() {
+        if (!captchaRequired) {
+            return Map.of("captchaRequired", "false");
+        }
         CaptchaUtil.CaptchaResult result = CaptchaUtil.generate();
         String key = UUID.randomUUID().toString().replace("-", "");
         captchaCache.put(key, new CaptchaCacheEntry(result.code(), System.currentTimeMillis() + 120_000));
@@ -85,11 +91,13 @@ public class AuthService {
         if (captchaCache.size() > 1000) {
             captchaCache.entrySet().removeIf(e -> System.currentTimeMillis() > e.getValue().expireTime);
         }
-        return Map.of("captchaKey", key, "captchaImage", result.base64Image());
+        return Map.of("captchaRequired", "true", "captchaKey", key, "captchaImage", result.base64Image());
     }
 
     public void validateCaptcha(String captchaKey, String captchaCode) {
-        // 生产环境始终强制验证码校验
+        if (!captchaRequired) {
+            return;
+        }
         if (captchaKey == null || captchaCode == null || captchaCode.trim().isEmpty()) {
             throw new CaptchaValidationException("Captcha code is required");
         }

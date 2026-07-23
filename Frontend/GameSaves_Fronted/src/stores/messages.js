@@ -8,6 +8,8 @@ export const useMessageStore = defineStore('messages', () => {
   const messagesByConversation = ref({})
   const unreadCount = ref(0)
   const loading = ref(false)
+  const loadingOlder = ref(false)
+  const hasOlderMessages = ref(false)
   const connectionState = ref('disconnected')
   const eventCursor = ref(null)
   const eventEpoch = ref(null)
@@ -85,15 +87,25 @@ export const useMessageStore = defineStore('messages', () => {
   async function refreshActive() {
     if (!activeConversationId.value) return
     const page = await messageApi.getItems(activeConversationId.value, { size: 40 })
-    mergeMessages(activeConversationId.value, page.content || [])
+    const incoming = page.content || []
+    mergeMessages(activeConversationId.value, incoming)
+    hasOlderMessages.value = (page.totalElements || 0) > incoming.length
   }
 
   async function loadOlder() {
     const items = activeMessages.value
-    if (!activeConversationId.value || !items.length) return
-    const page = await messageApi.getItems(activeConversationId.value, { beforeId: items[0].id, size: 40 })
-    mergeMessages(activeConversationId.value, page.content || [], true)
-    return page.content?.length || 0
+    if (!activeConversationId.value || !items.length || loadingOlder.value || !hasOlderMessages.value) return 0
+
+    loadingOlder.value = true
+    try {
+      const page = await messageApi.getItems(activeConversationId.value, { beforeId: items[0].id, size: 40 })
+      const incoming = page.content || []
+      mergeMessages(activeConversationId.value, incoming, true)
+      hasOlderMessages.value = (page.totalElements || 0) > incoming.length
+      return incoming.length
+    } finally {
+      loadingOlder.value = false
+    }
   }
 
   async function markActiveRead() {
@@ -129,6 +141,8 @@ export const useMessageStore = defineStore('messages', () => {
     activeConversationId.value = null
     messagesByConversation.value = {}
     unreadCount.value = 0
+    loadingOlder.value = false
+    hasOlderMessages.value = false
     connectionState.value = 'disconnected'
     eventCursor.value = null
     eventEpoch.value = null
@@ -136,7 +150,7 @@ export const useMessageStore = defineStore('messages', () => {
     eventStateStorageKey = null
   }
 
-  return { conversations, activeConversationId, messagesByConversation, unreadCount, loading, connectionState, eventCursor, eventEpoch,
+  return { conversations, activeConversationId, messagesByConversation, unreadCount, loading, loadingOlder, hasOlderMessages, connectionState, eventCursor, eventEpoch,
     activeConversation, activeMessages, loadConversations, selectConversation, refreshActive, loadOlder,
     markActiveRead, send, handleEvent, refreshUnread, restoreEventState, reset }
 })

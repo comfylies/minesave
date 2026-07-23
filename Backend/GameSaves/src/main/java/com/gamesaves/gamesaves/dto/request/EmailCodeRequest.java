@@ -19,9 +19,7 @@ public class EmailCodeRequest {
     @Email(message = "Invalid email format")
     private String email;
 
-    @NotBlank(message = "Captcha key is required")
     private String captchaKey;      // 图形验证码key
 
-    @NotBlank(message = "Captcha code is required")
     private String captchaCode;     // 用户输入的图形验证码
 }

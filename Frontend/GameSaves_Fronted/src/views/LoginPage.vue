@@ -51,7 +51,7 @@
         </el-form-item>
 
         <!-- 图形验证码 -->
-        <el-form-item prop="captchaCode">
+        <el-form-item v-if="captchaRequired" prop="captchaCode">
           <div class="captcha-row">
             <el-input
               v-model="passwordForm.captchaCode"
@@ -107,7 +107,7 @@
         </el-form-item>
 
         <!-- 图形验证码 -->
-        <el-form-item prop="emailCaptchaCode">
+        <el-form-item v-if="captchaRequired" prop="emailCaptchaCode">
           <div class="captcha-row">
             <el-input
               v-model="emailForm.emailCaptchaCode"
@@ -191,12 +191,14 @@ const loginAgreed = ref(true)
 // ---- 图形验证码 ----
 const captchaImage = ref('')
 const captchaKey = ref('')
+const captchaRequired = ref(true)
 
 async function refreshCaptcha() {
   try {
     const data = await authApi.getCaptcha()
-    captchaImage.value = data.captchaImage
-    captchaKey.value = data.captchaKey
+    captchaRequired.value = data.captchaRequired !== 'false'
+    captchaImage.value = captchaRequired.value ? data.captchaImage : ''
+    captchaKey.value = captchaRequired.value ? data.captchaKey : ''
   } catch (e) {
     // error shown by interceptor
   }
@@ -264,8 +266,9 @@ let cooldownTimer = null
 async function refreshEmailCaptcha() {
   try {
     const data = await authApi.getCaptcha()
-    emailCaptchaImage.value = data.captchaImage
-    emailCaptchaKey.value = data.captchaKey
+    captchaRequired.value = data.captchaRequired !== 'false'
+    emailCaptchaImage.value = captchaRequired.value ? data.captchaImage : ''
+    emailCaptchaKey.value = captchaRequired.value ? data.captchaKey : ''
   } catch (e) {
     // error shown by interceptor
   }
@@ -285,7 +288,7 @@ async function handleSendEmailCode() {
     ElMessage.warning('请先输入邮箱')
     return
   }
-  if (!emailForm.emailCaptchaCode) {
+  if (captchaRequired.value && !emailForm.emailCaptchaCode) {
     ElMessage.warning('请先填写图形验证码')
     return
   }

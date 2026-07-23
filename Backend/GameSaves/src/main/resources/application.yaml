@@ -97,6 +97,7 @@ app:
     captcha-threshold: 524288000             # 500 MB — 超过此大小的下载需要验证码
     max-large-downloads-per-day: 3           # 每人（IP）每日大文件下载次数上限
   login:
+    captcha-required: true
     max-fail-count: 5
     lock-minutes: 30
     email-code-cooldown: 90
