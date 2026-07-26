@@ -60,6 +60,15 @@ test('ReadmeRenderer clears visual annotation state when refresh returns no comm
   )
 })
 
+test('ReadmeRenderer emits groups from annotation first client rects', async () => {
+  const source = await readFile(readmeRendererUrl, 'utf8')
+
+  assert.match(source, /import \{ groupAnnotationLines \} from '\.\.\/\.\.\/composables\/annotationLineGroups'/)
+  assert.match(source, /const rects = range\.getClientRects\(\)/)
+  assert.match(source, /rects\[0\]\.top - containerRect\.top/)
+  assert.match(source, /positions: groupAnnotationLines\(candidates\)/)
+})
+
 function installHighlightDom() {
   const elements = new Map()
   const originalHighlight = globalThis.Highlight
