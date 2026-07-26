@@ -76,7 +76,7 @@ test('AnnotationPanel renders compact line summaries and focused groups', async 
   assert.match(source, /const focusedGroupId = ref\(null\)/)
   assert.match(source, /function openGroup\(group\)/)
   assert.match(source, /function closeFocusedGroup\(\)/)
-  assert.match(source, /function summarySelectedText\(group\)/)
+  assert.match(source, /class="annotation-summary-content"/)
   assert.match(source, /group\.commentIds\.length/)
 })
 
@@ -88,6 +88,20 @@ test('AnnotationPanel keeps focused details at their source line and uses a stat
   assert.doesNotMatch(source, /<span v-if="allComments\.length" class="annotation-count">/)
   assert.match(source, /class="focused-group"\s*:style="\{ top: focusedGroup\.top \+ 'px' \}"/)
   assert.doesNotMatch(source, /\.focused-group\s*\{[\s\S]*?inset:\s*0;/)
+})
+
+test('AnnotationPanel uses independent three-level navigation without selecting README text', async () => {
+  const panelUrl = new URL('../src/components/article/AnnotationPanel.vue', import.meta.url)
+  const source = await readFile(panelUrl, 'utf8')
+
+  assert.match(source, /const focusedCommentId = ref\(null\)/)
+  assert.match(source, /function openComment\(comment\)/)
+  assert.match(source, /function closeFocusedComment\(\)/)
+  assert.match(source, /<template v-else>[\s\S]*?class="annotation-detail-summary"/)
+  assert.doesNotMatch(source, /annotation-summary-selected/)
+  const openGroupSource = source.match(/function openGroup\(group\) \{[\s\S]*?\n\}/)?.[0] || ''
+  assert.match(openGroupSource, /focusedGroupId\.value = group\.id/)
+  assert.doesNotMatch(openGroupSource, /emit\(/)
 })
 
 function installHighlightDom() {

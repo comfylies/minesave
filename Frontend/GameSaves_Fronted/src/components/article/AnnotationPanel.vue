@@ -16,47 +16,64 @@
         :class="{ 'positioned-layer--focused': focusedGroup }"
       >
         <section v-if="focusedGroup" class="focused-group" :style="{ top: focusedGroup.top + 'px' }">
-          <div class="focused-group-header">
-            <span>本行 {{ focusedGroup.commentIds.length }} 条批注</span>
-            <el-button text size="small" @click.stop="closeFocusedGroup">关闭</el-button>
-          </div>
+          <template v-if="focusedComment">
+            <div class="focused-group-header">
+              <el-button text size="small" @click.stop="closeFocusedComment">返回本行批注</el-button>
+              <el-button text size="small" @click.stop="closeFocusedGroup">关闭</el-button>
+            </div>
 
-          <article
-            v-for="comment in focusedGroup.comments"
-            :key="comment.id"
-            class="comment-card focused-comment"
-            :class="`comment-card--role-${getColorRole(comment)}`"
-          >
-            <div class="card-expanded">
-              <div class="card-expanded-header">
-                <el-avatar :size="20" icon="UserFilled" />
-                <span class="card-author">{{ comment.nickname || '用户' }}</span>
-                <span class="card-role-tag" :class="`role-tag--${getColorRole(comment)}`">
-                  {{ roleLabel(comment) }}
-                </span>
-                <span class="card-time">{{ formatTime(comment.createdAt) }}</span>
-              </div>
-              <div class="card-quote">"{{ comment.selectedText }}"</div>
-              <div class="card-content focused-comment-content">{{ comment.content }}</div>
+            <article
+              class="comment-card focused-comment"
+              :class="`comment-card--role-${getColorRole(focusedComment)}`"
+            >
+              <div class="card-expanded">
+                <div class="card-expanded-header">
+                  <el-avatar :size="20" icon="UserFilled" />
+                  <span class="card-author">{{ focusedComment.nickname || '用户' }}</span>
+                  <span class="card-role-tag" :class="`role-tag--${getColorRole(focusedComment)}`">
+                    {{ roleLabel(focusedComment) }}
+                  </span>
+                  <span class="card-time">{{ formatTime(focusedComment.createdAt) }}</span>
+                </div>
+                <div class="card-quote">"{{ focusedComment.selectedText }}"</div>
+                <div class="card-content focused-comment-content">{{ focusedComment.content }}</div>
 
-              <div v-if="comment.children?.length" class="card-replies">
-                <div v-for="child in comment.children" :key="child.id" class="reply-item">
-                  <span class="reply-author">{{ child.nickname || '用户' }}</span>
-                  <span class="reply-role-tag" :class="`role-tag--${getColorRole(child)}`">
-                    {{ roleLabel(child) }}
-                  </span>：
-                  <span class="reply-content">{{ child.content }}</span>
-                  <span class="reply-time">{{ formatTime(child.createdAt) }}</span>
+                <div v-if="focusedComment.children?.length" class="card-replies">
+                  <div v-for="child in focusedComment.children" :key="child.id" class="reply-item">
+                    <span class="reply-author">{{ child.nickname || '用户' }}</span>
+                    <span class="reply-role-tag" :class="`role-tag--${getColorRole(child)}`">
+                      {{ roleLabel(child) }}
+                    </span>：
+                    <span class="reply-content">{{ child.content }}</span>
+                    <span class="reply-time">{{ formatTime(child.createdAt) }}</span>
+                  </div>
+                </div>
+
+                <div v-if="canDelete(focusedComment)" class="card-actions">
+                  <el-button text size="small" type="danger" @click.stop="handleDelete(focusedComment)">
+                    <el-icon><Delete /></el-icon> 删除
+                  </el-button>
                 </div>
               </div>
+            </article>
+          </template>
 
-              <div v-if="canDelete(comment)" class="card-actions">
-                <el-button text size="small" type="danger" @click.stop="handleDelete(comment)">
-                  <el-icon><Delete /></el-icon> 删除
-                </el-button>
-              </div>
+          <template v-else>
+            <div class="focused-group-header">
+              <span>本行 {{ focusedGroup.commentIds.length }} 条批注</span>
+              <el-button text size="small" @click.stop="closeFocusedGroup">关闭</el-button>
             </div>
-          </article>
+            <button
+              v-for="comment in focusedGroup.comments"
+              :key="comment.id"
+              type="button"
+              class="annotation-detail-summary"
+              @click="openComment(comment)"
+            >
+              <span>{{ (comment.selectedText || '').trim().slice(0, 2) || '批注' }}</span>
+              <span>{{ truncate(comment.content, 52) }}</span>
+            </button>
+          </template>
         </section>
 
         <button
@@ -69,7 +86,6 @@
           :style="{ top: group.top + 'px' }"
           @click="openGroup(group)"
         >
-          <span class="annotation-summary-selected">{{ summarySelectedText(group) }}</span>
           <span class="annotation-summary-content">{{ truncate(group.comments[0].content, 42) }}</span>
           <span class="annotation-count-badge">{{ group.commentIds.length }}</span>
         </button>
@@ -150,6 +166,7 @@ const comments = ref([])
 const loading = ref(false)
 const expandedIds = ref(new Set())
 const focusedGroupId = ref(null)
+const focusedCommentId = ref(null)
 const bodyRef = ref(null)
 const layerRef = ref(null)
 const bodyOffsetTop = ref(0)
@@ -216,17 +233,26 @@ const focusedGroup = computed(() =>
   annotationGroups.value.find(group => group.id === focusedGroupId.value) || null
 )
 
-function summarySelectedText(group) {
-  return (group.comments[0]?.selectedText || '').trim().slice(0, 2) || '批注'
-}
+const focusedComment = computed(() =>
+  focusedGroup.value?.comments.find(comment => String(comment.id) === String(focusedCommentId.value)) || null
+)
 
 function openGroup(group) {
   focusedGroupId.value = group.id
-  emit('select-comment', group.comments[0].id)
+  focusedCommentId.value = null
 }
 
 function closeFocusedGroup() {
   focusedGroupId.value = null
+  focusedCommentId.value = null
+}
+
+function openComment(comment) {
+  focusedCommentId.value = comment.id
+}
+
+function closeFocusedComment() {
+  focusedCommentId.value = null
 }
 
 function measureBodyOffset() {
@@ -327,6 +353,7 @@ watch([() => props.activeCommentId, annotationGroups], ([newId]) => {
   )
   if (group) {
     focusedGroupId.value = group.id
+    focusedCommentId.value = null
   } else {
     expandedIds.value.add(newId)
     expandedIds.value = new Set(expandedIds.value)
@@ -393,7 +420,7 @@ onBeforeUnmount(() => {
   width: calc(100% - 8px);
   min-height: 32px;
   display: grid;
-  grid-template-columns: 30px minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 6px;
   padding: 4px 7px;
@@ -411,14 +438,6 @@ onBeforeUnmount(() => {
 .annotation-summary-card--active {
   border-color: var(--color-link);
   box-shadow: 0 1px 5px rgba(0, 0, 0, .09);
-}
-.annotation-summary-selected {
-  overflow: hidden;
-  color: #16794a;
-  font-size: 12px;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .annotation-summary-content {
   overflow: hidden;
@@ -439,6 +458,33 @@ onBeforeUnmount(() => {
   line-height: 18px;
   text-align: center;
 }
+.annotation-detail-summary {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+  min-height: 32px;
+  margin-bottom: 6px;
+  padding: 5px 7px;
+  border: 1px solid var(--color-border-primary);
+  border-left: 3px solid #27ae60;
+  border-radius: 6px;
+  background: #fff;
+  color: var(--color-body-text);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.annotation-detail-summary:hover { border-color: var(--color-link); }
+.annotation-detail-summary span {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.annotation-detail-summary span:first-child { color: #16794a; font-weight: 600; }
+.annotation-detail-summary span:last-child { color: #5d6879; }
 
 /* ======== 卡片 ======== */
 .comment-card {
