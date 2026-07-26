@@ -44,6 +44,7 @@ import AnnotationPopup from './AnnotationPopup.vue'
 import { useTextAnnotator } from '../../composables/useTextAnnotator'
 import { HighlightManager } from '../../composables/HighlightManager'
 import { BorderLayer } from '../../composables/BorderLayer'
+import { groupAnnotationLines } from '../../composables/annotationLineGroups'
 import { useArticleStore } from '../../stores/articles'
 import { commentApi } from '../../api/commentApi'
 
@@ -349,46 +350,20 @@ function computeAnnotationPositions() {
   const container = contentContainer.value
   if (!container) return { positions: [], readmeContentTop: 0 }
   const containerRect = container.getBoundingClientRect()
-  const results = []
+  const candidates = []
 
   for (const comment of allComments.value) {
-    // Plan B: 优先 pyCache（resize 后更新）→ anchor.py（首次加载）→ Range 测量（老批注 fallback）
-    let py = pyCache.value.get(comment.id) ?? null
-
-    if (py == null) {
-      // 从 anchor JSON 读取创建时测量的 py
-      try {
-        const anchor = typeof comment.anchor === 'string'
-          ? JSON.parse(comment.anchor)
-          : comment.anchor
-        if (typeof anchor?.py === 'number') {
-          py = anchor.py
-          pyCache.value.set(comment.id, py) // 首次加载时缓存，后续 resize 不走此分支
-        }
-      } catch { /* anchor parse error, fall through */ }
+    const range = createRangeFromOffsets(container, comment.quoteStart ?? 0, comment.quoteEnd ?? 0)
+    let top = pyCache.value.get(comment.id) ?? null
+    if (range) {
+      const rects = range.getClientRects()
+      if (rects.length > 0) top = Math.round(rects[0].top - containerRect.top)
     }
 
-    if (py != null) {
-      // 用存储/缓存的 py（创建时测量，可靠值）
-      results.push({ id: comment.id, top: py, comment })
-    } else {
-      // 老批注 fallback：TreeWalker + Range 测量（可能受 recogito 二次扫描影响）
-      const start = comment.quoteStart ?? 0
-      const end = comment.quoteEnd ?? 0
-      if (end <= start) continue
-      const range = createRangeFromOffsets(container, start, end)
-      if (!range) continue
-      const rect = range.getBoundingClientRect()
-      results.push({ id: comment.id, top: Math.round(rect.top - containerRect.top), comment })
-    }
+    if (top != null) candidates.push({ commentId: comment.id, top })
   }
 
-  results.sort((a, b) => a.top - b.top)
-  const cardH = 36, gap = 6
-  for (let i = 1; i < results.length; i++) {
-    if (results[i].top < results[i - 1].top + cardH + gap) results[i].top = results[i - 1].top + cardH + gap
-  }
-  return { positions: results, readmeContentTop: containerRect.top }
+  return { positions: groupAnnotationLines(candidates), readmeContentTop: containerRect.top }
 }
 
 function emitPositions() {

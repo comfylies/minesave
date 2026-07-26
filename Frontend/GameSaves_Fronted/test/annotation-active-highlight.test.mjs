@@ -60,6 +60,75 @@ test('ReadmeRenderer clears visual annotation state when refresh returns no comm
   )
 })
 
+test('ReadmeRenderer emits groups from annotation first client rects', async () => {
+  const source = await readFile(readmeRendererUrl, 'utf8')
+
+  assert.match(source, /import \{ groupAnnotationLines \} from '\.\.\/\.\.\/composables\/annotationLineGroups'/)
+  assert.match(source, /const rects = range\.getClientRects\(\)/)
+  assert.match(source, /rects\[0\]\.top - containerRect\.top/)
+  assert.match(source, /positions: groupAnnotationLines\(candidates\)/)
+})
+
+test('AnnotationPanel renders compact line summaries and focused groups', async () => {
+  const panelUrl = new URL('../src/components/article/AnnotationPanel.vue', import.meta.url)
+  const source = await readFile(panelUrl, 'utf8')
+
+  assert.match(source, /const focusedGroupId = ref\(null\)/)
+  assert.match(source, /function openGroup\(group\)/)
+  assert.match(source, /function closeFocusedGroup\(\)/)
+  assert.match(source, /class="annotation-summary-content"/)
+  assert.match(source, /group\.commentIds\.length/)
+})
+
+test('AnnotationPanel keeps focused details at their source line and uses a static panel label', async () => {
+  const panelUrl = new URL('../src/components/article/AnnotationPanel.vue', import.meta.url)
+  const source = await readFile(panelUrl, 'utf8')
+
+  assert.match(source, /<h3 class="annotation-title">批注栏<\/h3>/)
+  assert.doesNotMatch(source, /<span v-if="allComments\.length" class="annotation-count">/)
+  assert.match(source, /class="focused-group"\s*:style="\{ top: focusedGroupTop\(focusedGroup\) \+ 'px' \}"/)
+  assert.match(source, /const FOCUSED_GROUP_OFFSET = 38/)
+  assert.match(source, /function focusedGroupTop\(group\) \{[\s\S]*?Math\.max\(0, group\.top - FOCUSED_GROUP_OFFSET\)/)
+  assert.doesNotMatch(source, /\.focused-group\s*\{[\s\S]*?inset:\s*0;/)
+  assert.doesNotMatch(source, /\.focused-group\s*\{[^}]*?(?:max-height|overflow-y)/)
+  assert.match(source, /class="copy-comment-button"[\s\S]*?@click\.stop="copyComment\(focusedComment\)"/)
+  assert.match(source, /function copyComment\(comment\)/)
+  assert.match(source, /navigator\.clipboard\?\.writeText/)
+  assert.match(source, /\.focused-comment::before\s*\{\s*display:\s*none;/)
+  assert.match(source, /\.comment-card--role-admin\s*\{\s*border-left:\s*3px/)
+})
+
+test('AnnotationPanel uses independent three-level navigation without selecting README text', async () => {
+  const panelUrl = new URL('../src/components/article/AnnotationPanel.vue', import.meta.url)
+  const source = await readFile(panelUrl, 'utf8')
+
+  assert.match(source, /const focusedCommentId = ref\(null\)/)
+  assert.match(source, /function openComment\(comment\)/)
+  assert.match(source, /function closeFocusedComment\(\)/)
+  assert.match(source, /<template v-else>[\s\S]*?class="annotation-detail-summary"/)
+  assert.doesNotMatch(source, /annotation-summary-selected/)
+  const openGroupSource = source.match(/function openGroup\(group\) \{[\s\S]*?\n\}/)?.[0] || ''
+  assert.match(openGroupSource, /focusedGroupId\.value = group\.id/)
+  assert.doesNotMatch(openGroupSource, /emit\(/)
+
+  const openCommentSource = source.match(/function openComment\(comment\) \{[\s\S]*?\n\}/)?.[0] || ''
+  assert.match(openCommentSource, /focusedCommentId\.value = comment\.id/)
+  assert.match(openCommentSource, /emit\('select-comment', comment\.id\)/)
+})
+
+test('AnnotationPanel opens one-comment lines directly and applies role colors to both summary levels', async () => {
+  const panelUrl = new URL('../src/components/article/AnnotationPanel.vue', import.meta.url)
+  const source = await readFile(panelUrl, 'utf8')
+
+  const openGroupSource = source.match(/function openGroup\(group\) \{[\s\S]*?\n\}/)?.[0] || ''
+  assert.match(openGroupSource, /if \(group\.comments\.length === 1\)/)
+  assert.match(openGroupSource, /openComment\(group\.comments\[0\]\)/)
+  assert.match(source, /function getGroupColorRole\(group\)/)
+  assert.match(source, /annotation-summary-card--role-\$\{getGroupColorRole\(group\)\}/)
+  assert.match(source, /annotation-detail-summary--role-\$\{getColorRole\(comment\)\}/)
+  assert.match(source, /const isCurrentFocusedDetail = focusedGroupId\.value === group\.id[\s\S]*?focusedCommentId\.value\) === String\(newId\)/)
+})
+
 function installHighlightDom() {
   const elements = new Map()
   const originalHighlight = globalThis.Highlight
