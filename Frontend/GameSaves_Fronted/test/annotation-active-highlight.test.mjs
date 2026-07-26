@@ -94,6 +94,8 @@ test('AnnotationPanel keeps focused details at their source line and uses a stat
   assert.match(source, /class="copy-comment-button"[\s\S]*?@click\.stop="copyComment\(focusedComment\)"/)
   assert.match(source, /function copyComment\(comment\)/)
   assert.match(source, /navigator\.clipboard\?\.writeText/)
+  assert.match(source, /\.focused-comment::before\s*\{\s*display:\s*none;/)
+  assert.match(source, /\.comment-card--role-admin\s*\{\s*border-left:\s*3px/)
 })
 
 test('AnnotationPanel uses independent three-level navigation without selecting README text', async () => {

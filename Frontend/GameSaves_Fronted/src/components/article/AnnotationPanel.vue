@@ -604,6 +604,7 @@ onBeforeUnmount(() => {
 
 .comment-card--positioned:hover { z-index: 10; }
 .focused-comment { position: relative; margin-bottom: 8px; cursor: default; }
+.focused-comment::before { display: none; }
 
 /* ======== 折叠视图（内容优先） ======== */
 .card-collapsed { padding: 8px 10px; }
