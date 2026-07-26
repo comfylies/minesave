@@ -108,6 +108,19 @@ test('AnnotationPanel uses independent three-level navigation without selecting 
   assert.match(openCommentSource, /emit\('select-comment', comment\.id\)/)
 })
 
+test('AnnotationPanel opens one-comment lines directly and applies role colors to both summary levels', async () => {
+  const panelUrl = new URL('../src/components/article/AnnotationPanel.vue', import.meta.url)
+  const source = await readFile(panelUrl, 'utf8')
+
+  const openGroupSource = source.match(/function openGroup\(group\) \{[\s\S]*?\n\}/)?.[0] || ''
+  assert.match(openGroupSource, /if \(group\.comments\.length === 1\)/)
+  assert.match(openGroupSource, /openComment\(group\.comments\[0\]\)/)
+  assert.match(source, /function getGroupColorRole\(group\)/)
+  assert.match(source, /annotation-summary-card--role-\$\{getGroupColorRole\(group\)\}/)
+  assert.match(source, /annotation-detail-summary--role-\$\{getColorRole\(comment\)\}/)
+  assert.match(source, /const isCurrentFocusedDetail = focusedGroupId\.value === group\.id[\s\S]*?focusedCommentId\.value\) === String\(newId\)/)
+})
+
 function installHighlightDom() {
   const elements = new Map()
   const originalHighlight = globalThis.Highlight

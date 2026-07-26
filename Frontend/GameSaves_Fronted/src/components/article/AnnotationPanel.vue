@@ -68,6 +68,7 @@
               :key="comment.id"
               type="button"
               class="annotation-detail-summary"
+              :class="`annotation-detail-summary--role-${getColorRole(comment)}`"
               @click="openComment(comment)"
             >
               <span>{{ (comment.selectedText || '').trim().slice(0, 2) || '批注' }}</span>
@@ -82,7 +83,10 @@
           :key="group.id"
           type="button"
           class="annotation-summary-card"
-          :class="{ 'annotation-summary-card--active': group.commentIds.includes(Number(activeCommentId)) }"
+          :class="[
+            `annotation-summary-card--role-${getGroupColorRole(group)}`,
+            { 'annotation-summary-card--active': group.commentIds.includes(Number(activeCommentId)) }
+          ]"
           :style="{ top: group.top + 'px' }"
           @click="openGroup(group)"
         >
@@ -191,6 +195,16 @@ function roleLabel(comment) {
   return ''
 }
 
+function getGroupColorRole(group) {
+  const priority = { user: 1, uploader: 2, admin: 3 }
+  let highestRole = 'user'
+  for (const comment of group.comments) {
+    const role = getColorRole(comment)
+    if (priority[role] > priority[highestRole]) highestRole = role
+  }
+  return highestRole
+}
+
 // bodyOffsetTop > 0 在页面滚动后会变成负数（元素在viewport上方），
 // 导致 showPositioned 变为 false，positioned-layer 被销毁，卡片退回列表模式。
 // 改用独立标记：只要执行过一次 measureBodyOffset 就认为坐标系已就绪。
@@ -239,7 +253,11 @@ const focusedComment = computed(() =>
 
 function openGroup(group) {
   focusedGroupId.value = group.id
-  focusedCommentId.value = null
+  if (group.comments.length === 1) {
+    openComment(group.comments[0])
+  } else {
+    focusedCommentId.value = null
+  }
 }
 
 function closeFocusedGroup() {
@@ -353,8 +371,10 @@ watch([() => props.activeCommentId, annotationGroups], ([newId]) => {
     candidate.commentIds.some(commentId => String(commentId) === String(newId))
   )
   if (group) {
+    const isCurrentFocusedDetail = focusedGroupId.value === group.id &&
+      String(focusedCommentId.value) === String(newId)
     focusedGroupId.value = group.id
-    focusedCommentId.value = null
+    if (!isCurrentFocusedDetail) focusedCommentId.value = null
   } else {
     expandedIds.value.add(newId)
     expandedIds.value = new Set(expandedIds.value)
@@ -415,6 +435,9 @@ onBeforeUnmount(() => {
 .comment-list { display: flex; flex-direction: column; gap: 6px; }
 
 .annotation-summary-card {
+  --annotation-role-color: #27ae60;
+  --annotation-role-tint: #e8f7ee;
+  --annotation-role-text: #16794a;
   position: absolute;
   left: 4px;
   right: 4px;
@@ -426,7 +449,7 @@ onBeforeUnmount(() => {
   gap: 6px;
   padding: 4px 7px;
   border: 1px solid var(--color-border-primary);
-  border-left: 3px solid #27ae60;
+  border-left: 3px solid var(--annotation-role-color);
   border-radius: 6px;
   background: #fff;
   color: var(--color-body-text);
@@ -452,14 +475,16 @@ onBeforeUnmount(() => {
   height: 18px;
   padding: 0 5px;
   border-radius: 9px;
-  background: #e8f7ee;
-  color: #16794a;
+  background: var(--annotation-role-tint);
+  color: var(--annotation-role-text);
   font-size: 11px;
   font-weight: 700;
   line-height: 18px;
   text-align: center;
 }
 .annotation-detail-summary {
+  --annotation-role-color: #27ae60;
+  --annotation-role-text: #16794a;
   width: 100%;
   display: grid;
   grid-template-columns: 30px minmax(0, 1fr);
@@ -469,7 +494,7 @@ onBeforeUnmount(() => {
   margin-bottom: 6px;
   padding: 5px 7px;
   border: 1px solid var(--color-border-primary);
-  border-left: 3px solid #27ae60;
+  border-left: 3px solid var(--annotation-role-color);
   border-radius: 6px;
   background: #fff;
   color: var(--color-body-text);
@@ -484,8 +509,20 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.annotation-detail-summary span:first-child { color: #16794a; font-weight: 600; }
+.annotation-detail-summary span:first-child { color: var(--annotation-role-text); font-weight: 600; }
 .annotation-detail-summary span:last-child { color: #5d6879; }
+.annotation-summary-card--role-admin,
+.annotation-detail-summary--role-admin {
+  --annotation-role-color: #e74c3c;
+  --annotation-role-tint: #fde8e8;
+  --annotation-role-text: #c0392b;
+}
+.annotation-summary-card--role-uploader,
+.annotation-detail-summary--role-uploader {
+  --annotation-role-color: #3498db;
+  --annotation-role-tint: #e3f2fd;
+  --annotation-role-text: #1565c0;
+}
 
 /* ======== 卡片 ======== */
 .comment-card {
