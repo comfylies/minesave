@@ -10,59 +10,70 @@
         选中 README 中任意文字即可添加批注
       </div>
 
-      <div v-else-if="showPositioned" ref="layerRef" class="positioned-layer">
-        <div
-          v-for="item in adjustedPositions"
-          :key="item.id"
-          class="comment-card"
-          :class="[
-            'comment-card--positioned',
-            `comment-card--role-${getColorRole(item.comment)}`,
-            {
-              'comment-card--active': activeCommentId === item.id,
-              'comment-card--expanded': expandedIds.has(item.id)
-            }
-          ]"
-          :style="{ top: item.top + 'px' }"
-          @click="handleClick(item.comment, item.id)"
-        >
-          <!-- 折叠状态：原文（一行）+ 批注内容（两行） -->
-          <div v-if="!expandedIds.has(item.id)" class="card-collapsed">
-            <div class="card-quote">"{{ truncate(item.comment.selectedText, 60) }}"</div>
-            <div class="card-content">{{ truncate(item.comment.content, 100) }}</div>
+      <div
+        v-else-if="showPositioned"
+        ref="layerRef"
+        class="positioned-layer"
+        :class="{ 'positioned-layer--focused': focusedGroup }"
+      >
+        <section v-if="focusedGroup" class="focused-group">
+          <div class="focused-group-header">
+            <span>本行 {{ focusedGroup.commentIds.length }} 条批注</span>
+            <el-button text size="small" @click.stop="closeFocusedGroup">关闭</el-button>
           </div>
 
-          <!-- 展开状态：详细信息 -->
-          <div v-else class="card-expanded">
-            <div class="card-expanded-header">
-              <el-avatar :size="20" icon="UserFilled" />
-              <span class="card-author">{{ item.comment.nickname || '用户' }}</span>
-              <span class="card-role-tag" :class="`role-tag--${getColorRole(item.comment)}`">
-                {{ roleLabel(item.comment) }}
-              </span>
-              <span class="card-time">{{ formatTime(item.comment.createdAt) }}</span>
-            </div>
-            <div class="card-quote">"{{ item.comment.selectedText }}"</div>
-            <div class="card-content">{{ item.comment.content }}</div>
+          <article
+            v-for="comment in focusedGroup.comments"
+            :key="comment.id"
+            class="comment-card focused-comment"
+            :class="`comment-card--role-${getColorRole(comment)}`"
+          >
+            <div class="card-expanded">
+              <div class="card-expanded-header">
+                <el-avatar :size="20" icon="UserFilled" />
+                <span class="card-author">{{ comment.nickname || '用户' }}</span>
+                <span class="card-role-tag" :class="`role-tag--${getColorRole(comment)}`">
+                  {{ roleLabel(comment) }}
+                </span>
+                <span class="card-time">{{ formatTime(comment.createdAt) }}</span>
+              </div>
+              <div class="card-quote">"{{ comment.selectedText }}"</div>
+              <div class="card-content focused-comment-content">{{ comment.content }}</div>
 
-            <div v-if="item.comment.children?.length" class="card-replies">
-              <div v-for="child in item.comment.children" :key="child.id" class="reply-item">
-                <span class="reply-author">{{ child.nickname || '用户' }}</span>
-                <span class="reply-role-tag" :class="`role-tag--${getColorRole(child)}`">
-                  {{ roleLabel(child) }}
-                </span>：
-                <span class="reply-content">{{ child.content }}</span>
-                <span class="reply-time">{{ formatTime(child.createdAt) }}</span>
+              <div v-if="comment.children?.length" class="card-replies">
+                <div v-for="child in comment.children" :key="child.id" class="reply-item">
+                  <span class="reply-author">{{ child.nickname || '用户' }}</span>
+                  <span class="reply-role-tag" :class="`role-tag--${getColorRole(child)}`">
+                    {{ roleLabel(child) }}
+                  </span>：
+                  <span class="reply-content">{{ child.content }}</span>
+                  <span class="reply-time">{{ formatTime(child.createdAt) }}</span>
+                </div>
+              </div>
+
+              <div v-if="canDelete(comment)" class="card-actions">
+                <el-button text size="small" type="danger" @click.stop="handleDelete(comment)">
+                  <el-icon><Delete /></el-icon> 删除
+                </el-button>
               </div>
             </div>
+          </article>
+        </section>
 
-            <div v-if="canDelete(item.comment)" class="card-actions">
-              <el-button text size="small" type="danger" @click.stop="handleDelete(item.comment)">
-                <el-icon><Delete /></el-icon> 删除
-              </el-button>
-            </div>
-          </div>
-        </div>
+        <button
+          v-else
+          v-for="group in annotationGroups"
+          :key="group.id"
+          type="button"
+          class="annotation-summary-card"
+          :class="{ 'annotation-summary-card--active': group.commentIds.includes(Number(activeCommentId)) }"
+          :style="{ top: group.top + 'px' }"
+          @click="openGroup(group)"
+        >
+          <span class="annotation-summary-selected">{{ summarySelectedText(group) }}</span>
+          <span class="annotation-summary-content">{{ truncate(group.comments[0].content, 42) }}</span>
+          <span class="annotation-count-badge">{{ group.commentIds.length }}</span>
+        </button>
       </div>
 
       <!-- 降级列表模式 -->
@@ -139,6 +150,7 @@ const articleStore = useArticleStore()
 const comments = ref([])
 const loading = ref(false)
 const expandedIds = ref(new Set())
+const focusedGroupId = ref(null)
 const bodyRef = ref(null)
 const layerRef = ref(null)
 const bodyOffsetTop = ref(0)
@@ -172,7 +184,7 @@ const showPositioned = computed(() => {
   return props.marginPositions && props.marginPositions.length > 0 && coordinateReady.value
 })
 
-const adjustedPositions = computed(() => {
+const annotationGroups = computed(() => {
   const bodyTop = bodyOffsetTop.value
   const contentTop = props.readmeContentTop
   const offsetAdjust = bodyTop - contentTop
@@ -183,16 +195,40 @@ const adjustedPositions = computed(() => {
   }
 
   const result = props.marginPositions
-    .filter(p => commentMap.has(p.id))
-    .map(p => ({
-      id: p.id,
-      top: Math.round(p.top - offsetAdjust),
-      comment: commentMap.get(p.id) || p.comment
+    .map(position => ({
+      id: position.id,
+      commentIds: position.commentIds || [],
+      top: Math.round(position.top - offsetAdjust),
+      comments: (position.commentIds || [])
+        .map(commentId => commentMap.get(commentId))
+        .filter(Boolean)
+    }))
+    .filter(group => group.comments.length > 0)
+    .map(group => ({
+      ...group,
+      commentIds: group.commentIds
     }))
     .sort((a, b) => a.top - b.top)
 
   return showPositioned.value ? result : []
 })
+
+const focusedGroup = computed(() =>
+  annotationGroups.value.find(group => group.id === focusedGroupId.value) || null
+)
+
+function summarySelectedText(group) {
+  return (group.comments[0]?.selectedText || '').trim().slice(0, 2) || '批注'
+}
+
+function openGroup(group) {
+  focusedGroupId.value = group.id
+  emit('select-comment', group.comments[0].id)
+}
+
+function closeFocusedGroup() {
+  focusedGroupId.value = null
+}
 
 function measureBodyOffset() {
   if (layerRef.value) {
@@ -285,8 +321,14 @@ watch(() => props.marginPositions, () => {
 })
 watch(() => props.readmeContentTop, () => nextTick(() => measureBodyOffset()))
 watch(() => props.articleId, () => { if (props.articleId) fetchComments() })
-watch(() => props.activeCommentId, (newId) => {
-  if (newId) {
+watch([() => props.activeCommentId, annotationGroups], ([newId]) => {
+  if (!newId) return
+  const group = annotationGroups.value.find(candidate =>
+    candidate.commentIds.some(commentId => String(commentId) === String(newId))
+  )
+  if (group) {
+    focusedGroupId.value = group.id
+  } else {
     expandedIds.value.add(newId)
     expandedIds.value = new Set(expandedIds.value)
   }
@@ -332,7 +374,76 @@ onBeforeUnmount(() => {
 .empty-hint { text-align: center; padding: 24px 12px; font-size: 13px; color: var(--color-secondary-text); }
 
 .positioned-layer { position: relative; width: 100%; min-height: 0; }
+.positioned-layer--focused { height: min(70vh, 640px); }
+.focused-group {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+.focused-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--color-secondary-text);
+}
 .comment-list { display: flex; flex-direction: column; gap: 6px; }
+
+.annotation-summary-card {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  width: calc(100% - 8px);
+  min-height: 32px;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 7px;
+  border: 1px solid var(--color-border-primary);
+  border-left: 3px solid #27ae60;
+  border-radius: 6px;
+  background: #fff;
+  color: var(--color-body-text);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  transition: border-color .15s, box-shadow .15s;
+}
+.annotation-summary-card:hover,
+.annotation-summary-card--active {
+  border-color: var(--color-link);
+  box-shadow: 0 1px 5px rgba(0, 0, 0, .09);
+}
+.annotation-summary-selected {
+  overflow: hidden;
+  color: #16794a;
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.annotation-summary-content {
+  overflow: hidden;
+  color: #5d6879;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.annotation-count-badge {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: #e8f7ee;
+  color: #16794a;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
 
 /* ======== 卡片 ======== */
 .comment-card {
@@ -376,6 +487,7 @@ onBeforeUnmount(() => {
 }
 
 .comment-card--positioned:hover { z-index: 10; }
+.focused-comment { position: relative; margin-bottom: 8px; cursor: default; }
 
 /* ======== 折叠视图（内容优先） ======== */
 .card-collapsed { padding: 8px 10px; }
@@ -404,6 +516,16 @@ onBeforeUnmount(() => {
   -webkit-box-orient: vertical;
   overflow: hidden;
   word-break: break-word;
+}
+.focused-group .card-quote {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
+.focused-comment-content {
+  display: block;
+  overflow: visible;
+  -webkit-line-clamp: unset;
 }
 
 /* ======== 展开视图 ======== */
@@ -450,5 +572,8 @@ onBeforeUnmount(() => {
 @media (max-width: 900px) {
   .comment-card--positioned { position: static; margin-bottom: 6px; }
   .positioned-layer { min-height: auto !important; }
+  .positioned-layer--focused { height: auto; }
+  .focused-group { position: static; max-height: min(70vh, 640px); }
+  .annotation-summary-card { position: static; margin-bottom: 6px; }
 }
 </style>

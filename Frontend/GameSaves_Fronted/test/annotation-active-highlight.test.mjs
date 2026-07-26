@@ -69,6 +69,17 @@ test('ReadmeRenderer emits groups from annotation first client rects', async () 
   assert.match(source, /positions: groupAnnotationLines\(candidates\)/)
 })
 
+test('AnnotationPanel renders compact line summaries and focused groups', async () => {
+  const panelUrl = new URL('../src/components/article/AnnotationPanel.vue', import.meta.url)
+  const source = await readFile(panelUrl, 'utf8')
+
+  assert.match(source, /const focusedGroupId = ref\(null\)/)
+  assert.match(source, /function openGroup\(group\)/)
+  assert.match(source, /function closeFocusedGroup\(\)/)
+  assert.match(source, /function summarySelectedText\(group\)/)
+  assert.match(source, /group\.commentIds\.length/)
+})
+
 function installHighlightDom() {
   const elements = new Map()
   const originalHighlight = globalThis.Highlight
