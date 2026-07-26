@@ -34,6 +34,15 @@
                     {{ roleLabel(focusedComment) }}
                   </span>
                   <span class="card-time">{{ formatTime(focusedComment.createdAt) }}</span>
+                  <el-button
+                    class="copy-comment-button"
+                    text
+                    size="small"
+                    title="复制批注内容"
+                    @click.stop="copyComment(focusedComment)"
+                  >
+                    复制
+                  </el-button>
                 </div>
                 <div class="card-quote">"{{ focusedComment.selectedText }}"</div>
                 <div class="card-content focused-comment-content">{{ focusedComment.content }}</div>
@@ -251,7 +260,7 @@ const focusedComment = computed(() =>
   focusedGroup.value?.comments.find(comment => String(comment.id) === String(focusedCommentId.value)) || null
 )
 
-const FOCUSED_GROUP_OFFSET = 76
+const FOCUSED_GROUP_OFFSET = 38
 
 function focusedGroupTop(group) {
   return Math.max(0, group.top - FOCUSED_GROUP_OFFSET)
@@ -278,6 +287,30 @@ function openComment(comment) {
 
 function closeFocusedComment() {
   focusedCommentId.value = null
+}
+
+async function copyComment(comment) {
+  const text = comment?.content || ''
+  if (!text) return
+
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+    } else {
+      const textarea = document.createElement('textarea')
+      textarea.value = text
+      textarea.style.position = 'fixed'
+      textarea.style.opacity = '0'
+      document.body.appendChild(textarea)
+      textarea.select()
+      const copied = document.execCommand('copy')
+      textarea.remove()
+      if (!copied) throw new Error('Copy command failed')
+    }
+    ElMessage.success('批注内容已复制')
+  } catch {
+    ElMessage.error('复制失败，请手动复制')
+  }
 }
 
 function measureBodyOffset() {
@@ -426,8 +459,6 @@ onBeforeUnmount(() => {
   position: absolute;
   left: 0;
   right: 0;
-  max-height: min(70vh, 640px);
-  overflow-y: auto;
   padding-right: 2px;
 }
 .focused-group-header {
@@ -644,6 +675,7 @@ onBeforeUnmount(() => {
 }
 
 .card-time { font-size: 11px; color: #909399; margin-left: auto; }
+.copy-comment-button { margin-left: 2px; }
 
 .card-replies { margin-top: 6px; padding-top: 6px; border-top: 1px solid #f2f3f5; }
 .reply-item { padding: 3px 0; font-size: 12px; color: #606266; line-height: 1.5; }
@@ -657,7 +689,7 @@ onBeforeUnmount(() => {
 @media (max-width: 900px) {
   .comment-card--positioned { position: static; margin-bottom: 6px; }
   .positioned-layer { min-height: auto !important; }
-  .focused-group { position: static; max-height: min(70vh, 640px); }
+  .focused-group { position: static; }
   .annotation-summary-card { position: static; margin-bottom: 6px; }
 }
 </style>

@@ -87,9 +87,13 @@ test('AnnotationPanel keeps focused details at their source line and uses a stat
   assert.match(source, /<h3 class="annotation-title">批注栏<\/h3>/)
   assert.doesNotMatch(source, /<span v-if="allComments\.length" class="annotation-count">/)
   assert.match(source, /class="focused-group"\s*:style="\{ top: focusedGroupTop\(focusedGroup\) \+ 'px' \}"/)
-  assert.match(source, /const FOCUSED_GROUP_OFFSET = 76/)
+  assert.match(source, /const FOCUSED_GROUP_OFFSET = 38/)
   assert.match(source, /function focusedGroupTop\(group\) \{[\s\S]*?Math\.max\(0, group\.top - FOCUSED_GROUP_OFFSET\)/)
   assert.doesNotMatch(source, /\.focused-group\s*\{[\s\S]*?inset:\s*0;/)
+  assert.doesNotMatch(source, /\.focused-group\s*\{[^}]*?(?:max-height|overflow-y)/)
+  assert.match(source, /class="copy-comment-button"[\s\S]*?@click\.stop="copyComment\(focusedComment\)"/)
+  assert.match(source, /function copyComment\(comment\)/)
+  assert.match(source, /navigator\.clipboard\?\.writeText/)
 })
 
 test('AnnotationPanel uses independent three-level navigation without selecting README text', async () => {
