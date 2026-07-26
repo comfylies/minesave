@@ -1,8 +1,7 @@
 <template>
   <aside class="annotation-panel">
     <div class="annotation-header">
-      <h3 class="annotation-title">📝 批注</h3>
-      <span v-if="allComments.length" class="annotation-count">{{ allComments.length }}</span>
+      <h3 class="annotation-title">批注栏</h3>
     </div>
 
     <div class="annotation-body" ref="bodyRef" v-loading="loading">
@@ -16,7 +15,7 @@
         class="positioned-layer"
         :class="{ 'positioned-layer--focused': focusedGroup }"
       >
-        <section v-if="focusedGroup" class="focused-group">
+        <section v-if="focusedGroup" class="focused-group" :style="{ top: focusedGroup.top + 'px' }">
           <div class="focused-group-header">
             <span>本行 {{ focusedGroup.commentIds.length }} 条批注</span>
             <el-button text size="small" @click.stop="closeFocusedGroup">关闭</el-button>
@@ -352,32 +351,28 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .annotation-panel {
-  border: 1px solid var(--color-border-primary);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-canvas);
   display: flex;
   flex-direction: column;
 }
 
 .annotation-header {
-  padding: 10px 14px;
+  padding: 0 0 8px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   flex-shrink: 0;
 }
 
 .annotation-title { font-size: 14px; font-weight: 600; margin: 0; }
-.annotation-count { font-size: 12px; background: var(--color-link); color: #fff; padding: 1px 6px; border-radius: 10px; }
 
-.annotation-body { padding: 8px; flex: 1; position: relative; }
+.annotation-body { flex: 1; position: relative; }
 .empty-hint { text-align: center; padding: 24px 12px; font-size: 13px; color: var(--color-secondary-text); }
 
 .positioned-layer { position: relative; width: 100%; min-height: 0; }
-.positioned-layer--focused { height: min(70vh, 640px); }
 .focused-group {
   position: absolute;
-  inset: 0;
+  left: 0;
+  right: 0;
+  max-height: min(70vh, 640px);
   overflow-y: auto;
   padding-right: 2px;
 }
@@ -572,7 +567,6 @@ onBeforeUnmount(() => {
 @media (max-width: 900px) {
   .comment-card--positioned { position: static; margin-bottom: 6px; }
   .positioned-layer { min-height: auto !important; }
-  .positioned-layer--focused { height: auto; }
   .focused-group { position: static; max-height: min(70vh, 640px); }
   .annotation-summary-card { position: static; margin-bottom: 6px; }
 }

@@ -80,6 +80,16 @@ test('AnnotationPanel renders compact line summaries and focused groups', async 
   assert.match(source, /group\.commentIds\.length/)
 })
 
+test('AnnotationPanel keeps focused details at their source line and uses a static panel label', async () => {
+  const panelUrl = new URL('../src/components/article/AnnotationPanel.vue', import.meta.url)
+  const source = await readFile(panelUrl, 'utf8')
+
+  assert.match(source, /<h3 class="annotation-title">批注栏<\/h3>/)
+  assert.doesNotMatch(source, /<span v-if="allComments\.length" class="annotation-count">/)
+  assert.match(source, /class="focused-group"\s*:style="\{ top: focusedGroup\.top \+ 'px' \}"/)
+  assert.doesNotMatch(source, /\.focused-group\s*\{[\s\S]*?inset:\s*0;/)
+})
+
 function installHighlightDom() {
   const elements = new Map()
   const originalHighlight = globalThis.Highlight
