@@ -18,6 +18,7 @@ import com.gamesaves.gamesaves.service.SearchSyncService;
 import com.gamesaves.gamesaves.service.SiteSettingService;
 import com.gamesaves.gamesaves.service.StorageService;
 import com.gamesaves.gamesaves.service.TagService;
+import com.gamesaves.gamesaves.service.TagSearchService;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -41,6 +42,7 @@ public class AdminController {
     private final AnnouncementService announcementService;
     private final TagService tagService;
     private final SearchSyncService searchSyncService;
+    private final TagSearchService tagSearchService;
     private final SafePathService safePathService;
     private final CleanupScheduler cleanupScheduler;
     private final StorageService storageService;
@@ -50,7 +52,7 @@ public class AdminController {
     private final ContactService contactService;
 
     public AdminController(AdminService adminService, AnnouncementService announcementService,
-                           TagService tagService, SearchSyncService searchSyncService,
+                           TagService tagService, SearchSyncService searchSyncService, TagSearchService tagSearchService,
                            SafePathService safePathService,
                            CleanupScheduler cleanupScheduler,
                            StorageService storageService,
@@ -62,6 +64,7 @@ public class AdminController {
         this.announcementService = announcementService;
         this.tagService = tagService;
         this.searchSyncService = searchSyncService;
+        this.tagSearchService = tagSearchService;
         this.safePathService = safePathService;
         this.cleanupScheduler = cleanupScheduler;
         this.storageService = storageService;
@@ -176,9 +179,11 @@ public class AdminController {
     public ApiResponse<Map<String, Object>> reindex() {
         long start = System.currentTimeMillis();
         int count = searchSyncService.rebuildAll();
+        int tagCount = tagSearchService.rebuildIndex();
         long elapsed = System.currentTimeMillis() - start;
         return ApiResponse.success(Map.of(
                 "documents", count,
+                "tagDocuments", tagCount,
                 "elapsedMs", elapsed
         ));
     }
