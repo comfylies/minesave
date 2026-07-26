@@ -102,6 +102,10 @@ test('AnnotationPanel uses independent three-level navigation without selecting 
   const openGroupSource = source.match(/function openGroup\(group\) \{[\s\S]*?\n\}/)?.[0] || ''
   assert.match(openGroupSource, /focusedGroupId\.value = group\.id/)
   assert.doesNotMatch(openGroupSource, /emit\(/)
+
+  const openCommentSource = source.match(/function openComment\(comment\) \{[\s\S]*?\n\}/)?.[0] || ''
+  assert.match(openCommentSource, /focusedCommentId\.value = comment\.id/)
+  assert.match(openCommentSource, /emit\('select-comment', comment\.id\)/)
 })
 
 function installHighlightDom() {

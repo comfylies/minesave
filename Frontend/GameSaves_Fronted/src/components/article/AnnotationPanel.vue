@@ -249,6 +249,7 @@ function closeFocusedGroup() {
 
 function openComment(comment) {
   focusedCommentId.value = comment.id
+  emit('select-comment', comment.id)
 }
 
 function closeFocusedComment() {
