@@ -3,6 +3,7 @@ package com.gamesaves.gamesaves.config;
 import com.gamesaves.gamesaves.entity.User;
 import com.gamesaves.gamesaves.repository.UserRepository;
 import com.gamesaves.gamesaves.service.SearchSyncService;
+import com.gamesaves.gamesaves.service.TagSearchService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.CommandLineRunner;
@@ -30,11 +31,14 @@ public class DataInitializer implements CommandLineRunner {
     private final UserRepository userRepository;
     private final BCryptPasswordEncoder passwordEncoder;
     private final SearchSyncService searchSyncService;
+    private final TagSearchService tagSearchService;
 
-    public DataInitializer(UserRepository userRepository, SearchSyncService searchSyncService) {
+    public DataInitializer(UserRepository userRepository, SearchSyncService searchSyncService,
+                           TagSearchService tagSearchService) {
         this.userRepository = userRepository;
         this.passwordEncoder = new BCryptPasswordEncoder();
         this.searchSyncService = searchSyncService;
+        this.tagSearchService = tagSearchService;
     }
 
     @Override
@@ -54,7 +58,8 @@ public class DataInitializer implements CommandLineRunner {
         // Rebuild search index on startup
         try {
             int count = searchSyncService.rebuildAll();
-            log.info("DataInitializer: search index rebuilt with {} documents", count);
+            int tagCount = tagSearchService.rebuildIndex();
+            log.info("DataInitializer: rebuilt {} save documents and {} tag documents", count, tagCount);
         } catch (Exception e) {
             log.warn("DataInitializer: search index rebuild skipped ({}): {}",
                     e.getClass().getSimpleName(), e.getMessage());

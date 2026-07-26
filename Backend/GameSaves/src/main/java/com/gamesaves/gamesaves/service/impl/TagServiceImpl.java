@@ -8,13 +8,16 @@ import com.gamesaves.gamesaves.exception.ResourceNotFoundException;
 import com.gamesaves.gamesaves.repository.ArticleRepository;
 import com.gamesaves.gamesaves.repository.TagRepository;
 import com.gamesaves.gamesaves.service.TagService;
+import com.gamesaves.gamesaves.service.TagSearchService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
@@ -25,10 +28,13 @@ public class TagServiceImpl implements TagService {
 
     private final TagRepository tagRepository;
     private final ArticleRepository articleRepository;
+    private final TagSearchService tagSearchService;
 
-    public TagServiceImpl(TagRepository tagRepository, ArticleRepository articleRepository) {
+    public TagServiceImpl(TagRepository tagRepository, ArticleRepository articleRepository,
+                          TagSearchService tagSearchService) {
         this.tagRepository = tagRepository;
         this.articleRepository = articleRepository;
+        this.tagSearchService = tagSearchService;
     }
 
     @Override
@@ -46,6 +52,7 @@ public class TagServiceImpl implements TagService {
                 .build();
 
         tag = tagRepository.save(tag);
+        tagSearchService.indexTag(tag);
         log.info("Tag created: {} (source={})", tag.getName(), tag.getSource());
         return TagResponse.fromEntity(tag);
     }
@@ -66,6 +73,7 @@ public class TagServiceImpl implements TagService {
         }
 
         tag = tagRepository.save(tag);
+        tagSearchService.indexTag(tag);
         log.info("Tag updated: id={}, name={}", id, tag.getName());
         return TagResponse.fromEntity(tag);
     }
@@ -77,6 +85,7 @@ public class TagServiceImpl implements TagService {
         }
         try {
             tagRepository.deleteById(id);
+            tagSearchService.deleteTag(id);
             log.info("Tag deleted: id={}", id);
         } catch (DataIntegrityViolationException e) {
             throw new BadRequestException("Cannot delete tag: it is still associated with articles");
@@ -108,10 +117,26 @@ public class TagServiceImpl implements TagService {
     @Transactional(readOnly = true)
     public List<TagResponse> searchTags(String keyword) {
         if (keyword == null || keyword.isBlank()) {
-            return getAllTags();
+            return List.of();
         }
-        return tagRepository.findByNameContaining(keyword).stream()
+        return tagSearchService.search(keyword);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<TagResponse> getFeaturedTags() {
+        return tagSearchService.featured();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<TagResponse> getTagsByIds(Collection<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, TagResponse> byId = tagRepository.findByIdIn(ids).stream()
                 .map(TagResponse::fromEntity)
-                .collect(Collectors.toList());
+                .collect(Collectors.toMap(TagResponse::getId, tag -> tag));
+        return ids.stream().distinct().map(byId::get).filter(java.util.Objects::nonNull).toList();
     }
 }

@@ -4,6 +4,7 @@ import com.gamesaves.gamesaves.dto.request.TagCreateRequest;
 import com.gamesaves.gamesaves.dto.response.TagResponse;
 
 import java.util.List;
+import java.util.Collection;
 
 public interface TagService {
 
@@ -18,4 +19,8 @@ public interface TagService {
     List<TagResponse> getTagsBySource(String source);
 
     List<TagResponse> searchTags(String keyword);
+
+    List<TagResponse> getFeaturedTags();
+
+    List<TagResponse> getTagsByIds(Collection<Long> ids);
 }

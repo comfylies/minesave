@@ -26,13 +26,24 @@ public class TagController {
             @RequestParam(required = false) String source,
             @RequestParam(required = false) String q) {
 
-        if (q != null && !q.isBlank()) {
-            return ApiResponse.success(tagService.searchTags(q));
+        if (q != null) {
+            String keyword = q.trim();
+            return ApiResponse.success(keyword.length() >= 2 ? tagService.searchTags(keyword) : List.of());
         }
         if (source != null && !source.isBlank()) {
             return ApiResponse.success(tagService.getTagsBySource(source));
         }
         return ApiResponse.success(tagService.getAllTags());
+    }
+
+    @GetMapping("/featured")
+    public ApiResponse<List<TagResponse>> featuredTags() {
+        return ApiResponse.success(tagService.getFeaturedTags());
+    }
+
+    @GetMapping("/by-ids")
+    public ApiResponse<List<TagResponse>> getTagsByIds(@RequestParam List<Long> ids) {
+        return ApiResponse.success(tagService.getTagsByIds(ids.stream().distinct().limit(5).toList()));
     }
 
     /** 创建用户标签（需登录，普通用户创建的标签 source=user） */

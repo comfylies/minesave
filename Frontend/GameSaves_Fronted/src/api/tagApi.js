@@ -4,6 +4,10 @@ export const tagApi = {
   /** 获取所有标签（可选过滤 source=admin / source=user） */
   getAll: (params = {}) => client.get('/tags', { params }),
 
+  featured: () => client.get('/tags/featured'),
+
+  byIds: (ids) => client.get('/tags/by-ids', { params: { ids } }),
+
   /** 模糊搜索标签 */
   search: (keyword) => client.get('/tags', { params: { q: keyword } }),
 
