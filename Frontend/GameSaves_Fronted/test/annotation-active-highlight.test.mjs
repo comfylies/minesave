@@ -86,7 +86,9 @@ test('AnnotationPanel keeps focused details at their source line and uses a stat
 
   assert.match(source, /<h3 class="annotation-title">批注栏<\/h3>/)
   assert.doesNotMatch(source, /<span v-if="allComments\.length" class="annotation-count">/)
-  assert.match(source, /class="focused-group"\s*:style="\{ top: focusedGroup\.top \+ 'px' \}"/)
+  assert.match(source, /class="focused-group"\s*:style="\{ top: focusedGroupTop\(focusedGroup\) \+ 'px' \}"/)
+  assert.match(source, /const FOCUSED_GROUP_OFFSET = 76/)
+  assert.match(source, /function focusedGroupTop\(group\) \{[\s\S]*?Math\.max\(0, group\.top - FOCUSED_GROUP_OFFSET\)/)
   assert.doesNotMatch(source, /\.focused-group\s*\{[\s\S]*?inset:\s*0;/)
 })
 

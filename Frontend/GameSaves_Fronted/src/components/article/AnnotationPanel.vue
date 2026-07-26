@@ -15,7 +15,7 @@
         class="positioned-layer"
         :class="{ 'positioned-layer--focused': focusedGroup }"
       >
-        <section v-if="focusedGroup" class="focused-group" :style="{ top: focusedGroup.top + 'px' }">
+        <section v-if="focusedGroup" class="focused-group" :style="{ top: focusedGroupTop(focusedGroup) + 'px' }">
           <template v-if="focusedComment">
             <div class="focused-group-header">
               <el-button text size="small" @click.stop="closeFocusedComment">返回本行批注</el-button>
@@ -250,6 +250,12 @@ const focusedGroup = computed(() =>
 const focusedComment = computed(() =>
   focusedGroup.value?.comments.find(comment => String(comment.id) === String(focusedCommentId.value)) || null
 )
+
+const FOCUSED_GROUP_OFFSET = 76
+
+function focusedGroupTop(group) {
+  return Math.max(0, group.top - FOCUSED_GROUP_OFFSET)
+}
 
 function openGroup(group) {
   focusedGroupId.value = group.id
