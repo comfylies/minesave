@@ -27,6 +27,7 @@ import com.gamesaves.gamesaves.service.SearchSyncService;
 import com.gamesaves.gamesaves.service.StorageService;
 import com.gamesaves.gamesaves.service.ZipExtractionService;
 import com.gamesaves.gamesaves.util.ArchiveFormat;
+import com.gamesaves.gamesaves.util.CoverUrlResolver;
 import com.gamesaves.gamesaves.util.ImageThumbnailService;
 import com.gamesaves.gamesaves.util.XssFilter;
 import cn.dev33.satoken.stp.StpUtil;
@@ -601,12 +602,7 @@ public class ArticleServiceImpl implements ArticleService {
 
         List<ArticleListItemResponse> content = articles.stream()
                 .map(ArticleListItemResponse::fromEntity)
-                .peek(item -> {
-                    String coverKey = item.getCoverImage();
-                    String cacheBuster = buildCacheBuster(item.getUpdatedAt());
-                    item.setCoverImage(appendCacheBuster(resolveCoverUrl(coverKey), cacheBuster));
-                    item.setCoverThumbnail(appendCacheBuster(resolveCoverThumbnailUrl(coverKey, 360), cacheBuster));
-                })
+                .peek(item -> CoverUrlResolver.resolveListItem(item, storageService))
                 .collect(Collectors.toList());
 
         return PageDTO.of(content, page, size, total);
@@ -621,12 +617,7 @@ public class ArticleServiceImpl implements ArticleService {
 
         List<ArticleListItemResponse> content = articles.stream()
                 .map(ArticleListItemResponse::fromEntity)
-                .peek(item -> {
-                    String coverKey = item.getCoverImage();
-                    String cacheBuster = buildCacheBuster(item.getUpdatedAt());
-                    item.setCoverImage(appendCacheBuster(resolveCoverUrl(coverKey), cacheBuster));
-                    item.setCoverThumbnail(appendCacheBuster(resolveCoverThumbnailUrl(coverKey, 360), cacheBuster));
-                })
+                .peek(item -> CoverUrlResolver.resolveListItem(item, storageService))
                 .collect(Collectors.toList());
 
         return PageDTO.of(content, page, size, total);

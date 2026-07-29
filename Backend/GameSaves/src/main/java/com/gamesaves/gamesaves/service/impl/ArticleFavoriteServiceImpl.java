@@ -8,6 +8,8 @@ import com.gamesaves.gamesaves.exception.ResourceNotFoundException;
 import com.gamesaves.gamesaves.repository.ArticleFavoriteRepository;
 import com.gamesaves.gamesaves.repository.ArticleRepository;
 import com.gamesaves.gamesaves.service.ArticleFavoriteService;
+import com.gamesaves.gamesaves.service.StorageService;
+import com.gamesaves.gamesaves.util.CoverUrlResolver;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,11 +22,14 @@ public class ArticleFavoriteServiceImpl implements ArticleFavoriteService {
 
     private final ArticleFavoriteRepository favoriteRepository;
     private final ArticleRepository articleRepository;
+    private final StorageService storageService;
 
     public ArticleFavoriteServiceImpl(ArticleFavoriteRepository favoriteRepository,
-                                      ArticleRepository articleRepository) {
+                                      ArticleRepository articleRepository,
+                                      StorageService storageService) {
         this.favoriteRepository = favoriteRepository;
         this.articleRepository = articleRepository;
+        this.storageService = storageService;
     }
 
     @Override
@@ -61,6 +66,7 @@ public class ArticleFavoriteServiceImpl implements ArticleFavoriteService {
                 .findFavoriteArticlesByUserId(userId, PageRequest.of(page, size))
                 .stream()
                 .map(ArticleListItemResponse::fromEntity)
+                .peek(item -> CoverUrlResolver.resolveListItem(item, storageService))
                 .toList();
         return PageDTO.of(content, page, size, total);
     }
