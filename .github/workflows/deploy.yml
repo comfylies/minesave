@@ -1,0 +1,114 @@
+name: Deploy to Server
+
+on:
+  push:
+    branches: [master]
+
+jobs:
+  # ==================== 检测哪些代码变了 ====================
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'Backend/**'
+              - 'pom.xml'
+            frontend:
+              - 'Frontend/**'
+
+  # ==================== 后端：构建 + 上传 + 重启 ====================
+  deploy-backend:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Build JAR
+        run: cd Backend/GameSaves && ./mvnw clean package -Dmaven.test.skip=true
+
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: ${{ secrets.SERVER_SSH_KEY }}
+
+      - name: Upload JAR to server
+        run: |
+          scp -o StrictHostKeyChecking=no \
+            Backend/GameSaves/target/GameSaves-0.0.1-SNAPSHOT.jar \
+            ubuntu@118.25.51.239:/tmp/GameSaves.jar.new
+
+      - name: Replace JAR and restart service
+        run: |
+          ssh -o StrictHostKeyChecking=no ubuntu@118.25.51.239 "
+            sudo mv /tmp/GameSaves.jar.new /opt/gamesaving/GameSaves-0.0.1-SNAPSHOT.jar
+            sudo systemctl reset-failed gamesaving
+            sudo systemctl restart gamesaving
+          "
+
+      - name: Verify backend is running
+        run: |
+          sleep 10
+          ssh -o StrictHostKeyChecking=no ubuntu@118.25.51.239 \
+            "systemctl is-active gamesaving && curl -fsS http://127.0.0.1:8080/api/games | head -c 200"
+
+  # ==================== 前端：构建 + 上传 + 原子切换 ====================
+  deploy-frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: Frontend/GameSaves_Fronted/package-lock.json
+
+      - name: Build dist
+        run: cd Frontend/GameSaves_Fronted && npm ci && npm run build
+
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: ${{ secrets.SERVER_SSH_KEY }}
+
+      - name: Upload to server
+        run: |
+          STAMP=$(date +%Y%m%d-%H%M)
+          scp -o StrictHostKeyChecking=no -r \
+            Frontend/GameSaves_Fronted/dist \
+            ubuntu@118.25.51.239:/tmp/gamesaving-web-$STAMP
+          echo "STAMP=$STAMP" >> $GITHUB_ENV
+
+      - name: Atomic switch and reload Nginx
+        run: |
+          ssh -o StrictHostKeyChecking=no ubuntu@118.25.51.239 "
+            set -e
+            test ! -e /www/wwwroot/gamesaving.backup-${{ env.STAMP }}
+            sudo mv /www/wwwroot/gamesaving /www/wwwroot/gamesaving.backup-${{ env.STAMP }}
+            sudo mv /tmp/gamesaving-web-${{ env.STAMP }} /www/wwwroot/gamesaving
+            sudo chown -R www:www /www/wwwroot/gamesaving
+            sudo nginx -t && sudo systemctl reload nginx
+          "
+
+      - name: Verify frontend
+        run: |
+          ssh -o StrictHostKeyChecking=no ubuntu@118.25.51.239 \
+            "sudo -u www test -s /www/wwwroot/gamesaving/index.html && echo 'frontend OK'"
