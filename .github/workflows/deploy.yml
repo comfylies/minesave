@@ -39,7 +39,8 @@ jobs:
           cache: 'maven'
 
       - name: Build JAR
-        run: cd Backend/GameSaves && ./mvnw clean package -Dmaven.test.skip=true
+        run: cd Backend/GameSaves && mvn clean package -Dmaven.test.skip=true
+        # 使用系统 mvn 而非 ./mvnw，因为 maven-wrapper.jar 被 gitignore 排除了
 
       - name: Setup SSH
         uses: webfactory/ssh-agent@v0.9.1
