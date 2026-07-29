@@ -102,6 +102,13 @@ public class RateLimiter {
         return true;
     }
 
+    /** Clears all in-memory counters and bans for test isolation. */
+    public void clear() {
+        counters.clear();
+        globalCounters.clear();
+        ipBans.clear();
+    }
+
     /**
      * Periodically evict expired entries to prevent memory leak.
      */

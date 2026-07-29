@@ -4,6 +4,7 @@ import com.gamesaves.gamesaves.dto.PageDTO;
 import com.gamesaves.gamesaves.dto.response.DirectMessageResponse;
 import com.gamesaves.gamesaves.exception.BadRequestException;
 import com.gamesaves.gamesaves.exception.ForbiddenException;
+import com.gamesaves.gamesaves.util.RateLimiter;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,8 +33,12 @@ class DirectMessageServiceTest {
     @Autowired
     private DirectMessageService service;
 
+    @Autowired
+    private RateLimiter rateLimiter;
+
     @BeforeEach
     void prepareUsersAndClearDirectMessages() {
+        rateLimiter.clear();
         jdbcTemplate.update("DELETE FROM conversation_read_states");
         jdbcTemplate.update("DELETE FROM direct_messages");
         jdbcTemplate.update("DELETE FROM direct_conversations");
