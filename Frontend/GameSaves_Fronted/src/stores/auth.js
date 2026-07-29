@@ -5,6 +5,7 @@ import { userApi } from '../api/userApi'
 import { useArticleStore } from './articles'
 import { useGameStore } from './games'
 import { useFileStore } from './files'
+import { useFollowStore } from './follows'
 
 export const useAuthStore = defineStore('auth', () => {
   const currentUser = ref(loadUser())
@@ -77,6 +78,7 @@ export const useAuthStore = defineStore('auth', () => {
     useArticleStore().reset()
     useGameStore().reset()
     useFileStore().reset()
+    useFollowStore().reset()
   }
 
   /** 检查登录状态（从服务器验证） */

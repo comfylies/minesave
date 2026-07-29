@@ -9,8 +9,10 @@ import com.gamesaves.gamesaves.dto.response.ApiResponse;
 import com.gamesaves.gamesaves.dto.response.ArticleDetailResponse;
 import com.gamesaves.gamesaves.dto.response.ArticleListItemResponse;
 import com.gamesaves.gamesaves.dto.response.VoteResponse;
+import com.gamesaves.gamesaves.dto.response.FavoriteResponse;
 import com.gamesaves.gamesaves.dto.request.VoteRequest;
 import com.gamesaves.gamesaves.service.ArticleService;
+import com.gamesaves.gamesaves.service.ArticleFavoriteService;
 import com.gamesaves.gamesaves.service.ArticleVoteService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -25,11 +27,14 @@ public class ArticleController {
 
     private final ArticleService articleService;
     private final ArticleVoteService articleVoteService;
+    private final ArticleFavoriteService articleFavoriteService;
 
     public ArticleController(ArticleService articleService,
-                              ArticleVoteService articleVoteService) {
+                              ArticleVoteService articleVoteService,
+                              ArticleFavoriteService articleFavoriteService) {
         this.articleService = articleService;
         this.articleVoteService = articleVoteService;
+        this.articleFavoriteService = articleFavoriteService;
     }
 
     @PostMapping
@@ -147,5 +152,18 @@ public class ArticleController {
             result.put("userVote", null);
         }
         return ApiResponse.success(result);
+    }
+
+    @PostMapping("/{id}/favorite")
+    public ApiResponse<FavoriteResponse> toggleFavorite(@PathVariable Long id) {
+        FavoriteResponse response = articleFavoriteService.toggle(id, StpUtil.getLoginIdAsLong());
+        return ApiResponse.success(response);
+    }
+
+    @GetMapping("/{id}/my-favorite")
+    public ApiResponse<Map<String, Object>> getMyFavorite(@PathVariable Long id) {
+        boolean favorited = StpUtil.isLogin()
+                && articleFavoriteService.isFavorited(id, StpUtil.getLoginIdAsLong());
+        return ApiResponse.success(Map.of("favorited", favorited));
     }
 }
