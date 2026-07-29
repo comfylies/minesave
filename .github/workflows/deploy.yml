@@ -28,6 +28,11 @@ jobs:
     needs: changes
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-backend-production
+      cancel-in-progress: false
+    env:
+      REMOTE_JAR: /tmp/GameSaves-${{ github.run_id }}-${{ github.run_attempt }}.jar
     steps:
       - uses: actions/checkout@v4
 
@@ -48,15 +53,20 @@ jobs:
           ssh-private-key: ${{ secrets.SERVER_SSH_KEY }}
 
       - name: Upload JAR to server
+        timeout-minutes: 15
         run: |
           scp -o StrictHostKeyChecking=no \
+            -o BatchMode=yes \
+            -o ConnectTimeout=20 \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=3 \
             Backend/GameSaves/target/GameSaves-0.0.1-SNAPSHOT.jar \
-            ubuntu@118.25.51.239:/tmp/GameSaves.jar.new
+            ubuntu@118.25.51.239:${REMOTE_JAR}
 
       - name: Replace JAR and restart service
         run: |
           ssh -o StrictHostKeyChecking=no ubuntu@118.25.51.239 "
-            sudo mv /tmp/GameSaves.jar.new /opt/gamesaving/GameSaves-0.0.1-SNAPSHOT.jar
+            sudo mv ${REMOTE_JAR} /opt/gamesaving/GameSaves-0.0.1-SNAPSHOT.jar
             sudo systemctl reset-failed gamesaving
             sudo systemctl restart gamesaving
           "
