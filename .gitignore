@@ -63,3 +63,16 @@ data.ms/
 
 # Logs
 *.log
+
+# Sensitive config files (contain local credentials)
+Backend/GameSaves/src/main/resources/application-local.yaml
+Backend/GameSaves/src/main/resources/application-prod.yaml
+
+# Deployment guide (contains server credentials)
+部署操作指南.md
+
+# Claude Code project file (contains server IP and credentials)
+CLAUDE.md
+
+# GitHub Actions workflows (temporary, remove after CI/CD stabilizes if desired)
+# .github/workflows/
