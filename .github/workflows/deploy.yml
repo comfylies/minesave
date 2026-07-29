@@ -2,7 +2,7 @@ name: Deploy to Server
 
 on:
   push:
-    branches: [master]
+    branches: [main]
 
 jobs:
   # ==================== 检测哪些代码变了 ====================
