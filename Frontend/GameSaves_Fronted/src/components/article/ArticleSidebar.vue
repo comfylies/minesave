@@ -8,7 +8,11 @@
         </el-avatar>
         <span class="author-name" :title="article.nickname">{{ article.nickname }}</span>
       </router-link>
-      <el-button v-if="auth.isLoggedIn && auth.userId !== article.userId" size="small" plain class="message-author" @click="router.push(`/messages?peer=${article.userId}`)">私信</el-button>
+      <div v-if="auth.userId !== article.userId" class="author-actions">
+        <el-button size="small" plain :loading="followLoading" @click="handleFollow">{{ following ? '已关注' : '关注' }}</el-button>
+        <el-button v-if="auth.isLoggedIn" size="small" plain @click="router.push(`/messages?peer=${article.userId}`)">私信</el-button>
+      </div>
+      <el-button size="small" plain :loading="favoriteLoading" class="favorite-article" @click="handleFavorite">{{ favorited ? '已收藏' : '收藏存档' }}</el-button>
     </div>
 
     <!-- 下载按钮 -->
@@ -131,6 +135,8 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { fileApi } from '../../api/fileApi'
 import { voteApi } from '../../api/voteApi'
+import { favoriteApi } from '../../api/favoriteApi'
+import { followApi } from '../../api/followApi'
 import { useAuthStore } from '../../stores/auth'
 import TagDisplay from '../tag/TagDisplay.vue'
 import DownloadCaptchaModal from '../download/DownloadCaptchaModal.vue'
@@ -146,18 +152,54 @@ const auth = useAuthStore()
 
 const downloading = ref(false)
 const showDownloadNotice = ref(false)
+const favorited = ref(false)
+const following = ref(false)
+const favoriteLoading = ref(false)
+const followLoading = ref(false)
 
 // ── 投票状态 ──
 const currentUserVote = ref(null)
 const voting = ref(false)
 
 onMounted(() => {
+  favoriteApi.state(props.article.id).then(result => { favorited.value = result.favorited }).catch(() => {})
+  if (auth.isLoggedIn && auth.userId !== props.article.userId) {
+    followApi.state(props.article.userId).then(result => { following.value = result.following }).catch(() => {})
+  }
   if (auth.isLoggedIn) {
     voteApi.getMyVote(props.article.id).then(res => {
       currentUserVote.value = res.userVote
     }).catch(() => {})
   }
 })
+
+function requireLogin() {
+  if (auth.isLoggedIn) return true
+  router.push('/login?redirect=' + encodeURIComponent(router.currentRoute.value.fullPath))
+  return false
+}
+
+async function handleFavorite() {
+  if (!requireLogin() || favoriteLoading.value) return
+  favoriteLoading.value = true
+  try {
+    const result = await favoriteApi.toggle(props.article.id)
+    favorited.value = result.favorited
+  } finally {
+    favoriteLoading.value = false
+  }
+}
+
+async function handleFollow() {
+  if (!requireLogin() || followLoading.value) return
+  followLoading.value = true
+  try {
+    const result = await followApi.toggle(props.article.userId)
+    following.value = result.following
+  } finally {
+    followLoading.value = false
+  }
+}
 
 async function handleVote(voteType) {
   if (!auth.isLoggedIn) {
@@ -280,7 +322,18 @@ const statusText = computed(() => {
   color: var(--color-link);
 }
 
-.message-author {
+.author-actions {
+  display: flex;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-sm);
+}
+
+.author-actions .el-button,
+.favorite-article {
+  flex: 1;
+}
+
+.favorite-article {
   width: 100%;
   margin-top: var(--spacing-sm);
 }

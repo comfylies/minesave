@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, reactive } from 'vue'
 import { articleApi } from '../api/articleApi'
+import { favoriteApi } from '../api/favoriteApi'
 
 export const useArticleStore = defineStore('articles', () => {
   const currentArticle = ref(null)
@@ -61,6 +62,23 @@ export const useArticleStore = defineStore('articles', () => {
     }
   }
 
+  async function fetchFavorites(page = 0) {
+    loading.value = true
+    error.value = null
+    try {
+      const result = await favoriteApi.list(page, pagination.size)
+      articleList.value = result.content || []
+      pagination.page = result.page
+      pagination.totalElements = result.totalElements
+      pagination.totalPages = result.totalPages
+    } catch (e) {
+      error.value = e.message || '加载收藏列表失败'
+      articleList.value = []
+    } finally {
+      loading.value = false
+    }
+  }
+
   async function deleteArticle(id) {
     await articleApi.delete(id)
   }
@@ -78,7 +96,7 @@ export const useArticleStore = defineStore('articles', () => {
 
   return {
     currentArticle, articleList, pagination, loading, error,
-    fetchArticle, fetchByGame, fetchByUser, deleteArticle,
+    fetchArticle, fetchByGame, fetchByUser, fetchFavorites, deleteArticle,
     reset
   }
 })

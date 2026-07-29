@@ -15,6 +15,8 @@
               <router-link to="/messages" class="nav-link" active-class="nav-link--active">消息</router-link>
             </el-badge>
           </span>
+          <router-link v-if="auth.isLoggedIn" to="/following" class="nav-link" active-class="nav-link--active">我的关注</router-link>
+          <router-link v-if="auth.isLoggedIn" to="/favorites" class="nav-link" active-class="nav-link--active">我的收藏</router-link>
           <router-link v-if="auth.isLoggedIn" to="/upload" class="nav-link" active-class="nav-link--active">上传存档</router-link>
         </nav>
       </div>
@@ -214,7 +216,8 @@ function handleLogout() {
   display: flex;
   align-items: center;
   gap: var(--spacing-lg);
-  flex: 1;
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 .navbar-logo {
@@ -241,6 +244,8 @@ function handleLogout() {
   display: flex;
   align-items: center;
   gap: var(--spacing-xs);
+  flex-wrap: nowrap;
+  flex-shrink: 0;
 }
 
 .nav-message-item {
@@ -256,6 +261,7 @@ function handleLogout() {
   border-radius: var(--radius-sm);
   transition: background var(--transition-fast), color var(--transition-fast);
   text-decoration: none;
+  white-space: nowrap;
 }
 
 .nav-link:hover {
@@ -274,7 +280,8 @@ function handleLogout() {
   align-items: center;
   justify-content: flex-end;
   gap: var(--spacing-md);
-  flex: 1;
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 
 .btn-outline {
