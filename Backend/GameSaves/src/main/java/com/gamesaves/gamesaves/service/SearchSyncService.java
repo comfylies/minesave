@@ -1,6 +1,7 @@
 package com.gamesaves.gamesaves.service;
 
 import com.gamesaves.gamesaves.dto.response.SearchHitResponse;
+import jakarta.annotation.PostConstruct;
 import com.gamesaves.gamesaves.entity.Article;
 import com.gamesaves.gamesaves.entity.Game;
 import com.gamesaves.gamesaves.entity.GameAlias;
@@ -27,6 +28,10 @@ public class SearchSyncService {
     private static final Logger log = LoggerFactory.getLogger(SearchSyncService.class);
     private static final String INDEX_UID = "saves";
     private static final DateTimeFormatter DTF = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    /** 可搜索字段：必须包含 searchText（name + 别名），否则别名搜索会静默失效 */
+    private static final String[] SEARCHABLE_ATTRIBUTES = {
+            "name", "title", "description", "tags", "gameName", "searchText"
+    };
 
     private final Client client;
     private final ArticleRepository articleRepository;
@@ -39,6 +44,29 @@ public class SearchSyncService {
         this.articleRepository = articleRepository;
         this.gameRepository = gameRepository;
         this.aliasRepository = aliasRepository;
+    }
+
+    /**
+     * 启动时确保索引可搜索字段包含 searchText。
+     * 索引设置不随文档操作保存 —— 若索引被删除重建，别名搜索会静默失效（曾实际发生过），
+     * 因此每次启动都强制应用一次；Meilisearch 不可用时不阻断应用启动。
+     */
+    @PostConstruct
+    public void init() {
+        ensureIndexSettings();
+    }
+
+    /**
+     * 确保 saves 索引的 searchableAttributes 包含 searchText（name + 别名）。
+     * 幂等操作：值不变时 Meilisearch 视为无变化。
+     */
+    public void ensureIndexSettings() {
+        try {
+            client.index(INDEX_UID).updateSearchableAttributesSettings(SEARCHABLE_ATTRIBUTES);
+            log.debug("Ensured searchable attributes: {}", Arrays.toString(SEARCHABLE_ATTRIBUTES));
+        } catch (Exception e) {
+            log.warn("Failed to ensure index settings: {}", e.getMessage());
+        }
     }
 
     /** 索引单个游戏 */
@@ -92,6 +120,7 @@ public class SearchSyncService {
     public int rebuildAll() {
         try {
             Index index = client.index(INDEX_UID);
+            ensureIndexSettings();
             index.deleteAllDocuments();
             int count = 0;
 
