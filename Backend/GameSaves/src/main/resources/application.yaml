@@ -90,6 +90,7 @@ app:
     max-entry-size: 104857600                # 100 MB（单条目解压后上限）
     max-total-uncompressed-size: 524288000   # 500 MB（普通用户总解压后大小上限）
     max-entry-count: 10000                   # 最大条目数
+    upload-parallelism: 8                    # 提取文件并行上传到存储的线程数（IO 密集，可调大加速大文件上传）
     admin:
       max-file-size: 1073741824              # 1 GB（管理员上传文件大小上限）
       max-total-uncompressed-size: 1610612736 # 1.5 GB（管理员总解压后大小上限）

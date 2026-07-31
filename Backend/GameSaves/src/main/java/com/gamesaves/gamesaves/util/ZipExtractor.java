@@ -12,6 +12,7 @@ import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.util.*;
 
@@ -326,10 +327,19 @@ public class ZipExtractor {
                     if (entryData != null) {
                         Files.write(physicalPath, entryData);
                     } else {
-                        Files.copy(tempFile, physicalPath);
+                        // 大文件：同目录 move 替代 copy，避免大文件双倍磁盘 I/O
+                        try {
+                            Files.move(tempFile, physicalPath);
+                        } catch (IOException e) {
+                            // move 失败（如杀毒软件占用）时回退为 copy + 删除
+                            Files.copy(tempFile, physicalPath, StandardCopyOption.REPLACE_EXISTING);
+                            Files.deleteIfExists(tempFile);
+                        }
                     }
                 } else {
                     log.debug("Dedup: file {} already exists as {}", entryName, physicalKey);
+                    // 物理文件已存在（内容去重），临时文件不再需要
+                    if (tempFile != null) Files.deleteIfExists(tempFile);
                 }
 
                 // ── 文本可预览性判断 ──
@@ -337,26 +347,9 @@ public class ZipExtractor {
                 if (entryData != null) {
                     isText = ArchiveUtils.isTextFile(entryName, entryData);
                 } else {
-                    // 大文件：读前 5MB 用于文本检测
-                    long previewLen = Math.min(entrySize, 5 * 1024 * 1024);
-                    byte[] preview = new byte[(int) previewLen];
-                    try (InputStream is = Files.newInputStream(tempFile)) {
-                        int total = 0;
-                        while (total < preview.length) {
-                            int n = is.read(preview, total, preview.length - total);
-                            if (n < 0) break;
-                            total += n;
-                        }
-                        if (total < preview.length) {
-                            preview = Arrays.copyOf(preview, total);
-                        }
-                    }
-                    isText = ArchiveUtils.isTextFile(entryName, preview);
-                }
-
-                // 清理临时文件
-                if (tempFile != null) {
-                    try { Files.deleteIfExists(tempFile); } catch (IOException ignored) {}
+                    // 大文件：从物理文件读前 5MB 用于文本检测（tempFile 可能已被 move）
+                    byte[] preview = ArchiveUtils.readFirstBytes(physicalPath, 5 * 1024 * 1024);
+                    isText = preview != null && ArchiveUtils.isTextFile(entryName, preview);
                 }
 
                 // ── 自动创建父目录节点（GitHub 风格文件浏览）──
@@ -380,7 +373,13 @@ public class ZipExtractor {
                 // ── README 文件检测 ──
                 if (entryName.equalsIgnoreCase("README.md")
                         || entryName.equalsIgnoreCase("readme.txt")) {
-                    readmeContents.add(new String(entryData, StandardCharsets.UTF_8));
+                    // 大文件分支 entryData 为 null，从物理文件读取（截断到 5MB，防 NPE + 防爆内存）
+                    String readme = entryData != null
+                            ? new String(entryData, StandardCharsets.UTF_8)
+                            : ArchiveUtils.readReadmeContent(physicalPath);
+                    if (readme != null) {
+                        readmeContents.add(readme);
+                    }
                 }
 
                 // ── 进度回调（每 5 个文件报告一次）──

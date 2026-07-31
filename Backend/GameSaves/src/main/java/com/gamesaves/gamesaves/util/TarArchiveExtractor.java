@@ -12,6 +12,7 @@ import org.slf4j.LoggerFactory;
 import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.util.*;
 
@@ -153,20 +154,49 @@ public class TarArchiveExtractor {
                     }
                 }
 
-                // 读取条目内容：≤10MB 直接读内存，>10MB 先写临时文件再读回
-                byte[] entryData;
-                Path tempFile = null;
+                // ── 读取条目内容（大小分支：≤10MB 内存，>10MB 流式写临时文件并同步算 MD5）──
+                final byte[] entryData;
+                final String md5Hash;
+                final Path tempFile;
+                final long entrySize;
+
                 if (size <= MEMORY_BUFFER_THRESHOLD) {
+                    // 小文件：直接读入内存
+                    tempFile = null;
                     entryData = readToMemory(tarIn, (int) size);
+                    entrySize = entryData.length;
+                    md5Hash = ArchiveUtils.computeMd5(entryData);
                 } else {
+                    // 大文件：流式写入临时文件，MD5 在流中计算（不再读回内存）
+                    entryData = null;
                     tempFile = Files.createTempFile(extractRoot, "tar-extract-", ".tmp");
-                    readToFile(tarIn, tempFile, size);
-                    entryData = Files.readAllBytes(tempFile);
+                    MessageDigest md5Digest;
+                    try {
+                        md5Digest = MessageDigest.getInstance("MD5");
+                    } catch (java.security.NoSuchAlgorithmException e) {
+                        Files.deleteIfExists(tempFile);
+                        throw new FileProcessingException("MD5 not available", e);
+                    }
+                    try {
+                        readToFile(tarIn, tempFile, size, md5Digest);
+                    } catch (IOException e) {
+                        Files.deleteIfExists(tempFile);
+                        throw e;
+                    }
+                    entrySize = Files.size(tempFile);
+                    md5Hash = ArchiveUtils.bytesToHex(md5Digest.digest());
                 }
 
                 // ── Magic number 校验（检测伪装可执行文件）──
-                String magicViolation = magicNumberValidator.check(
-                        entryData.length > 4 ? entryData : new byte[0], entryName);
+                String magicViolation;
+                if (entryData != null) {
+                    magicViolation = magicNumberValidator.check(
+                            entryData.length > 4 ? entryData : new byte[0], entryName);
+                } else {
+                    // 从临时文件读前 4 字节（所有魔数签名都在 4 字节内）
+                    byte[] header = ArchiveUtils.readFirstBytes(tempFile, 4);
+                    magicViolation = magicNumberValidator.check(header != null ? header : new byte[0], entryName);
+                }
                 if (magicViolation != null) {
                     violations.add(magicViolation);
                     log.warn("Magic number violation: {}", magicViolation);
@@ -176,7 +206,7 @@ public class TarArchiveExtractor {
 
                 // ── README images 处理（images/ 目录下的图片不存入 saving_items）──
                 String lowerEntry = entryName.toLowerCase();
-                if (lowerEntry.startsWith("images/") && entryData.length <= 10 * 1024 * 1024) {
+                if (lowerEntry.startsWith("images/") && entryData != null && entryData.length <= 10 * 1024 * 1024) {
                     String relativePath = entryName.substring("images/".length());
                     if (!relativePath.isEmpty()) {
                         readmeImages.add(ArchiveExtractionResult.ReadmeImageEntry.builder()
@@ -188,18 +218,37 @@ public class TarArchiveExtractor {
 
                 // ── Content-addressable 存储（去重）──
                 String fileType = ArchiveUtils.getExtension(entryName);
-                String md5Hash = ArchiveUtils.computeMd5(entryData);
                 String physicalKey = md5Hash + "." + fileType;
 
                 Path physicalPath = extractRoot.resolve(physicalKey);
                 if (!Files.exists(physicalPath)) {
-                    Files.write(physicalPath, entryData);
+                    if (entryData != null) {
+                        Files.write(physicalPath, entryData);
+                    } else {
+                        // 大文件：同目录 move 替代 copy，避免大文件双倍磁盘 I/O
+                        try {
+                            Files.move(tempFile, physicalPath);
+                        } catch (IOException e) {
+                            // move 失败（如杀毒软件占用）时回退为 copy + 删除
+                            Files.copy(tempFile, physicalPath, StandardCopyOption.REPLACE_EXISTING);
+                            Files.deleteIfExists(tempFile);
+                        }
+                    }
+                } else {
+                    log.debug("Dedup: file {} already exists as {}", entryName, physicalKey);
+                    // 物理文件已存在（内容去重），临时文件不再需要
+                    if (tempFile != null) Files.deleteIfExists(tempFile);
                 }
 
-                boolean isText = ArchiveUtils.isTextFile(entryName, entryData);
-
-                // 清理临时文件
-                if (tempFile != null) Files.deleteIfExists(tempFile);
+                // ── 文本可预览性判断 ──
+                boolean isText;
+                if (entryData != null) {
+                    isText = ArchiveUtils.isTextFile(entryName, entryData);
+                } else {
+                    // 大文件：从物理文件读前 5MB 用于文本检测（tempFile 可能已被 move）
+                    byte[] preview = ArchiveUtils.readFirstBytes(physicalPath, 5 * 1024 * 1024);
+                    isText = preview != null && ArchiveUtils.isTextFile(entryName, preview);
+                }
 
                 String parentPath = PathTraversalValidator.computeParentPath(entryName);
                 ArchiveUtils.autoCreateDirectories(items, createdDirs, parentPath, snapshotId);
@@ -210,7 +259,7 @@ public class TarArchiveExtractor {
                         .physicalKey(physicalKey)
                         .parentPath(parentPath)
                         .isDirectory(false)
-                        .fileSize((long) entryData.length)
+                        .fileSize(entrySize)
                         .md5Hash(md5Hash)
                         .fileType(fileType)
                         .isText(isText)
@@ -219,7 +268,13 @@ public class TarArchiveExtractor {
 
                 // ── README 检测 ──
                 if (entryName.equalsIgnoreCase("README.md") || entryName.equalsIgnoreCase("readme.txt")) {
-                    readmeContents.add(new String(entryData, java.nio.charset.StandardCharsets.UTF_8));
+                    // 大文件分支 entryData 为 null，从物理文件读取（截断到 5MB）
+                    String readme = entryData != null
+                            ? new String(entryData, java.nio.charset.StandardCharsets.UTF_8)
+                            : ArchiveUtils.readReadmeContent(physicalPath);
+                    if (readme != null) {
+                        readmeContents.add(readme);
+                    }
                 }
 
                 // ── 进度回调（每 10 个文件报告一次，TAR 总数未知 = -1）──
@@ -280,14 +335,16 @@ public class TarArchiveExtractor {
         return baos.toByteArray();
     }
 
-    /** 将条目内容写入临时文件（用于大文件 >10MB） */
-    private void readToFile(TarArchiveInputStream tarIn, Path tempFile, long size) throws IOException {
+    /** 将条目内容写入临时文件并同步计算 MD5（用于大文件 >10MB，不读回内存） */
+    private void readToFile(TarArchiveInputStream tarIn, Path tempFile, long size,
+                            MessageDigest md5Digest) throws IOException {
         try (OutputStream os = Files.newOutputStream(tempFile)) {
             byte[] buf = new byte[BUFFER_SIZE];
             long remaining = size;
             int len;
             while (remaining > 0 && (len = tarIn.read(buf, 0, (int) Math.min(BUFFER_SIZE, remaining))) != -1) {
                 os.write(buf, 0, len);
+                md5Digest.update(buf, 0, len);
                 remaining -= len;
             }
         }

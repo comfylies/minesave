@@ -20,6 +20,7 @@ import com.gamesaves.gamesaves.util.TarArchiveExtractor;
 import com.gamesaves.gamesaves.util.ZipExtractor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -31,6 +32,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 /**
  * 压缩包提取服务 — 异步提取存档文件并上传到存储。
@@ -51,6 +53,8 @@ public class ZipExtractionService {
     private final MagicNumberValidator magicNumberValidator;
     private final StorageService storageService;
     private final ExtractionProgressService progressService;
+    // 提取文件并行上传到存储的专用线程池（见 AsyncConfig.uploadExecutor）
+    private final Executor uploadExecutor;
 
     // 提取限制 — 从配置文件读取，与 ArticleServiceImpl 预检保持一致
     @Value("${app.extraction.max-entry-size:104857600}")
@@ -73,7 +77,8 @@ public class ZipExtractionService {
                                 SearchSyncService searchSyncService,
                                 MagicNumberValidator magicNumberValidator,
                                 StorageService storageService,
-                                ExtractionProgressService progressService) {
+                                ExtractionProgressService progressService,
+                                @Qualifier("uploadExecutor") Executor uploadExecutor) {
         this.articleRepository = articleRepository;
         this.savingsRepository = savingsRepository;
         this.savingItemRepository = savingItemRepository;
@@ -82,6 +87,7 @@ public class ZipExtractionService {
         this.magicNumberValidator = magicNumberValidator;
         this.storageService = storageService;
         this.progressService = progressService;
+        this.uploadExecutor = uploadExecutor;
     }
 
     /**
@@ -219,23 +225,16 @@ public class ZipExtractionService {
                     .values().stream()
                     .toList();
             int totalUploadItems = uniqueItems.size();
-            uniqueItems.parallelStream().forEach(item -> {
-                Path localFile = extractRoot.resolve(item.getPhysicalKey());
-                if (Files.exists(localFile)) {
-                    String fileKey = cosPrefix + "extracted/" + item.getPhysicalKey();
-                    try {
-                        storageService.storeFromPath(fileKey, localFile);
-                    } catch (Exception e) {
-                        uploadErrors.add(item.getPhysicalKey() + ": " + e.getMessage());
-                        log.error("Upload failed for {}: {}", fileKey, e.getMessage());
-                    }
-                }
-                int done = uploadedCount.incrementAndGet();
-                if (listener != null && (done % 10 == 0 || done == totalUploadItems)) {
-                    listener.onProgress("UPLOADING", done, totalUploadItems,
-                            0, -1, item.getPhysicalKey());
-                }
-            });
+            // 使用专用上传线程池（替代 parallelStream 的公共 ForkJoinPool）：
+            // 上传是网络 IO 密集操作，公共池按 CPU 核数并行度太低，且多个压缩包并发提取时
+            // 会互相争抢公共池线程。大文件上传的加速靠此池并发度，见 app.extraction.upload-parallelism。
+            List<CompletableFuture<Void>> uploadFutures = uniqueItems.stream()
+                    .map(item -> CompletableFuture.runAsync(
+                            () -> uploadItem(item, cosPrefix, extractRoot, uploadedCount,
+                                    uploadErrors, listener, totalUploadItems),
+                            uploadExecutor))
+                    .toList();
+            CompletableFuture.allOf(uploadFutures.toArray(new CompletableFuture[0])).join();
 
             // 上传完成时确保 100% 进度
             if (listener != null && totalUploadItems > 0) {
@@ -330,6 +329,34 @@ public class ZipExtractionService {
             } catch (Exception e) {
                 log.warn("Failed to clean temp directory {}: {}", tempDir, e.getMessage());
             }
+        }
+    }
+
+    /**
+     * 上传单个提取文件到存储（在 uploadExecutor 线程池中并发执行）。
+     * 文件缺失时记为错误而不是静默跳过，否则 saving_items 会出现 storage 上不存在的幽灵记录。
+     */
+    private void uploadItem(SavingItem item, String cosPrefix, Path extractRoot,
+                            java.util.concurrent.atomic.AtomicInteger uploadedCount,
+                            java.util.concurrent.ConcurrentLinkedQueue<String> uploadErrors,
+                            ExtractionProgressListener listener, int totalUploadItems) {
+        Path localFile = extractRoot.resolve(item.getPhysicalKey());
+        String fileKey = cosPrefix + "extracted/" + item.getPhysicalKey();
+        if (!Files.exists(localFile)) {
+            String err = item.getPhysicalKey() + ": local file missing after extraction";
+            uploadErrors.add(err);
+            log.error("Upload skipped — {}", err);
+            return;
+        }
+        try {
+            storageService.storeFromPath(fileKey, localFile);
+        } catch (Exception e) {
+            uploadErrors.add(item.getPhysicalKey() + ": " + e.getMessage());
+            log.error("Upload failed for {}: {}", fileKey, e.getMessage());
+        }
+        int done = uploadedCount.incrementAndGet();
+        if (listener != null && (done % 10 == 0 || done == totalUploadItems)) {
+            listener.onProgress("UPLOADING", done, totalUploadItems, 0, -1, item.getPhysicalKey());
         }
     }
 

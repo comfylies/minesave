@@ -2,8 +2,14 @@ package com.gamesaves.gamesaves.util;
 
 import com.gamesaves.gamesaves.entity.SavingItem;
 import com.gamesaves.gamesaves.exception.FileProcessingException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.*;
 
@@ -15,8 +21,55 @@ import java.util.*;
  */
 public final class ArchiveUtils {
 
+    private static final Logger log = LoggerFactory.getLogger(ArchiveUtils.class);
+
+    // 从物理文件提取 README 内容的上限（超过视为超大，截断存储）
+    private static final int README_CONTENT_LIMIT = 5 * 1024 * 1024;
+
     private ArchiveUtils() {
         // 工具类禁止实例化
+    }
+
+    /**
+     * 有界读取文件前 maxBytes 字节（用于大文件分支的魔数校验 / 文本检测 / README 提取）。
+     * 文件不存在或读取失败时返回 {@code null}。
+     */
+    public static byte[] readFirstBytes(Path path, int maxBytes) {
+        try {
+            long fileSize = Files.size(path);
+            int len = (int) Math.min(fileSize, maxBytes);
+            byte[] data = new byte[len];
+            try (InputStream is = Files.newInputStream(path)) {
+                int total = 0;
+                while (total < len) {
+                    int n = is.read(data, total, len - total);
+                    if (n < 0) break;
+                    total += n;
+                }
+                if (total < len) {
+                    return Arrays.copyOf(data, total);
+                }
+            }
+            return data;
+        } catch (IOException e) {
+            log.warn("Failed to read first {} bytes of {}: {}", maxBytes, path, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 从物理文件提取 README 内容（大文件分支专用，entryData 为 null 时调用）。
+     * 截断到 {@link #README_CONTENT_LIMIT}，防止超大 README 打爆内存 / 数据库字段。
+     */
+    public static String readReadmeContent(Path physicalPath) {
+        byte[] data = readFirstBytes(physicalPath, README_CONTENT_LIMIT);
+        if (data == null) {
+            return null;
+        }
+        if (Files.exists(physicalPath) && data.length == README_CONTENT_LIMIT) {
+            log.warn("README truncated to {} bytes: {}", README_CONTENT_LIMIT, physicalPath);
+        }
+        return new String(data, StandardCharsets.UTF_8);
     }
 
     // ── 字节/哈希工具 ──
