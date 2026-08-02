@@ -1,6 +1,7 @@
 <template>
   <div class="bubble-row" :class="{ mine: mine }"><div class="bubble">
-    <img v-if="imageUrl" class="chat-image" :src="imageUrl" alt="聊天图片" @click="openImage" @error="refreshThumbnail" />
+    <div v-if="message.imageExpired" class="image-expired">&lt;图片已过期&gt;</div>
+    <img v-else-if="imageUrl" class="chat-image" :src="imageUrl" alt="聊天图片" @click="openImage" @error="refreshThumbnail" />
     <p v-if="message.content">{{ message.content }}</p><small>{{ formattedTime }}</small>
   </div><el-image-viewer v-if="show && originalUrl" :url-list="[originalUrl]" @close="closeImage" /></div>
 </template>
@@ -26,7 +27,7 @@ onBeforeUnmount(() => {
   revokeObjectUrl(originalUrl.value)
 })
 async function loadLocalThumbnail() {
-  if (imageUrl.value || !props.message.imageThumbnailKey) return
+  if (props.message.imageExpired || imageUrl.value || !props.message.imageThumbnailKey) return
   try {
     imageUrl.value = URL.createObjectURL(await messageApi.getImage(props.message.id, true))
   } catch {
@@ -34,7 +35,7 @@ async function loadLocalThumbnail() {
   }
 }
 async function refreshThumbnail() {
-  if (thumbnailRefreshed.value || !props.message.imageThumbnailKey) return
+  if (props.message.imageExpired || thumbnailRefreshed.value || !props.message.imageThumbnailKey) return
   thumbnailRefreshed.value = true
   try {
     revokeObjectUrl(imageUrl.value)
@@ -46,7 +47,7 @@ async function refreshThumbnail() {
   }
 }
 async function openImage() {
-  if (loadingOriginal.value) return
+  if (props.message.imageExpired || loadingOriginal.value) return
   loadingOriginal.value = true
   try {
     revokeObjectUrl(originalUrl.value)
@@ -70,5 +71,5 @@ function revokeObjectUrl(url) {
 }
 </script>
 <style scoped>
-.bubble-row{display:flex;margin:8px 0}.bubble-row.mine{justify-content:flex-end}.bubble{max-width:min(75%,560px);padding:8px 10px;border:1px solid var(--color-border-primary);border-radius:var(--radius-md);background:var(--color-bg-primary)}.mine .bubble{background:#dafbe1}.bubble p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}.bubble small{display:block;margin-top:4px;color:var(--color-secondary-text);font-size:11px}.chat-image{display:block;max-width:100%;max-height:300px;border-radius:6px;cursor:zoom-in}
+.bubble-row{display:flex;margin:8px 0}.bubble-row.mine{justify-content:flex-end}.bubble{max-width:min(75%,560px);padding:8px 10px;border:1px solid var(--color-border-primary);border-radius:var(--radius-md);background:var(--color-bg-primary)}.mine .bubble{background:#dafbe1}.bubble p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}.bubble small{display:block;margin-top:4px;color:var(--color-secondary-text);font-size:11px}.chat-image{display:block;max-width:100%;max-height:300px;border-radius:6px;cursor:zoom-in}.image-expired{color:var(--color-secondary-text);font-size:13px}
 </style>

@@ -124,6 +124,11 @@ app:
   edit:
     max-daily-edits: 999999
   messaging:
+    retention:
+      image-days: 14
+      message-days: 30
+      cron: "0 15 3 * * *"
+      batch-size: 200
     max-text-length: 4000
     max-image-bytes: 5242880
     long-poll-timeout-ms: 25000

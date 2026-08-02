@@ -59,6 +59,9 @@ public class DirectMessage {
     @Column(name = "image_height")
     private Integer imageHeight;
 
+    @Column(name = "image_expired_at")
+    private LocalDateTime imageExpiredAt;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

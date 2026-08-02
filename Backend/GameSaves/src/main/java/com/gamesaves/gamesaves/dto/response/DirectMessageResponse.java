@@ -21,6 +21,7 @@ public class DirectMessageResponse {
     private String imageThumbnailUrl;
     private Integer imageWidth;
     private Integer imageHeight;
+    private boolean imageExpired;
     private LocalDateTime createdAt;
 
     public static DirectMessageResponse fromEntity(DirectMessage message) {
@@ -34,6 +35,7 @@ public class DirectMessageResponse {
                 .imageThumbnailKey(message.getImageThumbnailKey())
                 .imageWidth(message.getImageWidth())
                 .imageHeight(message.getImageHeight())
+                .imageExpired(message.getImageExpiredAt() != null)
                 .createdAt(message.getCreatedAt())
                 .build();
     }

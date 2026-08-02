@@ -41,6 +41,9 @@ public class DirectConversation {
     @Column(name = "last_message_at")
     private LocalDateTime lastMessageAt;
 
+    @Column(name = "history_purged_at")
+    private LocalDateTime historyPurgedAt;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

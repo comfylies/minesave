@@ -10,6 +10,7 @@ export const useMessageStore = defineStore('messages', () => {
   const loading = ref(false)
   const loadingOlder = ref(false)
   const hasOlderMessages = ref(false)
+  const historyPurged = ref(false)
   const connectionState = ref('disconnected')
   const eventCursor = ref(null)
   const eventEpoch = ref(null)
@@ -90,6 +91,7 @@ export const useMessageStore = defineStore('messages', () => {
     const incoming = page.content || []
     mergeMessages(activeConversationId.value, incoming)
     hasOlderMessages.value = (page.totalElements || 0) > incoming.length
+    historyPurged.value = Boolean(page.historyPurged)
   }
 
   async function loadOlder() {
@@ -102,6 +104,7 @@ export const useMessageStore = defineStore('messages', () => {
       const incoming = page.content || []
       mergeMessages(activeConversationId.value, incoming, true)
       hasOlderMessages.value = (page.totalElements || 0) > incoming.length
+      historyPurged.value = Boolean(page.historyPurged)
       return incoming.length
     } finally {
       loadingOlder.value = false
@@ -143,6 +146,7 @@ export const useMessageStore = defineStore('messages', () => {
     unreadCount.value = 0
     loadingOlder.value = false
     hasOlderMessages.value = false
+    historyPurged.value = false
     connectionState.value = 'disconnected'
     eventCursor.value = null
     eventEpoch.value = null
@@ -150,7 +154,7 @@ export const useMessageStore = defineStore('messages', () => {
     eventStateStorageKey = null
   }
 
-  return { conversations, activeConversationId, messagesByConversation, unreadCount, loading, loadingOlder, hasOlderMessages, connectionState, eventCursor, eventEpoch,
+  return { conversations, activeConversationId, messagesByConversation, unreadCount, loading, loadingOlder, hasOlderMessages, historyPurged, connectionState, eventCursor, eventEpoch,
     activeConversation, activeMessages, loadConversations, selectConversation, refreshActive, loadOlder,
     markActiveRead, send, handleEvent, refreshUnread, restoreEventState, reset }
 })

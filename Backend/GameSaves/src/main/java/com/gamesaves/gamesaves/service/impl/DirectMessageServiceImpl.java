@@ -119,8 +119,10 @@ public class DirectMessageServiceImpl implements DirectMessageService {
         long totalElements = beforeId == null
                 ? messageRepository.countByConversationId(conversation.getId())
                 : messageRepository.countByConversationIdAndIdLessThan(conversation.getId(), beforeId);
-        return PageDTO.of(chronological.stream().map(this::toMessageResponse).toList(),
+        PageDTO<DirectMessageResponse> response = PageDTO.of(chronological.stream().map(this::toMessageResponse).toList(),
                 0, messages.getSize(), totalElements);
+        response.setHistoryPurged(conversation.getHistoryPurgedAt() != null);
+        return response;
     }
 
     @Override

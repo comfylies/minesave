@@ -4,7 +4,7 @@
       :class="{ active: conversation.id === activeId }" @click="$emit('select', conversation.id)">
       <el-avatar :size="38" :src="conversation.peerAvatarUrl" icon="UserFilled" />
       <span class="conversation-text"><strong>{{ conversation.peerNickname || conversation.peerUsername }}</strong>
-        <small>{{ conversation.lastMessage?.content || (conversation.lastMessage ? '[图片]' : '') }}</small></span>
+        <small>{{ conversation.lastMessage?.content || (conversation.lastMessage ? (conversation.lastMessage.imageExpired ? '&lt;图片已过期&gt;' : '[图片]') : '消息已清理') }}</small></span>
       <el-badge :value="conversation.unreadCount" :hidden="!conversation.unreadCount" :max="99" />
     </button>
     <p v-if="!conversations.length" class="empty">暂无会话</p>
