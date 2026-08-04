@@ -7,9 +7,14 @@ const source = path => readFile(new URL(path, root), 'utf8')
 
 test('expired image bubbles show the literal placeholder without loading image data', async () => {
   const bubble = await source('src/components/message/MessageBubble.vue')
-  assert.match(bubble, /v-if="message\.imageExpired"/)
+  assert.match(bubble, /v-if="message\.imageExpired \|\| locallyExpired"/)
   assert.match(bubble, /&lt;图片已过期&gt;/)
   assert.match(bubble, /props\.message\.imageExpired \|\| imageUrl\.value/)
+})
+
+test('a failed original-image open marks the bubble expired locally', async () => {
+  const bubble = await source('src/components/message/MessageBubble.vue')
+  assert.match(bubble, /locallyExpired\.value = true/)
 })
 
 test('oldest retained history shows a cleanup divider', async () => {

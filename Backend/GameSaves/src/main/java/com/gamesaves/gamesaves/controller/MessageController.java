@@ -7,6 +7,7 @@ import com.gamesaves.gamesaves.dto.response.ApiResponse;
 import com.gamesaves.gamesaves.dto.response.ConversationResponse;
 import com.gamesaves.gamesaves.dto.response.DirectMessageResponse;
 import com.gamesaves.gamesaves.dto.response.MessageEventResponse;
+import com.gamesaves.gamesaves.exception.ResourceNotFoundException;
 import com.gamesaves.gamesaves.service.DirectMessageService;
 import com.gamesaves.gamesaves.service.MessageLongPollService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -88,6 +89,11 @@ public class MessageController {
     public ResponseEntity<byte[]> image(@PathVariable Long messageId,
                                         @RequestParam(defaultValue = "true") boolean thumbnail) {
         String key = messageService.getImageKey(messageId, thumbnail, StpUtil.getLoginIdAsLong());
+        // 对象可能已被清理或丢失（如图片过期删除、COS/Local 存储被外部清理）：
+        // 缺失时返回 404 而非 500，与过期消息的行为保持一致
+        if (!storageService.exists(key)) {
+            throw new ResourceNotFoundException("Chat image", messageId);
+        }
         MediaType type = key.endsWith(".png") ? MediaType.IMAGE_PNG : key.endsWith(".webp")
                 ? MediaType.parseMediaType("image/webp") : MediaType.IMAGE_JPEG;
         return ResponseEntity.ok().contentType(type).body(storageService.read(key));

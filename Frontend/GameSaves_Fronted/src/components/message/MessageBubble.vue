@@ -1,6 +1,6 @@
 <template>
   <div class="bubble-row" :class="{ mine: mine }"><div class="bubble">
-    <div v-if="message.imageExpired" class="image-expired">&lt;图片已过期&gt;</div>
+    <div v-if="message.imageExpired || locallyExpired" class="image-expired">&lt;图片已过期&gt;</div>
     <img v-else-if="imageUrl" class="chat-image" :src="imageUrl" alt="聊天图片" @click="openImage" @error="refreshThumbnail" />
     <p v-if="message.content">{{ message.content }}</p><small>{{ formattedTime }}</small>
   </div><el-image-viewer v-if="show && originalUrl" :url-list="[originalUrl]" @close="closeImage" /></div>
@@ -14,6 +14,8 @@ const imageUrl = ref(props.message.imageThumbnailUrl || '')
 const originalUrl = ref('')
 const thumbnailRefreshed = ref(false)
 const loadingOriginal = ref(false)
+// 原图打开失败（如图片刚被清理、对象已缺失）时本地标记过期，显示占位符而非点击无反应
+const locallyExpired = ref(false)
 const formattedTime = computed(() => {
   const date = new Date(props.message.createdAt)
   if (Number.isNaN(date.getTime())) return ''
@@ -56,7 +58,8 @@ async function openImage() {
       : URL.createObjectURL(await messageApi.getImage(props.message.id, false))
     show.value = true
   } catch {
-    // Keep the viewer closed when its freshly authorized URL cannot be issued.
+    // 原图已不可用（例如刚被清理/已过期）：本地按已过期显示，避免点击无反应
+    locallyExpired.value = true
   } finally {
     loadingOriginal.value = false
   }
