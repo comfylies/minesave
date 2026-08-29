@@ -4,6 +4,10 @@
 
 > 个人项目 · 前后端分离 · 中文界面
 
+<p align="center">
+  <img src="docs/screenshots/home.jpg" alt="MineSave 首页" width="100%">
+</p>
+
 ---
 
 ## ✨ 功能特性
@@ -23,6 +27,16 @@
 - 🚀 **自动化部署** — GitHub Actions 推送即部署（腾讯云服务器）
 
 ---
+
+## 🖼️ 界面预览
+
+| 存档详情 | 实时私信 |
+|----------|----------|
+| ![存档详情](docs/screenshots/article.png) | ![实时私信](docs/screenshots/messages.png) |
+
+**文本标注** — 选中文字即可添加批注，高亮 + 左侧色条 + 侧栏标注面板
+
+![文本标注](docs/screenshots/annotation.png)
 
 ## 🧱 技术栈
 
