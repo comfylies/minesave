@@ -1,122 +1,153 @@
 // =====================================================================
-// minesave 的 Jenkins 流水线定义
+// minesave 的 Jenkins 流水线
 //
-// 这个文件本身就是"构建配置" —— 它和代码一起存在 Git 里。
-// 这是 Pipeline 相对 Freestyle 最大的价值：构建流程可版本化、可 review、
-// 可复制到另一台 Jenkins，不用再对着界面点一遍。
-//
-// v3 新增两件事：
-//   ① when     —— 阶段可以"有条件地跳过"
-//   ② parallel —— 多条线同时跑（外加 failFast）
+// 它跑在【多分支流水线】里，分支源是 https://github.com/comfylies/minesave.git
+// 所以：这个文件就是构建配置本身。提交到哪个分支，就用哪个分支的这份脚本跑。
 // =====================================================================
+
+// 参数取值的统一入口，两个坑一次性解决：
+//   ① 首次引入某个参数的那次构建，params.X 是 null
+//      （参数定义是这次运行过程中才注册到任务上的，下次才有得选）。
+//   ② 不能图省事写 params.X ?: true —— Groovy 里 false ?: true 的结果是 true，
+//      用户取消勾选反而会被当成勾上。
+def pbool(String name, boolean dflt) {
+    def v = params[name]
+    return (v == null) ? dflt : (v instanceof Boolean ? v : v.toString().toBoolean())
+}
+
 pipeline {
-    agent any                       // 在任意可用执行器上跑（现在只有内置节点 Jenkins）
+
+    agent any
 
     options {
-        buildDiscarder(logRotator(numToKeepStr: '20'))   // 只留最近 20 次构建，别把磁盘撑爆
-        disableConcurrentBuilds()                        // 禁止同一个任务并发：工作区是共用的
+        buildDiscarder(logRotator(numToKeepStr: '20', daysToKeepStr: '30'))
+        disableConcurrentBuilds()            // 工作区是共用的，同时跑两次会互相踩
+        timeout(time: 30, unit: 'MINUTES')   // 兜底：卡死了自动判 ABORTED，不会永远占着执行器
     }
 
-    // -----------------------------------------------------------------
-    // 参数：写在代码里，不再在界面上手点。
-    // 注意 ── 新增的参数要等"包含它的那次构建"跑完，才会出现在界面上。
-    // -----------------------------------------------------------------
     parameters {
-        booleanParam(name: 'SKIP_TESTS',    defaultValue: true,  description: '跳过单元测试。本机没起 MySQL/Meilisearch 时必须勾上，否则测试大面积报错')
-        booleanParam(name: 'CLEAN_FIRST',   defaultValue: true,  description: '先执行 mvn clean 从零编译。取消勾选走增量，快很多')
-        booleanParam(name: 'SKIP_FRONTEND', defaultValue: false, description: '跳过"前端测试"这条并行分支（用来演示 when 条件）')
-        string(name: 'BUILD_NOTE', defaultValue: '', description: '随手写一句备注，会打印到日志里，方便事后区分这次构建是干嘛的')
+        booleanParam(name: 'SKIP_TESTS',    defaultValue: true,  description: '跳过单元测试。本机没起 MySQL/Meilisearch 时必须勾上')
+        booleanParam(name: 'CLEAN_FIRST',   defaultValue: true,  description: '先 mvn clean 从零编译。取消勾选走增量，快很多')
+        booleanParam(name: 'SKIP_FRONTEND', defaultValue: false, description: '跳过"前端构建"这条并行分支（npm ci / test / vite build）')
+        string(name: 'BUILD_NOTE',          defaultValue: '',     description: '随手写一句备注，会打印到日志里，方便事后区分')
+        booleanParam(name: 'CONFIRM_DEPLOY', defaultValue: false, description: '勾上后流水线会停下来等人点「确认发布」（人工卡点 input）')
+        booleanParam(name: 'DEPLOY_DRY_RUN', defaultValue: true,  description: '部署演练：连服务器、上传、校验完整性，但不替换不重启。第一次务必保持勾选')
     }
 
-    // -----------------------------------------------------------------
-    // 触发器：等价于界面上的"轮询 SCM"（Poll SCM）。
-    //   H   = hash。Jenkins 按任务名算出一个固定的分钟偏移，避免所有任务挤在同一分钟轮询。
-    //   /2  = 每 2 分钟一次。生产上一般写 H/5 或 H/15。
-    // -----------------------------------------------------------------
-    triggers {
-        pollSCM('H/2 * * * *')
-    }
+    // triggers 这里【故意留空】。
+    // 多分支任务里"盯仓库"由父项目统一负责（父项目 → 触发器 → Periodically if not otherwise run）。
+    // 子任务再各自 pollSCM 属于重复劳动，两边同时发现同一个提交还可能抢出重复构建。
 
     environment {
-        // ① 修掉"JAVA_HOME 是 21、java 却是 25"这个矛盾。
-        //    minesave 的编译目标是 Java 17，这里显式钉住 17，和 CI/生产保持一致。
+        // Jenkins 不读 ~/.bashrc —— .bashrc 里配的 JAVA_HOME / PATH 在这里一律无效，必须显式写。
+        // minesave 编译目标是 Java 17，这里钉死 17；本机默认 java 是 25，不钉就会不一致。
         JAVA_HOME = '/usr/lib/jvm/java-17-openjdk-amd64'
-
-        // ② 修掉"mvn 不在 PATH 里"。
-        //    Jenkins 不读 ~/.bashrc，所以 .bashrc 里配的在这里一律无效，必须显式声明。
         PATH = "/home/yf/opt/maven/bin:/usr/lib/jvm/java-17-openjdk-amd64/bin:${env.PATH}"
     }
 
     stages {
 
-        // ============ 第 1 阶段：把仓库代码拉到工作区 ============
-        stage('取代码') {
-            steps {
-                checkout scm
-                sh 'echo "工作区: $WORKSPACE"'
-                sh 'git log --oneline -1'
-                sh 'git rev-parse --short HEAD'
-            }
-        }
-
-        // ============ 第 2 阶段：确认工具链真的就位 ============
-        stage('工具链体检') {
+        // ---- 1. 环境侦察：一次把"我是谁、在哪、工具什么版本"打全 ----
+        // 这里【没有 checkout scm】：Declarative 已经在最前面自动 checkout 过了
+        // （日志里那个 "Declarative: Checkout SCM" 阶段），再调一次是白跑一趟网络。
+        stage('环境侦察') {
             steps {
                 sh '''
-                    echo "JAVA_HOME = $JAVA_HOME"
-                    echo -n "java : "; java -version 2>&1 | head -1
-                    echo -n "mvn  : "; mvn -version 2>&1 | head -1
-                    echo -n "node : "; node -v
+                    echo "工作区  : $WORKSPACE"
+                    echo "分支    : [$BRANCH_NAME] / [${GIT_LOCAL_BRANCH}] / [$GIT_BRANCH]"
+                    echo "本次提交: $(git rev-parse --short HEAD)  $(git log --oneline -1)"
+                    echo "提交总数: $(git rev-list --count HEAD)"
+                    echo -n "java    : "; java -version 2>&1 | head -1
+                    echo -n "mvn     : "; mvn -version 2>&1 | head -1
+                    echo -n "node    : "; node -v
                 '''
             }
         }
 
-        // =============================================================
-        // 第 3 阶段：侦察分支名
-        // 这一步是给下面 when { branch } 的演示铺垫：先看清楚这几个变量到底有没有值。
-        // =============================================================
-        stage('分支名侦察') {
+        // ---- 2. 本次变更：算出"这次动了哪些目录"，并摊开给日志看 ----
+        //
+        // 这一步把判断结果提前算成两个普通字符串塞进 env，后面的 when 只做字符串比较。
+        //
+        // ⚠ 为什么不直接在阶段里写 when { changeset pattern: 'Backend/**' } ——
+        // changeset 这个 when 条件的实现（ChangeSetConditionalScript）会把 changeSets
+        // 对象一直挂在 CPS 调用栈上，而它【不是可序列化的】。跑在 parallel 里的时候，
+        // 只要另一条线正好卡在 sh 上（CPS 此时要保存程序快照），整个构建就会这样收场：
+        //     java.io.NotSerializableException: hudson.plugins.git.GitChangeSetList
+        // 它是随机的：同一份脚本跑了 17 次都好好的，第 18 次才炸。所以老实点绕开它。
+        //
+        // 顺带修一个原来就有的死条件：changeset 的 pattern 是 Ant 风格，不带 ** 时
+        // 只匹配仓库【根目录】。pom.xml / package.json 这两个文件其实都在子目录里
+        // （Backend/GameSaves/pom.xml、Frontend/GameSaves_Fronted/package.json），
+        // 所以那两条 pattern 从来没生效过。这里用 endsWith 写成真正想要的意思。
+        stage('本次变更') {
             steps {
+                script {
+                    def paths = []
+                    currentBuild.changeSets.each { cs ->
+                        cs.items.each { item ->
+                            item.affectedFiles.each { f -> paths << f.path }
+                        }
+                    }
+                    def empty = paths.isEmpty()
+                    // 变更集为空（第一次构建 / 手动 Build Now）→ 两个标记都算 true，
+                    // 也就是"全都跑一遍"。否则 changeSets 一空，所有阶段会一起变灰，
+                    // 流水线"绿着但什么都没干"。
+                    env.CHANGES_EMPTY    = empty ? 'true' : 'false'
+                    env.CHANGED_BACKEND  = (empty || paths.any { it.endsWith('pom.xml')    || it.startsWith('Backend/')  }) ? 'true' : 'false'
+                    env.CHANGED_FRONTEND = (empty || paths.any { it.endsWith('package.json') || it.startsWith('Frontend/') }) ? 'true' : 'false'
+
+                    echo "Jenkins 记录的变更集数量: ${currentBuild.changeSets.size()}"
+                    echo "本次变更文件: ${paths}"
+                    echo "变更集为空=${env.CHANGES_EMPTY}  后端相关=${env.CHANGED_BACKEND}  前端相关=${env.CHANGED_FRONTEND}"
+                    if (empty) {
+                        echo "→ 变更集为空：两个标记都按 true 处理，全都跑一遍"
+                    }
+                }
                 sh '''
-                    echo "BRANCH_NAME      = [${BRANCH_NAME}]"
-                    echo "GIT_LOCAL_BRANCH = [${GIT_LOCAL_BRANCH}]"
-                    echo "GIT_BRANCH       = [${GIT_BRANCH}]"
+                    echo "本次提交 : $GIT_COMMIT"
+                    echo "上次成功 : ${GIT_PREVIOUS_SUCCESSFUL_COMMIT:-（无，这是第一次）}"
+                    if [ -n "$GIT_PREVIOUS_SUCCESSFUL_COMMIT" ]; then
+                        echo "变更文件："
+                        git diff --name-only "$GIT_PREVIOUS_SUCCESSFUL_COMMIT" "$GIT_COMMIT" | sed 's/^/    /'
+                    else
+                        echo "变更文件：（首次构建，没有可比对的基线）"
+                    fi
                 '''
             }
         }
 
         // =================================================================
-        // 第 4 阶段：并行区 —— 三条线同时开跑
+        // 3. 并行区：三条线同时开跑
         //
-        // parallel 的语义（这是最容易被误解的一点）：
+        // parallel 的语义，最容易被误解的一点：
         //   · 整个 Pipeline 只占【1 个执行器】。分支之间是同一个构建内部的
         //     并发线程，共用同一个工作区，不会各自再占一个执行器。
-        //   · 正因为共用工作区，分支之间【不能写同一个文件】。这里三条线
-        //     各写各的目录，互不干扰。
+        //   · 正因为共用工作区，分支之间不能写同一个文件 —— 这里三条线各写各的目录。
         //   · failFast true：任意一条线失败，立刻掐掉还在跑的其它线。
-        //     （不写的话默认会等所有线跑完，再统一判定失败。）
         // =================================================================
         stage('并行构建') {
             failFast true
 
             parallel {
 
-                // ---- 线 1：后端打包（最慢，约 8 秒）----
+                // ---- 线 1：后端打包 ----
                 stage('后端打包') {
+                    // 判断依据是上面『本次变更』算好的标记。
+                    // env 里的值永远是字符串，能安全地穿过 CPS 的程序快照 —— 别在这里
+                    // 直接碰 currentBuild.changeSets，原因见那个阶段的注释。
+                    when {
+                        expression { return env.CHANGED_BACKEND == 'true' }
+                    }
                     steps {
                         script {
-                            // ---- 读参数 ----
-                            // 坑：在"首次引入某个参数"的那次构建里，params.X 是 null
-                            //     （构建启动时任务上还没有这个参数定义，是这次运行过程中才注册上去的）。
-                            //     所以这里显式判 null 兜默认值。
-                            //
-                            //     千万不要图省事写  params.SKIP_TESTS ?: true
-                            //     Groovy 里 false ?: true 的结果是 true —— 用户取消勾选反而会被当成勾上。
-                            def skipTests  = (params.SKIP_TESTS  == null) ? true : params.SKIP_TESTS
-                            def cleanFirst = (params.CLEAN_FIRST == null) ? true : params.CLEAN_FIRST
+                            // 给后面『归档产物』留标记：这次后端到底编没编。
+                            // 不能靠"文件在不在"判断 —— 工作区跨构建持久，会归档到上一次的旧产物。
+                            env.BACKEND_RAN = 'true'
 
-                            // ---- 用参数拼命令 ----
-                            // 这就是 Pipeline 比 Freestyle 强的地方：真的是在写程序，不是在拼字符串。
+                            def skipTests  = pbool('SKIP_TESTS',  true)
+                            def cleanFirst = pbool('CLEAN_FIRST', true)
+
+                            // 这就是 Pipeline 比 Freestyle 强的地方：真的是在写程序。
                             def cmd = 'mvn -B ' + (cleanFirst ? 'clean package' : 'package')
                             if (skipTests) {
                                 cmd += ' -Dmaven.test.skip=true'
@@ -133,78 +164,23 @@ pipeline {
                             sh 'echo "[后端] 冲线 $(date +%T)"'
                         }
                     }
+                    // 阶段级 post：写法一样，作用范围只有这一个 stage。
+                    post {
+                        always {
+                            echo "[后端] 阶段级 post/always —— 这个阶段无论成败都会走到"
+                        }
+                    }
                 }
 
-                // ---- 线 2：前端测试（很快，约 0.2 秒；用 when 控制跑不跑）----
-                stage('前端测试') {
+                // ---- 线 2：前端构建 ----
+                stage('前端构建') {
+                    // 两个条件都要满足，所以用 allOf 套起来：
+                    //   ① 参数没让跳过   ② 这次改的东西跟前端有关
                     when {
-                        expression {
-                            // 同上一节的坑：新增参数在"首次引入它的那次构建"里是 null。
-                            // null 兜底成 false，也就是默认【要跑】前端测试。
-                            def skip = (params.SKIP_FRONTEND == null) ? false : params.SKIP_FRONTEND
-                            echo "[前端] when 求值：SKIP_FRONTEND=${skip}（null → false）"
-                            return !skip
-                        }
-                    }
-                    steps {
-                        sh 'echo "[前端] 起跑 $(date +%T)"'
-                        dir('Frontend/GameSaves_Fronted') {
-                            // 纯 node 内置测试，不需要 node_modules，所以这里不用先 npm install
-                            sh 'node --test test/*.test.mjs'
-                        }
-                        sh 'echo "[前端] 冲线 $(date +%T)"'
-                    }
-                }
-
-                // ---- 线 3：仓库体检（纯 git/du，几十毫秒）----
-                stage('仓库体检') {
-                    steps {
-                        sh '''
-                            echo "[体检] 起跑 $(date +%T)"
-                            echo "提交总数: $(git rev-list --count HEAD)"
-                            echo "最新提交: $(git log --oneline -1)"
-                            echo "源码体积: $(du -sh --exclude=.git . | cut -f1)"
-                            echo "[体检] 冲线 $(date +%T)"
-                        '''
-                    }
-                }
-            }
-        }
-
-        // ============ 第 5 阶段：归档产物（产物不在就跳过）============
-        stage('归档产物') {
-            when {
-                // 用 when 兜住"后端失败导致没有 jar"的情况，
-                // 免得归档报错把真正的失败原因盖住。
-                // 注意 fileExists 不支持通配符，必须写准确路径。
-                expression { return fileExists('Backend/GameSaves/target/GameSaves-0.0.1-SNAPSHOT.jar') }
-            }
-            steps {
-                // artifact 路径是相对【工作区根目录】的，不是相对 dir() 进去的目录
-                archiveArtifacts artifacts: 'Backend/GameSaves/target/GameSaves-*.jar', allowEmptyArchive: false
-                sh 'ls -lh Backend/GameSaves/target/*.jar'
-            }
-        }
-
-        // =================================================================
-        // 【教学演示】when { branch } 的经典陷阱
-        //
-        // 网上教程到处是 when { branch 'main' }，但它【只在多分支流水线
-        // (Multibranch Pipeline) 里有用】。普通 Pipeline 任务没有 BRANCH_NAME，
-        // 这个条件恒为 false —— 阶段被静默跳过，而且【不算失败】。
-        //
-        // 这个阶段是故意留着的，正常情况下它在流水线图里永远是灰的（skipped）。
-        // 看完效果就可以删掉它。
-        // =================================================================
-        stage('演示：branch条件在普通任务里恒为假') {
-            when { branch 'main' }
-            steps {
-                echo "看到这一行说明 branch 条件居然生效了，请回头看上面『分支名侦察』的输出"
-            }
-        }
-    }
-}
-RONTEND}（null 按 false 处理）→ skip=${skip}"
+                        allOf {
+                            expression {
+                                def skip = pbool('SKIP_FRONTEND', false)
+                                echo "[前端] when 求值：参数原值=${params.SKIP_FRONTEND}（null 按 false 处理）→ skip=${skip}"
                                 return !skip
                             }
                             expression { return env.CHANGED_FRONTEND == 'true' }
