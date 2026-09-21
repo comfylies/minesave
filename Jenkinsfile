@@ -31,6 +31,7 @@ pipeline {
         booleanParam(name: 'SKIP_FRONTEND', defaultValue: false, description: '跳过"前端构建"这条并行分支（npm ci / test / vite build）')
         string(name: 'BUILD_NOTE',          defaultValue: '',     description: '随手写一句备注，会打印到日志里，方便事后区分')
         booleanParam(name: 'CONFIRM_DEPLOY', defaultValue: false, description: '勾上后流水线会停下来等人点「确认发布」（人工卡点 input）')
+        booleanParam(name: 'DEPLOY_DRY_RUN', defaultValue: true,  description: '部署演练：连服务器、上传、校验完整性，但不替换不重启。第一次务必保持勾选')
     }
 
     // triggers 这里【故意留空】。
@@ -309,15 +310,261 @@ pipeline {
             }
 
             steps {
-                echo "已由 ${env.APPROVED_BY} 确认，可以进入发布环节了"
-                sh '''
-                    echo "=== 这里就是将来接部署脚本的位置 ==="
-                    echo "构建号 : $BUILD_NUMBER"
-                    echo "确认人 : $APPROVED_BY"
-                    echo "提交   : $GIT_COMMIT"
-                    ls -lh Backend/GameSaves/target/*.jar 2>/dev/null || echo "（这次没构建后端）"
-                    du -sh Frontend/GameSaves_Fronted/dist 2>/dev/null || echo "（这次没构建前端）"
-                '''
+                script {
+                    // 给后面的部署阶段留一个"已确认"标记。
+                    // 部署阶段靠它判断，所以没点确认就绝不会碰服务器。
+                    env.DEPLOY_APPROVED = 'true'
+                }
+                echo "已由 ${env.APPROVED_BY} 确认，进入部署环节"
+            }
+        }
+
+        // =================================================================
+        // 7. 部署到腾讯云 118.25.51.239
+        //
+        // 三重闸门，缺一不可：
+        //   ① 分支必须是 main
+        //   ② 必须点过上面那个 input（env.DEPLOY_APPROVED）
+        //   ③ 这次真的构建了对应产物（env.BACKEND_RAN / FRONTEND_RAN）
+        //      —— 没构建就不能上传，否则会把工作区里上一次留下的旧 jar 传上去
+        //
+        // 三条来自 docs/superpowers/specs/2026-07-29-backend-deploy-upload-guard-design.md
+        // 的教训，这里都落实了：
+        //   ① 上传路径带构建号，每次构建都是唯一文件名。那份文档记录的事故就是
+        //      两个部署同时写 /tmp/GameSaves.jar.new，SFTP 会话互相卡死。
+        //   ② 先传到 /tmp，再从 /tmp 原子 mv 到位。传一半被掐不会污染线上文件。
+        //   ③ 并发保护靠 options 里的 disableConcurrentBuilds()，同一个任务不会重入。
+        //
+        // 另外加了原文没有的：上传大小校验、替换前备份、重启后健康检查、
+        // 检查不过自动回滚、旧备份轮转清理。
+        // =================================================================
+        stage('部署到腾讯云') {
+            when {
+                allOf {
+                    branch 'main'
+                    expression { return env.DEPLOY_APPROVED == 'true' }
+                }
+            }
+            options {
+                timeout(time: 30, unit: 'MINUTES')
+            }
+            steps {
+                // 用凭据绑定而不是 sshagent：这台 Jenkins 没装 ssh-agent 插件。
+                // 私钥会被写到临时文件，构建结束即删；日志里只会显示 ****。
+                withCredentials([sshUserPrivateKey(credentialsId: 'tencent-deploy',
+                                                   keyFileVariable: 'SSH_KEY',
+                                                   usernameVariable: 'SSH_USER')]) {
+                    sh '''
+                    set -uo pipefail
+
+                    SSH_OPTS="-o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=3"
+                    SSH="ssh -i $SSH_KEY $SSH_OPTS"
+                    SCP="scp -i $SSH_KEY $SSH_OPTS"
+                    TARGET="$SSH_USER@118.25.51.239"
+
+                    TS=$(date +%Y%m%d-%H%M%S)
+                    TAG="b${BUILD_NUMBER}"
+                    DRY="$DEPLOY_DRY_RUN"
+
+                    echo "════════════════ 部署信息 ════════════════"
+                    echo "服务器   : $TARGET"
+                    echo "时间戳   : $TS     构建标签: $TAG"
+                    echo "确认人   : $APPROVED_BY"
+                    echo "提交     : $GIT_COMMIT"
+                    echo "演练模式 : $DRY   （true = 只上传校验，不改线上）"
+                    echo "══════════════════════════════════════════"
+
+                    # ---------- 后端 ----------
+                    if [ "$BACKEND_RAN" != "true" ]; then
+                        echo ""
+                        echo "──── 后端：这次没构建，跳过 ────"
+                    else
+                        JAR=Backend/GameSaves/target/GameSaves-0.0.1-SNAPSHOT.jar
+                        if [ ! -f "$JAR" ]; then echo "✗ 找不到 $JAR"; exit 1; fi
+                        LOCAL_SIZE=$(stat -c %s "$JAR")
+                        REMOTE_TMP="/tmp/GameSaves-${TAG}.jar"
+
+                        echo ""
+                        echo "──── 后端 ────"
+                        echo "本地 jar   : $JAR  ($LOCAL_SIZE 字节)"
+                        echo "远端暂存   : $REMOTE_TMP"
+
+                        echo "[1/3] 上传..."
+                        $SCP "$JAR" "$TARGET:$REMOTE_TMP"
+
+                        echo "[2/3] 远端校验并替换..."
+                        $SSH "$TARGET" \\
+                            REMOTE_TMP="$REMOTE_TMP" LOCAL_SIZE="$LOCAL_SIZE" TS="$TS" DRY="$DRY" \\
+                            'bash -s' <<'REMOTE'
+set -uo pipefail
+
+EXPECTED=/opt/gamesaving/GameSaves-0.0.1-SNAPSHOT.jar
+
+# 安全闸：确认服务实际在用的 jar 就是我们要替换的那个。对不上就停。
+ACTUAL=$(sudo systemctl show -p ExecStart --value gamesaving | tr ' ' '\\n' | grep -E '\\.jar$' | head -1)
+echo "    服务实际使用的 jar: $ACTUAL"
+if [ "$ACTUAL" != "$EXPECTED" ]; then
+    echo "    ✗ 与预期不符（预期 $EXPECTED），停止部署"
+    sudo rm -f "$REMOTE_TMP"
+    exit 1
+fi
+
+# 上传完整性
+GOT=$(stat -c %s "$REMOTE_TMP")
+if [ "$GOT" != "$LOCAL_SIZE" ]; then
+    echo "    ✗ 大小不符：远端 $GOT / 本地 $LOCAL_SIZE，可能传坏了"
+    sudo rm -f "$REMOTE_TMP"
+    exit 1
+fi
+echo "    ✓ 上传完整（$GOT 字节）"
+
+if [ "$DRY" = "true" ]; then
+    echo "    [演练] 跳过：备份 → sudo cp -a $EXPECTED ${EXPECTED}.bak-${TS}"
+    echo "    [演练] 跳过：替换 → sudo mv $REMOTE_TMP $EXPECTED"
+    echo "    [演练] 跳过：重启 → sudo systemctl restart gamesaving"
+    sudo rm -f "$REMOTE_TMP"
+    echo "    ✓ 演练结束，线上未改动（临时文件已清）"
+else
+    sudo cp -a "$EXPECTED" "${EXPECTED}.bak-${TS}"
+    sudo mv "$REMOTE_TMP" "$EXPECTED"
+    echo "    ✓ 已替换，旧文件备份为 ${EXPECTED}.bak-${TS}"
+    sudo systemctl reset-failed gamesaving
+    sudo systemctl restart gamesaving
+    echo "    ✓ 已重启"
+fi
+REMOTE
+
+                        echo "[3/3] 健康检查..."
+                        $SSH "$TARGET" TS="$TS" DRY="$DRY" 'bash -s' <<'REMOTE'
+set -uo pipefail
+EXPECTED=/opt/gamesaving/GameSaves-0.0.1-SNAPSHOT.jar
+
+if [ "$DRY" = "true" ]; then
+    echo "    [演练] 跳过：健康检查（线上服务没动过）"
+    exit 0
+fi
+
+ok=0
+for i in $(seq 1 24); do
+    if curl -fsS -m 5 http://127.0.0.1:8080/api/games >/dev/null 2>&1; then
+        ok=1; echo "    ✓ 第 ${i} 次探测通过（约 $(( (i-1)*5 )) 秒）"; break
+    fi
+    sleep 5
+done
+
+if [ "$ok" != "1" ]; then
+    echo "    ✗ 120 秒内没起来 —— 自动回滚"
+    sudo mv "$EXPECTED" "${EXPECTED}.failed-${TS}"
+    sudo cp -a "${EXPECTED}.bak-${TS}" "$EXPECTED"
+    sudo systemctl restart gamesaving
+    sleep 20
+    if curl -fsS -m 5 http://127.0.0.1:8080/api/games >/dev/null 2>&1; then
+        echo "    ✓ 已回滚到旧版本，服务恢复"
+    else
+        echo "    ✗✗ 回滚后仍不健康，需要人工介入：sudo journalctl -u gamesaving -n 200"
+    fi
+    exit 1
+fi
+
+echo "    线上 jar md5: $(sudo md5sum $EXPECTED | cut -d' ' -f1)"
+
+# 旧备份轮转，只留最近 3 个
+cd /opt/gamesaving || exit 0
+ls -1t GameSaves-*.jar.bak-* 2>/dev/null | tail -n +4 | while read -r f; do
+    sudo rm -f "$f" && echo "    清理旧备份: $f"
+done
+REMOTE
+                    fi
+
+                    # ---------- 前端 ----------
+                    if [ "$FRONTEND_RAN" != "true" ]; then
+                        echo ""
+                        echo "──── 前端：这次没构建，跳过 ────"
+                    else
+                        DIST=Frontend/GameSaves_Fronted/dist
+                        if [ ! -f "$DIST/index.html" ]; then echo "✗ 找不到 $DIST/index.html"; exit 1; fi
+                        REMOTE_TMP="/tmp/gamesaving-web-${TAG}"
+                        WEBROOT=/www/wwwroot/gamesaving
+
+                        echo ""
+                        echo "──── 前端 ────"
+                        echo "本地 dist  : $DIST  ($(du -sh $DIST | cut -f1), $(find $DIST -type f | wc -l) 个文件)"
+                        echo "远端暂存   : $REMOTE_TMP"
+
+                        echo "[1/3] 清理远端暂存目录..."
+                        $SSH "$TARGET" REMOTE_TMP="$REMOTE_TMP" 'bash -s' <<'REMOTE'
+set -euo pipefail
+test -n "$REMOTE_TMP"
+sudo rm -rf "$REMOTE_TMP"
+echo "    已清空 $REMOTE_TMP"
+REMOTE
+
+                        echo "[2/3] 上传..."
+                        $SCP -r "$DIST" "$TARGET:$REMOTE_TMP"
+
+                        echo "[3/3] 远端校验并切换..."
+                        $SSH "$TARGET" \\
+                            REMOTE_TMP="$REMOTE_TMP" WEBROOT="$WEBROOT" TS="$TS" DRY="$DRY" \\
+                            'bash -s' <<'REMOTE'
+set -uo pipefail
+
+# 校验完整性：必须真的有首页，而且文件数对得上
+COUNT=$(find "$REMOTE_TMP" -type f 2>/dev/null | wc -l)
+if [ ! -s "$REMOTE_TMP/index.html" ] || [ "$COUNT" -lt 5 ]; then
+    echo "    ✗ 上传不完整：index.html 缺失或只有 $COUNT 个文件"
+    sudo rm -rf "$REMOTE_TMP"
+    exit 1
+fi
+echo "    ✓ 上传完整（$(du -sh $REMOTE_TMP | cut -f1)，$COUNT 个文件）"
+
+if [ "$DRY" = "true" ]; then
+    echo "    [演练] 跳过：备份 → sudo mv $WEBROOT ${WEBROOT}.backup-${TS}"
+    echo "    [演练] 跳过：切换 → sudo mv $REMOTE_TMP $WEBROOT"
+    echo "    [演练] 跳过：chown / nginx -t / reload"
+    sudo rm -rf "$REMOTE_TMP"
+    echo "    ✓ 演练结束，线上站点未改动"
+    exit 0
+fi
+
+sudo mv "$WEBROOT" "${WEBROOT}.backup-${TS}"
+sudo mv "$REMOTE_TMP" "$WEBROOT"
+sudo chown -R www:www "$WEBROOT"
+echo "    ✓ 已切换，旧目录备份为 ${WEBROOT}.backup-${TS}"
+
+if ! sudo nginx -t >/dev/null 2>&1; then
+    echo "    ✗ nginx 配置检查失败 —— 回滚"
+    sudo mv "$WEBROOT" "${WEBROOT}.failed-${TS}"
+    sudo mv "${WEBROOT}.backup-${TS}" "$WEBROOT"
+    sudo nginx -t >/dev/null 2>&1 && sudo systemctl reload nginx
+    exit 1
+fi
+
+sudo systemctl reload nginx
+echo "    ✓ nginx 已重载"
+
+sleep 2
+if sudo -u www test -s "$WEBROOT/index.html"; then
+    echo "    ✓ 首页可读（$(sudo stat -c '%U:%G %s 字节' $WEBROOT/index.html)）"
+else
+    echo "    ✗ 首页不可读 —— 回滚"
+    sudo mv "$WEBROOT" "${WEBROOT}.failed-${TS}"
+    sudo mv "${WEBROOT}.backup-${TS}" "$WEBROOT"
+    sudo systemctl reload nginx
+    exit 1
+fi
+
+# 旧备份轮转，只留最近 3 个（只清我们自己生成的 backup- 前缀）
+cd /www/wwwroot || exit 0
+ls -1dt gamesaving.backup-* 2>/dev/null | tail -n +4 | while read -r d; do
+    sudo rm -rf "$d" && echo "    清理旧备份: $d"
+done
+REMOTE
+                    fi
+
+                    echo ""
+                    echo "════════════════ 部署流程结束 ════════════════"
+                    '''
+                }
             }
         }
     }
